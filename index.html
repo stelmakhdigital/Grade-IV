@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Грейд — мок-интервью для разработчиков: Go, Python, JS/TS и другие</title>
+  <meta name="description" content="Живые мок-интервью для разработчиков любого уровня. Выберите грейд (Junior–Staff) и стек (Go, Python, JS/TS, Java, Rust и др.) — получите честный разбор от действующего инженера через 24 часа.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 26'%3E%3Crect x='1' y='14' width='4' height='10' rx='2' fill='%2334d399'/%3E%3Crect x='9' y='10' width='4' height='14' rx='2' fill='%2322d3ee'/%3E%3Crect x='17' y='5' width='4' height='19' rx='2' fill='%23a78bfa'/%3E%3Crect x='25' y='1' width='4' height='23' rx='2' fill='%23fb923c'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Фоновая декорация -->
+  <div class="bg-decor" aria-hidden="true">
+    <div class="blob blob-cyan"></div>
+    <div class="blob blob-violet"></div>
+    <div class="grid-overlay"></div>
+  </div>
+
+  <!-- Шапка -->
+  <header class="site-header" id="siteHeader">
+    <a class="logo" href="#top" aria-label="Грейд — на главную">
+      <svg width="26" height="24" viewBox="0 0 28 26" fill="none" aria-hidden="true">
+        <rect x="1" y="14" width="4" height="10" rx="2" fill="#34d399"/>
+        <rect x="9" y="10" width="4" height="14" rx="2" fill="#22d3ee"/>
+        <rect x="17" y="5" width="4" height="19" rx="2" fill="#a78bfa"/>
+        <rect x="25" y="1" width="4" height="23" rx="2" fill="#fb923c"/>
+      </svg>
+      <span>Грейд</span>
+    </a>
+    <nav class="main-nav" id="mainNav" aria-label="Основная навигация">
+      <a href="#how">Как это работает</a>
+      <a href="#setup">Собрать интервью</a>
+      <a href="#features">Возможности</a>
+      <a href="#stats">Цифры</a>
+    </nav>
+    <a class="btn btn-primary btn-small" href="#setup">Начать</a>
+    <button class="nav-toggle" id="navToggle" aria-label="Открыть меню" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+  </header>
+
+  <main id="top">
+    <!-- HERO -->
+    <section class="hero">
+      <div class="hero-copy">
+        <span class="badge reveal">
+          <span class="pulse-dot"></span>
+          1 240 инженеров на связи
+        </span>
+        <h1 class="reveal">Узнайте свой уровень <span class="grad-text">до реального интервью</span></h1>
+        <p class="lead reveal">Живые мок-интервью по стекам Go, Python, JavaScript и другим — от действующих инженеров, а не скриптов. Выберите грейд и стек, пройдите сессию и получите честный разбор через 24 часа.</p>
+        <div class="hero-actions reveal">
+          <a class="btn btn-primary" href="#setup">
+            Собрать своё интервью
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
+          </a>
+          <a class="btn btn-ghost" href="#how">Как это работает</a>
+        </div>
+        <div class="hero-mini reveal">
+          <div><strong>48 000+</strong><span>интервью проведено</span></div>
+          <div class="mini-sep"></div>
+          <div><strong>32</strong><span>стека и направления</span></div>
+          <div class="mini-sep"></div>
+          <div><strong>4.8 / 5</strong><span>средняя оценка сервиса</span></div>
+        </div>
+      </div>
+
+      <div class="hero-visual reveal" aria-hidden="true">
+        <!-- Карточка редактора кода (сзади) -->
+        <div class="editor-card float-slow">
+          <div class="editor-bar">
+            <span class="dot d-red"></span><span class="dot d-yellow"></span><span class="dot d-green"></span>
+            <span class="editor-file">mock.go</span>
+          </div>
+          <pre class="editor-code"><code><span class="tk-kw">func</span> <span class="tk-fn">(m *Mock)</span> <span class="tk-fn">Interview</span>(ctx <span class="tk-ty">context.Context</span>) (<span class="tk-ty">Score</span>, <span class="tk-ty">error</span>) {
+  q := m.<span class="tk-fn">NextQuestion</span>(ctx)
+  ans, err := candidate.<span class="tk-fn">Answer</span>(q)
+  <span class="tk-kw">if</span> err != <span class="tk-kw">nil</span> {
+    <span class="tk-kw">return</span> <span class="tk-num">0</span>, err
+  }
+  <span class="tk-kw">return</span> m.<span class="tk-fn">Judge</span>(ans), <span class="tk-kw">nil</span><span class="caret"></span>
+}</code></pre>
+        </div>
+
+        <!-- Окно живого интервью (спереди) -->
+        <div class="window">
+          <div class="window-bar">
+            <span class="dot d-red"></span><span class="dot d-yellow"></span><span class="dot d-green"></span>
+            <span class="window-title">Грейд · Живое мок-интервью</span>
+            <span class="live-tag"><span class="pulse-dot"></span> LIVE</span>
+          </div>
+          <div class="window-body">
+            <div class="msg msg-interviewer" style="--i:1">
+              <span class="avatar">
+                <svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="#1e293b"/><circle cx="20" cy="15.5" r="6.5" fill="#94a3b8"/><path d="M8.5 34c1.8-6.5 6.6-9.5 11.5-9.5s9.7 3 11.5 9.5" fill="#94a3b8"/><path d="M11 13a9.5 9.5 0 0 1 18 0" stroke="#22d3ee" stroke-width="2.4" fill="none"/><rect x="8.5" y="13.5" width="4.5" height="7" rx="2.2" fill="#22d3ee"/><rect x="27" y="13.5" width="4.5" height="7" rx="2.2" fill="#22d3ee"/></svg>
+              </span>
+              <div class="bubble">Расскажите о самой сложной задаче этого квартала</div>
+            </div>
+            <div class="msg msg-you" style="--i:2">
+              <div class="bubble">Мы столкнулись с падением throughput: профилирование показало, что узкое место — в блокирующем вызове…</div>
+              <span class="avatar">
+                <svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="#12352b"/><circle cx="20" cy="15.5" r="6.5" fill="#6ee7b7"/><path d="M8.5 34c1.8-6.5 6.6-9.5 11.5-9.5s9.7 3 11.5 9.5" fill="#6ee7b7"/></svg>
+              </span>
+            </div>
+            <div class="msg msg-sys" style="--i:3">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="10" fill="rgba(52,211,153,.15)"/><path d="m6 10.3 2.6 2.6L14 7" stroke="#34d399" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <div class="bubble sys-bubble"><strong>Фидбек:</strong> 8.5 / 10 — отлично аргументируете. Добавьте оценку рисков альтернатив.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Плавающие чипы -->
+        <span class="chip float-a"><svg width="18" height="18" viewBox="0 0 24 24"><rect x="1" y="1" width="22" height="22" rx="6" fill="#00ADD8"/><text x="12" y="16.5" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" font-weight="700" fill="#fff">go</text></svg>Go</span>
+        <span class="chip float-b"><svg width="18" height="18" viewBox="0 0 24 24"><rect x="1" y="1" width="22" height="22" rx="6" fill="#3776AB"/><text x="12" y="16.5" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10.5" font-weight="700" fill="#FFD43B">Py</text></svg>Python</span>
+        <span class="chip float-c">System Design</span>
+        <span class="chip float-d">Фидбек за 24 ч</span>
+        <span class="chip chip-score float-e">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fb923c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/><circle cx="12" cy="12" r="4"/></svg>
+          Оценка грейда
+        </span>
+      </div>
+    </section>
+
+    <!-- Бегущая строка технологий -->
+    <div class="ticker" aria-hidden="true">
+      <div class="ticker-track">
+        <span>Go</span><i>✦</i><span>Python</span><i>✦</i><span>TypeScript</span><i>✦</i><span>Java</span><i>✦</i><span>Rust</span><i>✦</i><span>C++</span><i>✦</i><span>PHP</span><i>✦</i><span>Kotlin</span><i>✦</i><span>Swift</span><i>✦</i><span>SQL</span><i>✦</i><span>PostgreSQL</span><i>✦</i><span>Redis</span><i>✦</i><span>Kubernetes</span><i>✦</i><span>Docker</span><i>✦</i><span>gRPC</span><i>✦</i><span>Kafka</span><i>✦</i><span>React</span><i>✦</i><span>Node.js</span><i>✦</i><span>Linux</span><i>✦</i><span>Алгоритмы</span><i>✦</i>
+        <span>Go</span><i>✦</i><span>Python</span><i>✦</i><span>TypeScript</span><i>✦</i><span>Java</span><i>✦</i><span>Rust</span><i>✦</i><span>C++</span><i>✦</i><span>PHP</span><i>✦</i><span>Kotlin</span><i>✦</i><span>Swift</span><i>✦</i><span>SQL</span><i>✦</i><span>PostgreSQL</span><i>✦</i><span>Redis</span><i>✦</i><span>Kubernetes</span><i>✦</i><span>Docker</span><i>✦</i><span>gRPC</span><i>✦</i><span>Kafka</span><i>✦</i><span>React</span><i>✦</i><span>Node.js</span><i>✦</i><span>Linux</span><i>✦</i><span>Алгоритмы</span><i>✦</i>
+      </div>
+    </div>
+
+    <!-- КАК ЭТО РАБОТАЕТ -->
+    <section class="section" id="how">
+      <div class="section-head reveal">
+        <span class="kicker">Простой процесс</span>
+        <h2>Три шага до честной оценки</h2>
+        <p>Никаких «роботов» и шаблонов: с вами разговаривает живой инженер вашего стека.</p>
+      </div>
+      <div class="steps">
+        <article class="step-card reveal">
+          <div class="step-num">01</div>
+          <svg class="step-icon" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <rect x="4" y="4" width="40" height="40" rx="12" fill="rgba(34,211,238,.1)" stroke="rgba(34,211,238,.45)"/>
+            <line x1="13" y1="19" x2="35" y2="19" stroke="#22d3ee" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="20" cy="19" r="3.6" fill="#0a0e17" stroke="#22d3ee" stroke-width="2.4"/>
+            <line x1="13" y1="30" x2="35" y2="30" stroke="#a78bfa" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="28" cy="30" r="3.6" fill="#0a0e17" stroke="#a78bfa" stroke-width="2.4"/>
+          </svg>
+          <h3>Выберите грейд и стек</h3>
+          <p>Настройте интервью под роль, на которую претендуете: от Junior в Python до Staff в Go. Сессия подстроится под ваш уровень.</p>
+        </article>
+        <article class="step-card reveal">
+          <div class="step-num">02</div>
+          <svg class="step-icon" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <rect x="4" y="4" width="40" height="40" rx="12" fill="rgba(167,139,250,.1)" stroke="rgba(167,139,250,.45)"/>
+            <path d="M12 16a4 4 0 0 1 4-4h16a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H20l-5 5v-5h-1a4 4 0 0 1-4-4V16Z" stroke="#a78bfa" stroke-width="2.6" stroke-linejoin="round"/>
+            <circle cx="18" cy="21" r="1.8" fill="#a78bfa"/><circle cx="24" cy="21" r="1.8" fill="#a78bfa"/><circle cx="30" cy="21" r="1.8" fill="#a78bfa"/>
+          </svg>
+          <h3>Пройдите живую сессию</h3>
+          <p>45–75 минут реального интервью: CS, алгоритмы, системный дизайн и поведенческие вопросы. Настоящее давление, настоящие вопросы.</p>
+        </article>
+        <article class="step-card reveal">
+          <div class="step-num">03</div>
+          <svg class="step-icon" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <rect x="4" y="4" width="40" height="40" rx="12" fill="rgba(52,211,153,.1)" stroke="rgba(52,211,153,.45)"/>
+            <path d="M16 14h16M16 20h16M16 26h9" stroke="#34d399" stroke-width="2.6" stroke-linecap="round"/>
+            <circle cx="30" cy="30" r="8" stroke="#34d399" stroke-width="2.4"/>
+            <path d="m26.5 30.5 2.3 2.3 4.7-5" stroke="#34d399" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <h3>Получите разбор и план</h3>
+          <p>Через 24 часа: оценка каждого ответа, честный грейд, слабые зоны и план подготовки на ближайшие две недели.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- КОНСТРУКТОР ИНТЕРВЬЮ -->
+    <section class="section setup" id="setup">
+      <div class="section-head reveal">
+        <span class="kicker">Главная функция</span>
+        <h2>Соберите своё интервью</h2>
+        <p>Два выбора — и сессия настроена под вас. Сводка обновляется вживую.</p>
+      </div>
+
+      <div class="setup-grid">
+        <div class="setup-controls">
+          <div class="pick-block reveal">
+            <div class="pick-head">
+              <span class="pick-step">Шаг 1</span>
+              <h3>Выберите грейд</h3>
+            </div>
+            <div class="grade-cards" role="radiogroup" aria-label="Грейд">
+              <button class="grade-card" role="radio" aria-checked="false" data-grade="junior">
+                <svg class="grade-bars" viewBox="0 0 34 27" aria-hidden="true">
+                  <rect x="1"  y="15" width="6" height="11" rx="2.5" class="on" data-lv="1"/>
+                  <rect x="10" y="10" width="6" height="16" rx="2.5" data-lv="2"/>
+                  <rect x="19" y="5"  width="6" height="21" rx="2.5" data-lv="3"/>
+                  <rect x="28" y="0"  width="6" height="26" rx="2.5" data-lv="4"/>
+                </svg>
+                <span class="grade-name">Junior</span>
+                <span class="grade-desc">Первое оффер-интервью и уверенный старт</span>
+                <span class="grade-time">45 минут</span>
+              </button>
+              <button class="grade-card" role="radio" aria-checked="false" data-grade="middle">
+                <svg class="grade-bars" viewBox="0 0 34 27" aria-hidden="true">
+                  <rect x="1"  y="15" width="6" height="11" rx="2.5" class="on" data-lv="1"/>
+                  <rect x="10" y="10" width="6" height="16" rx="2.5" class="on" data-lv="2"/>
+                  <rect x="19" y="5"  width="6" height="21" rx="2.5" data-lv="3"/>
+                  <rect x="28" y="0"  width="6" height="26" rx="2.5" data-lv="4"/>
+                </svg>
+                <span class="grade-name">Middle</span>
+                <span class="grade-desc">Растущая самостоятельность и экспертиза</span>
+                <span class="grade-time">50 минут</span>
+              </button>
+              <button class="grade-card" role="radio" aria-checked="false" data-grade="senior">
+                <svg class="grade-bars" viewBox="0 0 34 27" aria-hidden="true">
+                  <rect x="1"  y="15" width="6" height="11" rx="2.5" class="on" data-lv="1"/>
+                  <rect x="10" y="10" width="6" height="16" rx="2.5" class="on" data-lv="2"/>
+                  <rect x="19" y="5"  width="6" height="21" rx="2.5" class="on" data-lv="3"/>
+                  <rect x="28" y="0"  width="6" height="26" rx="2.5" data-lv="4"/>
+                </svg>
+                <span class="grade-name">Senior</span>
+                <span class="grade-desc">Архитектура, сложное и менторство</span>
+                <span class="grade-time">60 минут</span>
+              </button>
+              <button class="grade-card" role="radio" aria-checked="false" data-grade="staff">
+                <svg class="grade-bars" viewBox="0 0 34 27" aria-hidden="true">
+                  <rect x="1"  y="15" width="6" height="11" rx="2.5" class="on" data-lv="1"/>
+                  <rect x="10" y="10" width="6" height="16" rx="2.5" class="on" data-lv="2"/>
+                  <rect x="19" y="5"  width="6" height="21" rx="2.5" class="on" data-lv="3"/>
+                  <rect x="28" y="0"  width="6" height="26" rx="2.5" class="on" data-lv="4"/>
+                </svg>
+                <span class="grade-name">Staff / Lead</span>
+                <span class="grade-desc">Кросс-системные решения и влияние</span>
+                <span class="grade-time">75 минут</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="pick-block reveal">
+            <div class="pick-head">
+              <span class="pick-step">Шаг 2</span>
+              <h3>Выберите стек</h3>
+            </div>
+            <div class="stack-chips" role="radiogroup" aria-label="Стек">
+              <button class="stack-chip" role="radio" aria-checked="false" data-stack="go">
+                <span class="stack-logo"><svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6.5" fill="#00ADD8"/><text x="12" y="16.5" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" font-weight="700" fill="#fff">go</text></svg></span>
+                <span>Go</span>
+              </button>
+              <button class="stack-chip" role="radio" aria-checked="false" data-stack="python">
+                <span class="stack-logo"><svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6.5" fill="#3776AB"/><text x="12" y="16.5" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10.5" font-weight="700" fill="#FFD43B">Py</text></svg></span>
+                <span>Python</span>
+              </button>
+              <button class="stack-chip" role="radio" aria-checked="false" data-stack="js">
+                <span class="stack-logo"><svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6.5" fill="#F7DF1E"/><text x="12" y="16.5" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10.5" font-weight="800" fill="#111">JS</text></svg></span>
+                <span>JS / TS</span>
+              </button>
+              <button class="stack-chip" role="radio" aria-checked="false" data-stack="java">
+                <span class="stack-logo"><svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6.5" fill="#f89820"/><text x="12" y="16.5" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" font-weight="800" fill="#fff">Ja</text></svg></span>
+                <span>Java</span>
+              </button>
+              <button class="stack-chip" role="radio" aria-checked="false" data-stack="cpp">
+                <span class="stack-logo"><svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6.5" fill="#00599C"/><text x="12" y="16" text-anchor="middle" font-family="ui-monospace, monospace" font-size="8.6" font-weight="800" fill="#fff">C++</text></svg></span>
+                <span>C++</span>
+              </button>
+              <button class="stack-chip" role="radio" aria-checked="false" data-stack="rust">
+                <span class="stack-logo"><svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6.5" fill="#dea584"/><text x="12" y="16.5" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10.5" font-weight="800" fill="#2b2b2b">Rs</text></svg></span>
+                <span>Rust</span>
+              </button>
+              <button class="stack-chip" role="radio" aria-checked="false" data-stack="php">
+                <span class="stack-logo"><svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="6.5" fill="#777BB4"/><text x="12" y="16" text-anchor="middle" font-family="ui-monospace, monospace" font-size="8.6" font-weight="800" fill="#fff">PHP</text></svg></span>
+                <span>PHP</span>
+              </button>
+              <button class="stack-chip" role="radio" aria-checked="false" data-stack="kotlin">
+                <span class="stack-logo"><svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="ktg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7F52FF"/><stop offset="1" stop-color="#3F51B5"/></linearGradient></defs><rect x="1" y="1" width="22" height="22" rx="6.5" fill="url(#ktg)"/><text x="12" y="16.5" text-anchor="middle" font-family="ui-monospace, monospace" font-size="10.5" font-weight="800" fill="#fff">Kt</text></svg></span>
+                <span>Kotlin</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Живая сводка -->
+        <aside class="summary reveal" id="summary" aria-live="polite">
+          <div class="summary-head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/><path d="m9 15.5 2 2 4-4.5"/></svg>
+            <div>
+              <h3>Ваше интервью</h3>
+              <p>Сводка обновляется вживую</p>
+            </div>
+          </div>
+
+          <div class="summary-picks">
+            <div class="summary-pick">
+              <span class="label">Грейд</span>
+              <span class="value" id="sumGrade">Не выбран</span>
+            </div>
+            <div class="summary-pick">
+              <span class="label">Стек</span>
+              <span class="value" id="sumStack">Не выбран</span>
+            </div>
+          </div>
+
+          <div class="summary-grid">
+            <div><span class="label">Длительность</span><span class="value" id="sumTime">—</span></div>
+            <div><span class="label">Формат</span><span class="value">Онлайн · 1-на-1</span></div>
+            <div><span class="label">Язык</span><span class="value">RU / EN</span></div>
+            <div><span class="label">Фидбек</span><span class="value">Через 24 ч</span></div>
+          </div>
+
+          <div class="summary-blocks">
+            <span class="label">Блоки сессии</span>
+            <ul id="sumBlocks">
+              <li class="placeholder">Выберите грейд и стек — покажем программу</li>
+            </ul>
+          </div>
+
+          <button class="btn btn-primary btn-cta" id="ctaBtn" disabled>Выберите грейд и стек</button>
+          <p class="summary-hint">Первые 15 минут — бесплатный разогрев с любым инженером</p>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ВОЗМОЖНОСТИ -->
+    <section class="section" id="features">
+      <div class="section-head reveal">
+        <span class="kicker">Почему «Грейд»</span>
+        <h2>Всё, что нужно, чтобы выйти на оффер уверенно</h2>
+      </div>
+      <div class="features-grid">
+        <article class="feature reveal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 20c1.2-3.8 4-5.5 7.5-5.5s6.3 1.7 7.5 5.5"/></svg>
+          <h3>Живые инженеры</h3>
+          <p>Интервью ведут действующие разработчики из крупных компаний — с реальным опытом найма, а не по скрипту.</p>
+        </article>
+        <article class="feature reveal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H4l2.3-2.9A8 8 0 1 1 21 12Z"/><path d="m9 12 2 2 4-4.5"/></svg>
+          <h3>Честный фидбек</h3>
+          <p>Разбор по каждому ответу: что сказать иначе, какие вопросы вы «провалили» и почему — через 24 часа.</p>
+        </article>
+        <article class="feature reveal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21a9 9 0 1 1 9-9"/><path d="m12 12 5-5"/><path d="M17 21h4"/></svg>
+          <h3>Оценка грейда</h3>
+          <p>Честный ответ на главный вопрос: где вы на самом деле — Junior, Middle или Senior. С аргументами.</p>
+        </article>
+        <article class="feature reveal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 7-5 5 5 5M16 7l5 5-5 5M13 4l-2.5 16"/></svg>
+          <h3>Реальные задачи</h3>
+          <p>Алгоритмы, CS, системный дизайн — форматы, как на интервью в топовых продуктовых компаниях.</p>
+        </article>
+        <article class="feature reveal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="14" height="14" rx="3"/><path d="m16 10 6-3v10l-6-3"/></svg>
+          <h3>Запись и прогресс</h3>
+          <p>Видео каждого ответа. Следите, как растёте между сессиями, и пересматривайте слабые места.</p>
+        </article>
+        <article class="feature reveal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+          <h3>Гибкий график</h3>
+          <p>По расписанию или ad hoc, в удобное время. На русском и на английском — как в реальной команде.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- ЦИФРЫ -->
+    <section class="section stats" id="stats">
+      <div class="stats-inner reveal">
+        <div class="stat">
+          <div class="stat-num"><span class="counter" data-target="48210">0</span></div>
+          <div class="stat-label">интервью проведено</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num"><span class="counter" data-target="1240">0</span></div>
+          <div class="stat-label">живых инженеров на платформе</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num"><span class="counter" data-target="32">0</span></div>
+          <div class="stat-label">стека и направления</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num"><span class="counter" data-target="4.8" data-decimals="1">0</span><span class="stat-suffix">/5</span></div>
+          <div class="stat-label">средняя оценка за сессию</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ФИНАЛЬНЫЙ CTA -->
+    <section class="final-cta reveal">
+      <div class="final-cta-card">
+        <svg class="cta-deco" viewBox="0 0 28 26" fill="none" aria-hidden="true">
+          <rect x="1" y="14" width="4" height="10" rx="2" fill="#34d399"/>
+          <rect x="9" y="10" width="4" height="14" rx="2" fill="#22d3ee"/>
+          <rect x="17" y="5" width="4" height="19" rx="2" fill="#a78bfa"/>
+          <rect x="25" y="1" width="4" height="23" rx="2" fill="#fb923c"/>
+        </svg>
+        <h2>Начните подготовку сегодня</h2>
+        <p>Один час живого интервью стоит дороже недели теории. Соберите сессию под свой грейд и стек.</p>
+        <a class="btn btn-primary btn-lg" href="#setup">Собрать своё интервью</a>
+      </div>
+    </section>
+  </main>
+
+  <!-- ФУТЕР -->
+  <footer class="site-footer">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="logo" href="#top">
+          <svg width="26" height="24" viewBox="0 0 28 26" fill="none" aria-hidden="true">
+            <rect x="1" y="14" width="4" height="10" rx="2" fill="#34d399"/>
+            <rect x="9" y="10" width="4" height="14" rx="2" fill="#22d3ee"/>
+            <rect x="17" y="5" width="4" height="19" rx="2" fill="#a78bfa"/>
+            <rect x="25" y="1" width="4" height="23" rx="2" fill="#fb923c"/>
+          </svg>
+          <span>Грейд</span>
+        </a>
+        <p>Мок-интервью с живыми инженерами. Проверьте свой уровень, получите фидбек и выйдите на оффер уверенно.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Платформа</h4>
+        <a href="#setup">Мок-интервью</a>
+        <a href="#how">Как это работает</a>
+        <a href="#features">Возможности</a>
+      </div>
+      <div class="footer-col">
+        <h4>Для инженеров</h4>
+        <a href="#">Стать интервьюером</a>
+        <a href="#">Программа для команд</a>
+        <a href="#">Рефералы</a>
+      </div>
+      <div class="footer-col">
+        <h4>Контакты</h4>
+        <a href="mailto:hello@graid.dev">hello@graid.dev</a>
+        <a href="#">Telegram-канал</a>
+        <a href="#">GitHub</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© <span id="year">2025</span> «Грейд». Сделано для разработчиков.</span>
+      <span>Демо-страница · данные сессий не передаются</span>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>
