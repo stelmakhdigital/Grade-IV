@@ -118,7 +118,20 @@
   - Phase gate Design пройден (2026-09-09); фаза Design закоммичена и запушена в origin/master.
   - → Фаза 3: Implementation (бекэнд — Go, ADR-006).
 
+- **2026-09-10** (Фаза 3) — WP-1 + WP-2:
+  - WP-1: каркас — services/api (Go: config/db/models/auth/httpapi, log/slog JSON), services/sandbox
+    (Go: health + stub /runs 501), services/voice (Python: /api/v1/health + фейки STT/TTS),
+    services/frontend (React+Vite+TS: каркас, health-check API, vitest), infra/ (.env.example,
+    docker-compose profile prod, 4 Dockerfile), Makefile (install/test/build/run-*/up), .gitignore.
+  - WP-2: api (Go) — модель данных: DDL 7 таблиц (sqlite + postgres, go:embed, миграции),
+    UserStore (users, minutes_ledger); auth: register/login/me (JWT HS256, bcrypt), middleware.
+  - Тесты зелёные: go test (api: auth/db/httpapi), go test (sandbox), pytest (voice),
+    vitest (frontend) + tsc/vite build; smoke-тест собранного api (healthz→register→me).
+  - ARCHITECTURE.md → v0.4.1 (§6: ADDR/JWT_*/SANDBOX_URL/LOG_LEVEL).
+  - Ожидается разрешение на коммит WP-1/WP-2.
+
 ## Next steps
-1. Фаза 3: Implementation (WBS WP-1…WP-12, бекэнд — Go): WP-1 — каркас
-   (services/api Go, services/sandbox Go, services/voice Python, services/frontend React+Vite, infra/, Makefile),
-   WP-2 — модель данных (7 таблиц, DDL) + auth (JWT, bcrypt) + go test.
+1. Коммит WP-1/WP-2 (разрешение ожидается) → отметить [x] в roadmap.
+2. WP-3: api (Go) — машина состояний сессий (voice→livecode→design→report), WS-протокол
+   (nhooyr.io/websocket), тарификация (pause/resume/finish, лимит 60 мин, таймер).
+3. Параллельно: WP-4 (voice: faster-whisper + Silero), WP-5 (LLM-клиент + движок интервьюера).

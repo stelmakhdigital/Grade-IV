@@ -1,0 +1,9 @@
+# grade-voice: STT/TTS-сервис (ARCHITECTURE.md §4.3, ADR-002).
+# WP-1: каркас FastAPI + фейковые провайдеры.
+# WP-4: реальные провайдеры — faster-whisper (STT) и Silero v5 (TTS):
+# faster-whisper>=1.0
+# silero[...]/torch — тянет ML-стек, устанавливается в WP-4 (AI-узел, GPU).
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pytest>=8.2
+httpx>=0.27

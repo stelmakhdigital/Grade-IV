@@ -225,6 +225,10 @@ sequenceDiagram
 | Переменная | По умолчанию | Описание |
 |---|---|---|
 | `DATABASE_URL` | sqlite:///./grade.db | PostgreSQL в prod |
+| `ADDR` | :8000 | адрес прослушивания (api) |
+| `JWT_SECRET` / `JWT_EXPIRY_HOURS` | — / 168 | JWT-аутентификация (WP-2) |
+| `SANDBOX_URL` | http://localhost:8200 | адрес sandbox-сервиса |
+| `LOG_LEVEL` | info | уровень логов (NFR-9) |
 | `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` | http://localhost:8300/v1 / Qwen3-4B / "" | OpenAI-совместимый; prod: vLLM + Qwen3.8-27B на AI-узле (ЛВС) |
 | `VOICE_URL` | http://localhost:8100 | Адрес AI-узла (voice: `/api/v1/stt|tts`); prod — IP в ЛВС |
 | `STT_MODEL` | small (dev) / large-v3-russian (prod) | faster-whisper |
@@ -235,7 +239,7 @@ sequenceDiagram
 | `MINUTES_FREE_S` | 3600 | стартовый грант |
 | `SESSION_PAUSE_TIMEOUT_S` | 1800 | финализация обрыва (SRS §7) |
 
-Наблюдаемость (NFR-9): structlog (JSON) + Prometheus `/metrics`:
+Наблюдаемость (NFR-9): JSON-логи (Go — `log/slog`, voice — structlog) + Prometheus `/metrics`:
 `turn_e2e_ms` (конец реплики → первый PCM-кадр ИИ; разбивка stt_ms/llm_ttfb_ms/tts_first_byte_ms),
 `stt_errors_total`, `sessions_active`, `sandbox_runs_total{result}`, `gpu_util` (если доступно).
 Алерты: p95 `turn_e2e_ms` > 6000 мс; `stt_errors` > 2%/5 мин; sandbox OOM/таймауты > 5/час.
@@ -246,3 +250,5 @@ sequenceDiagram
 - v0.3 (2026-09-09) — Design: ADR-001…005, модель данных, контракты API (REST/WS/voice/sandbox),
   sequence-диаграммы, топологии prod/dev, конфигурация, метрики.
 - v0.4 (2026-09-09) — бекэнд на Go (api, sandbox; ADR-006), voice остаётся Python (ML).
+- v0.4.1 (2026-09-10) — Implementation WP-1/WP-2: синхронизация §6 (ADDR, JWT_*, SANDBOX_URL,
+  LOG_LEVEL), JSON-логи — log/slog (Go).

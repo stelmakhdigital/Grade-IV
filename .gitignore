@@ -24,3 +24,22 @@ build/
 out/
 *.log
 captures/
+
+# Go
+services/*/bin/
+*.exe
+
+# Python (тесты)
+.pytest_cache/
+
+# Данные (SQLite)
+data/
+*.db
+*.db-journal
+*.db-wal
+
+# Env: пример не игнорировать
+!.env.example
+
+# TypeScript
+*.tsbuildinfo

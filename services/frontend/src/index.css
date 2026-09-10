@@ -1,0 +1,49 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  background: #0b0e14;
+  color: #d6dbe5;
+}
+
+.app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 48px 24px;
+}
+
+h1 {
+  color: #7aa2f7;
+  margin-bottom: 8px;
+}
+
+p {
+  color: #9aa4b8;
+}
+
+.badge {
+  display: inline-block;
+  margin-top: 16px;
+  padding: 4px 12px;
+  border: 1px solid #2a3140;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #9aa4b8;
+}
+
+.badge.ok {
+  color: #73daca;
+  border-color: #2b4a43;
+}
+
+.badge.err {
+  color: #e06c75;
+  border-color: #4a2b2e;
+}

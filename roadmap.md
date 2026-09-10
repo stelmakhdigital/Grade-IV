@@ -33,8 +33,8 @@
 - [x] Review архитектуры с пользователем (phase gate, 2026-09-09; правка «бекэнд = Go» — ADR-006, v0.4)
 
 ## Фаза 3: Implementation (бекэнд — Go (api, sandbox), voice — Python ML; WBS; зависимости: WP-1 → все; WP-4/5/6 → поток WP-3; WP-7 → WP-8/9/10)
-- [ ] WP-1: Каркас: services/api (Go), services/sandbox (Go), services/voice (Python), services/frontend (Vite+React+TS), infra/, Makefile; тесты: go test + vitest + pytest
-- [ ] WP-2: api (Go): модель данных (7 таблиц, DDL) + аутентификация (JWT, bcrypt)
+- [x] WP-1: Каркас: services/api (Go), services/sandbox (Go), services/voice (Python), services/frontend (Vite+React+TS), infra/, Makefile; тесты: go test + vitest + pytest
+- [x] WP-2: api (Go): модель данных (7 таблиц, DDL) + аутентификация (JWT, bcrypt)
 - [ ] WP-3: api (Go): машина состояний сессий + WS-протокол + тарификация (pause/resume/finish, лимит 60 мин, таймер)
 - [ ] WP-4: voice (Python): /api/v1/stt (faster-whisper), /api/v1/tts (Silero v5), абстракция провайдеров, health
 - [ ] WP-5: api (Go): LLM-слой (OpenAI-совместимый клиент) + движок интервьюера (персона, промпты, рубрики, nudge)

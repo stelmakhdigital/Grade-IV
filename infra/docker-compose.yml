@@ -1,0 +1,73 @@
+# Сервис «Грейд» — деплой (черновик; финализация: WP-12 — GPU-профиль, тюнинг).
+# Запуск: docker compose -f infra/docker-compose.yml --profile prod up --build
+# Локальный dev без compose: make install && make run-api (см. Makefile).
+name: grade
+
+services:
+  api:
+    build:
+      context: ../services/api
+      dockerfile: ../../infra/docker/api.Dockerfile
+    image: grade/api:dev
+    ports:
+      - "8000:8000"
+    environment:
+      ADDR: ":8000"
+      DATABASE_URL: "postgres://grade:grade@postgres:5432/grade"
+      JWT_SECRET: "${JWT_SECRET:-change-me-in-production}"
+      VOICE_URL: "http://voice:8100"
+      SANDBOX_URL: "http://sandbox:8200"
+      LLM_BASE_URL: "${LLM_BASE_URL:-http://localhost:8300/v1}"
+      LLM_MODEL: "${LLM_MODEL:-Qwen3-4B}"
+    depends_on:
+      - postgres
+      - voice
+      - sandbox
+    profiles: [prod]
+
+  sandbox:
+    build:
+      context: ../services/sandbox
+      dockerfile: ../../infra/docker/sandbox.Dockerfile
+    image: grade/sandbox:dev
+    ports:
+      - "8200:8200"
+    environment:
+      SANDBOX_MODE: "${SANDBOX_MODE:-docker}"
+    volumes:
+      # WP-6: управление контейнерами сессий
+      - /var/run/docker.sock:/var/run/docker.sock
+    profiles: [prod]
+
+  voice:
+    build:
+      context: ../services/voice
+      dockerfile: ../../infra/docker/voice.Dockerfile
+    image: grade/voice:dev
+    ports:
+      - "8100:8100"
+    profiles: [prod]
+
+  frontend:
+    build:
+      context: ../services/frontend
+      dockerfile: ../../infra/docker/frontend.Dockerfile
+    image: grade/frontend:dev
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    profiles: [prod]
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: grade
+      POSTGRES_PASSWORD: grade
+      POSTGRES_DB: grade
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    profiles: [prod]
+
+volumes:
+  pgdata:
