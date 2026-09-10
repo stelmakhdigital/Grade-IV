@@ -44,6 +44,8 @@
   сервисные эндпоинты /api/v1/stt, /api/v1/tts + абстракция провайдера (подменяемо).
 - LLM-интервьюер: Qwen3.8-27B (self-hosted, Apache 2.0 — коммерческое использование OK;
   модель с vision — может оценивать схемы whiteboard по изображению).
+- Язык бекэнда: **Go** (api, sandbox — ADR-006); voice-сервис — Python (ML: faster-whisper,
+  Silero v5, torch) за `/api/v1/stt|tts` + `VOICE_URL`.
 - Live-Code: редактор Monaco + сандбокс выполнения кода/тестов (Docker) + ИИ-ревьюер.
 - System Design: whiteboard (палитра архитектурных блоков + свободное рисование), ИИ-оценка схемы + устного ответа.
 - MVP: все стадии (голос, Live-Code, System Design, отчёт) для Go + Python; поминутная тарификация,

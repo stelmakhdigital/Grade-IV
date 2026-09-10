@@ -22,25 +22,29 @@
 - [x] Спецификация требований: REQUIREMENTS.md (SRS v1.0-черновик)
 - [x] SRS v1.0 одобрено пользователем (phase gate, 2026-09-09)
 
-## Фаза 2: Design (архитектура)
-- [ ] Финальная архитектура: компоненты, данные, последовательности
-- [ ] Mermaid: компоненты (уровень C4 L1–L2) + sequence голосового контура
-- [ ] Выбрать голосовой транспорт: WebRTC vs WebSocket; провайдеры STT/TTS
-- [ ] Выбрать сандбокс выполнения кода: Docker-контейнеры vs WASM
-- [ ] Выбрать whiteboard: Excalidraw-подобный холст + палитра блоков
-- [ ] Модель данных (БД) и контракты API (realtime + REST)
-- [ ] Метрики качества (latency-бюджет, точность STT, покрытие тестами)
-- [ ] Review архитектуры с пользователем (phase gate)
+## Фаза 2: Design (архитектура) — `[x]` ЗАВЕРШЕНА (2026-09-09, phase gate пройден)
+- [x] ADR-001…005: транспорт (WS + PCM16 16 кГц), голосовой конвейер (VAD/STT/LLM/TTS + latency-бюджет), сандбокс (Docker на сессию), whiteboard (Excalidraw + палитра 12 блоков), сервинг LLM (vLLM/llama.cpp, OpenAI-совместимо) — `docs/adr/`
+- [x] Финальная архитектура: компоненты, данные, последовательности (ARCHITECTURE.md v0.3)
+- [x] Mermaid: компоненты + sequence (голосовой ход, Live-Code, System Design)
+- [x] Модель данных (7 таблиц) и контракты API (REST + WS + /api/v1/stt|tts + sandbox)
+- [x] Метрики качества: latency-бюджет по этапам (ADR-002), метрики Prometheus + алерты (§6 v0.3)
+- [x] SRS v1.1: критерии и веса отчёта по грейдам (REQUIREMENTS.md §12)
+- [x] WBS Implementation: WP-1…WP-12 (Фаза 3)
+- [x] Review архитектуры с пользователем (phase gate, 2026-09-09; правка «бекэнд = Go» — ADR-006, v0.4)
 
-## Фаза 3: Implementation
-- [ ] Каркас проекта: фронтенд, бэкенд, realtime-gateway, CI
-- [ ] Голосовой конвейер MVP: STT → LLM-интервьюер → TTS (ходовой диалог)
-- [ ] LLM-интервьюер: промпт-персона, вопросы по стеку/грейду, follow-up, оценка на лету
-- [ ] Стадия Live-Code: редактор (Monaco), генерация задачи, сандбокс (код + тесты), ИИ-ревьюер с follow-up
-- [ ] Стадия System Design: whiteboard (блоки + рисование), ИИ-оценка схемы и ответа
-- [ ] Итоговый отчёт: оценка по критериям + текстовая рекомендация
-- [ ] Аутентификация, профиль кандидата, история сессий
-- [ ] Поминутная тарификация + лимит 60 минут бесплатно (платёжный шлюз в MVP не нужен)
+## Фаза 3: Implementation (бекэнд — Go (api, sandbox), voice — Python ML; WBS; зависимости: WP-1 → все; WP-4/5/6 → поток WP-3; WP-7 → WP-8/9/10)
+- [ ] WP-1: Каркас: services/api (Go), services/sandbox (Go), services/voice (Python), services/frontend (Vite+React+TS), infra/, Makefile; тесты: go test + vitest + pytest
+- [ ] WP-2: api (Go): модель данных (7 таблиц, DDL) + аутентификация (JWT, bcrypt)
+- [ ] WP-3: api (Go): машина состояний сессий + WS-протокол + тарификация (pause/resume/finish, лимит 60 мин, таймер)
+- [ ] WP-4: voice (Python): /api/v1/stt (faster-whisper), /api/v1/tts (Silero v5), абстракция провайдеров, health
+- [ ] WP-5: api (Go): LLM-слой (OpenAI-совместимый клиент) + движок интервьюера (персона, промпты, рубрики, nudge)
+- [ ] WP-6: sandbox (Go): Docker-runner (лимиты, --network=none) + subprocess dev-mode + банк задач Go/Python (≥ 5 на грейд)
+- [ ] WP-7: Frontend: каркас Vite+React+TS, кабинет (auth, минуты, история)
+- [ ] WP-8: Frontend: голосовая сессия (AudioWorklet-микрофон → WS, PCM-воспроизведение, транскрипт, таймер)
+- [ ] WP-9: Frontend: Live-Code (Monaco, «Запустить тесты», ИИ-ревью, follow-up)
+- [ ] WP-10: Frontend: System Design (Excalidraw + палитра 12 блоков, сохранение, ИИ-оценка)
+- [ ] WP-11: Отчёт (генерация по критериям §12, UI, история)
+- [ ] WP-12: Инфра и доки: docker-compose (profiles default/gpu), .env.example, Makefile, README, e2e-smoke скрипт
 
 ## Фаза 4: Testing
 - [ ] План тестирования (юнит, интеграция, E2E, load)

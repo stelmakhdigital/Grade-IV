@@ -25,6 +25,16 @@
 - Отсюда ключевой продуктовый вопрос: AI-интервью **заменяет** человеческое (с лендинга) или
   **дополняет** его (AI-сессия + опциональный разбор человеком)? → в опросе Discovery.
 
+## Локальное окружение (dev-машина — только для разработки, 2026-09-09)
+- Mac14,2 (M2, arm64), macOS 26, **16 ГБ RAM, ~11 ГБ свободно на диске**, 8 ядер.
+- Python 3.12, Node 22, pnpm 11, Docker Desktop (демон запускается по требованию), ffmpeg,
+  git (SSH-ключ к GitHub работает).
+- Сеть: PyPI / HuggingFace / npm / GitHub — доступны.
+- Следствие (только для dev): Qwen3.8-27B на эту машину не помещается — dev-LLM: llama.cpp +
+  Qwen3-4B, dev-STT: faster-whisper `small`. **Рантайм-цель prod — отдельные серверы:
+  LLM и голосовые модели (STT/TTS) — на отдельном сервере в ЛВС (AI-узел), приложение —
+  на app-узле (решение #20, ADR-005, ARCHITECTURE §2.1).**
+
 ## Ключевые решения
 | # | Дата | Решение |
 |---|------|---------|
@@ -45,6 +55,10 @@
 | 15 | 2026-09-09 | Платформа: Web (браузер) — подтверждено пользователем |
 | 16 | 2026-09-09 | Голосовой стек — только self-hosted (без облаков): STT — faster-whisper large-v3-russian на GPU (альтернатива whisper.cpp); TTS — Silero v5 (MIT); архитектура: эндпоинты /api/v1/stt и /api/v1/tts + абстракция провайдера для подмены в будущем. gpt-4o-mini-tts отклонён (только облачный API) |
 | 17 | 2026-09-09 | SRS v1.0 (REQUIREMENTS.md) одобрена пользователем (phase gate Requirements); «минута интервью» = активное время сессии (REQUIREMENTS.md §7) |
+| 18 | 2026-09-09 | Фаза Design: ADR-001…005 — транспорт WS + PCM16 16 кГц; STT по репликам + VAD (Silero) в оркестраторе api; Docker-контейнер на сессию (лимиты, без сети); Excalidraw + палитра 12 блоков; LLM — OpenAI-совместимый (vLLM prod / llama.cpp dev / Mock CI) — docs/adr/ |
+| 19 | 2026-09-09 | Dev-машина (16 ГБ RAM / 11 ГБ диск): dev-LLM — llama.cpp + Qwen3-4B Q4, dev-STT — `small`; prod — vLLM + Qwen3.8-27B (GPU) + large-v3-russian (ADR-005) |
+| 20 | 2026-09-09 | Деплой: рантайм-цель — отдельные серверы (dev-машина не используется); LLM (Qwen3.8-27B) и голосовые модели STT/TTS — на отдельном сервере в локальной сети (AI-узел); приложение (api/sandbox/frontend/БД) — на app-узле; связь по ЛВС через конфиг (`LLM_BASE_URL`, `VOICE_URL`) |
+| 21 | 2026-09-09 | Язык бекэнда: **Go** (api, sandbox — ADR-006); Python — только voice-сервис (faster-whisper/Silero — ML, torch), изолирован за /api/v1/stt|tts + VOICE_URL |
 
 ## Ограничения
 - Общение с пользователем — на русском.
@@ -55,8 +69,8 @@
 ## Открытые вопросы (остаток, 2026-09-09)
 - **Тарифные цифры поминутной модели** (не определены; в MVP не нужны).
 - ~~Определение «1 минуты интервью» для тарификации~~ — **закрыто** (2026-09-09): REQUIREMENTS.md, раздел 7.
-- Планка «живого диалога»: latency-бюджет, barge-in, критерии естественности — фаза Design.
-- Критерии и веса отчёта по грейдам (Junior…Staff) — SRS v1.1, фаза Design.
+- ~~Планка «живого диалога»: latency-бюджет~~ — **закрыто** (ADR-002); barge-in/естественность — бэклог Operations.
+- ~~Критерии и веса отчёта по грейдам (Junior…Staff)~~ — **закрыто** (v1.1): REQUIREMENTS.md §12.
 
 ## Итог Discovery (phase gate, 2026-09-09)
 - **Цель**: веб-сервис ИИ-мок-интервью для разработчиков: живой голосовой диалог с
@@ -94,7 +108,17 @@
   (R8 закрыт), явный список вне скоупа. SRS одобрена пользователем (phase gate), закоммичена.
   - → Фаза 2: Design.
 
+- **2026-09-09** (Фаза 2) — Design: ADR-001…005 (docs/adr/), ARCHITECTURE.md v0.3 (компоненты,
+  модель данных — 7 таблиц, контракты REST/WS/voice/sandbox, 3 sequence-диаграммы mermaid,
+  топологии prod/dev, конфиг и метрики), REQUIREMENTS.md v1.1 (§12 — критерии отчёта по грейдам),
+  WBS WP-1…WP-12 (roadmap). Уточнение от пользователя: рантайм-цель — отдельные серверы,
+  LLM и STT/TTS — на отдельном сервере в ЛВС (AI-узел) → решение #20, ADR-005 и
+  ARCHITECTURE.md §2.1/§6 обновлены.
+  - Правка от пользователя: бекэнд — Go (api/sandbox) → ADR-006, ARCHITECTURE v0.4, WBS обновлены.
+  - Phase gate Design пройден (2026-09-09); фаза Design закоммичена и запушена в origin/master.
+  - → Фаза 3: Implementation (бекэнд — Go, ADR-006).
+
 ## Next steps
-1. Фаза Design: WBS, ADR (голосовой конвейер, сандбокс, whiteboard), архитектура v0.3
-   (voice-сервис /api/v1/stt, /api/v1/tts; vLLM-сервинг Qwen3.8-27B; Docker-сандбокс Go/Python;
-   whiteboard), sequence-диаграммы, модель данных; SRS v1.1 (критерии отчёта по грейдам).
+1. Фаза 3: Implementation (WBS WP-1…WP-12, бекэнд — Go): WP-1 — каркас
+   (services/api Go, services/sandbox Go, services/voice Python, services/frontend React+Vite, infra/, Makefile),
+   WP-2 — модель данных (7 таблиц, DDL) + auth (JWT, bcrypt) + go test.
