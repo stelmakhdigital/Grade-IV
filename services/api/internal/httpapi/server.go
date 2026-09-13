@@ -14,6 +14,8 @@ import (
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/interviewer"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/session"
 )
 
@@ -24,22 +26,37 @@ type Server struct {
 	sessions    *db.SessionStore
 	submissions *db.SubmissionStore
 	engine      *session.Engine
+	interviewer *interviewer.Interviewer
 	log         *slog.Logger
 }
 
-// New собирает сервер.
+// New собирает сервер (LLM-провайдер по конфигу: реальный клиент или мок, LLM_MOCK).
 func New(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *slog.Logger) *Server {
+	var provider llm.Provider
+	if cfg.LLMMock {
+		provider = llm.NewMockProvider()
+	} else {
+		provider = llm.NewClient(cfg.LLMBaseURL, cfg.LLMModel, cfg.LLMAPIKey)
+	}
+	return NewWithLLM(cfg, database, dialect, log, provider)
+}
+
+// NewWithLLM — сборка с явным LLM-провайдером (тесты/ди, ADR-005).
+func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *slog.Logger,
+	provider llm.Provider) *Server {
 	users := db.NewUserStore(database, dialect)
 	sessions := db.NewSessionStore(database, dialect)
 	submissions := db.NewSubmissionStore(database, dialect)
 	engine := session.New(sessions, users, log,
 		session.WithPauseTimeout(time.Duration(cfg.PauseTimeoutS)*time.Second))
+	interviewer := interviewer.New(provider, sessions, log)
 	return &Server{
 		cfg:         cfg,
 		users:       users,
 		sessions:    sessions,
 		submissions: submissions,
 		engine:      engine,
+		interviewer: interviewer,
 		log:         log,
 	}
 }

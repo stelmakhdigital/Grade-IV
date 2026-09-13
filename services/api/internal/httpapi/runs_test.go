@@ -11,6 +11,7 @@ import (
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 )
 
@@ -46,7 +47,7 @@ func newRunsEnv(t *testing.T, sandboxHandler http.HandlerFunc) *runsEnv {
 		t.Fatalf("migrate: %v", err)
 	}
 	logger := discardLogger()
-	srv := New(cfg, database, dialect, logger)
+	srv := NewWithLLM(cfg, database, dialect, logger, llm.NewMockProvider())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 

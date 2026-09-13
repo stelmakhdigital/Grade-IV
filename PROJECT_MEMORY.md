@@ -65,6 +65,9 @@
 | 25 | 2026-09-14 | WP-6: MVP-отклонение от ADR-003 — контейнер на каждый run (упрощение; long-lived контейнер на сессию — бэклог Operations). Docker недоступен в dev-среде → дефолт `SANDBOX_MODE=subprocess` (dev), prod — docker (fail-closed 503 без демона) |
 | 26 | 2026-09-14 | WP-6: рабочие каталоги sandbox **не в /tmp** (Go игнорирует go.mod в системном temp-root, golang.org/issue/26708) — базовый каталог `~/.local/share/grade-sandbox` (override: `SANDBOX_WORKDIR_BASE`); TMPDIR в env запуска не ставится |
 | 27 | 2026-09-14 | WP-6: банк задач — 12 задач (6 Go + 6 Python), go:embed, только stdlib (GOPROXY=off, --network=none); тесты задач пишутся на `pytest` (Python) и `go test -json` (Go); в этой среде pytest стоит колёсами в `~/.local/pydeps` (нет pip), subprocess-раннер прокидывает PYTHONPATH |
+| 28 | 2026-09-14 | WP-5: движок интервьюера бессостойный к рестарту — контекст хода всегда из БД (сессия + последние 20 реплик из session_events); LLM — синхронный ход в read-loop (детерминизм + правило единственного писателя), неготовность LLM → стандартная fallback-реплика ai_text (FR-V8), сессия не прерывается; `LLM_MOCK=1` — мок для dev/CI (ADR-005). Голосовая асинхронная оркестрация (VAD+STT+стриминг TTS) — WP-4/8 |
+| 29 | 2026-09-14 | WP-4: STT faster-whisper (lazy load singleton+lock, CPU int8, VAD-фильтр Silero-onnx против галлюцинаций, принимает raw PCM16 и WAV, молчание → text=""); TTS Silero v5 (официальный torch-пакет v5_ru с models.silero.ai — pypi-обёртка silero 0.5.5 оказалась устаревшей; 5 рус. спикеров; нативные 24 кГц → ресемплинг 24→16 кГц (линейная интерполяция) в контракт; `TTS_SPEAKER` с fallback + warning). `VOICE_STT_PROVIDER`/`VOICE_TTS_PROVIDER`: реальные по умолчанию, `fake` для CI. Bэклог: стриминг TTS по предложениям, GPU-конфиг, кэш моделей в docker-образ |
+| 30 | 2026-09-14 | WP-4/WP-6: окружение без pip/ensurepip — venv создаётся `python3 -m venv --without-pip` + get-pip.py; torch ставится с CPU-индекса pytorch.org/whl/cpu (иначе nvidia-* ~2GB); make install учитывает (Makefile, только voice-цель) |
 
 ## Ограничения
 - Общение с пользователем — на русском.
@@ -197,9 +200,52 @@
   - Среда: pytest для dev-subprocess установлен колёсами в ~/.local/pydeps (нет pip в
     системе); PYTHONPATH=$HOME/.local/pydeps при запуске sandbox (раннер прокидывает).
 
+- **2026-09-14** (Фаза 3) — WP-5: api (Go) — LLM-слой + движок интервьюера:
+  - `internal/llm`: OpenAI-совместимый клиент (`/chat/completions`, non-streaming MVP),
+    `Provider`-интерфейс (ADR-005), `MockProvider` (детерминированное эхо + журнал
+    запросов), `ErrLLMUnavailable`, DefaultTimeout 30 с.
+  - `internal/interviewer`: бессостойный движок (контекст — из БД): `OnUserUtterance`
+    (ответ + событие ai_utterance), `OnStageChanged` (первый вопрос/представление стадии),
+    `OnCodeRun` (ревью по run_result + follow-up, только livecode), `Nudge` (ai_nudge).
+    Промпты: персона (строго-доброжелательный сеньор, решения #6/#7), фокус по грейду,
+    промпт по стадии; транскрипт — последние 20 реплик (user_utterance/ai_utterance/ai_nudge).
+  - Оркестрация (ws.go): `utterance` → LLM → `ai_text` (синхронный ход, правило
+    единственного писателя); приветствие на подключении к новой сессии; вход livecode —
+    задача из банка sandbox (`GET /tasks`, stage с task) + ai_text; вход design — ai_text;
+    nudge-loop: тишина > SILENCE_NUDGE_S на активной voice-сессии → nudge (PCM-кадры и
+    тексты сдвигают отсчёт); LLM-сбой → FallbackText (FR-V8).
+  - runs (WP-6) дополнен: после run_result — ИИ-ревью fire-and-forget → ai_text.
+  - Конфиг: SILENCE_NUDGE_S (8 с), LLM_MOCK=1 (мок). `NewWithLLM` — инъекция провайдера.
+  - Тесты: llm (httptest OpenAI-мок, ошибки), interviewer (промпты, транскрипт, stage-gate,
+    terminal), WS (utterance→ai_text, nudge при молчании, livecode-task из mock-sandbox);
+    go vet + go test -race зелёные. Live-smoke (LLM_MOCK + реальный sandbox): старт →
+    приветствие → utterance → livecode(task go-fizzbuzz) → runs(run_result+ревью) → события.
+  - ARCHITECTURE.md v0.4.4 (§4.2 оркестрация, §6 LLM_MOCK), .env.example — полный набор.
+
+- **2026-09-14** (Фаза 3) — WP-4: voice (Python) — реальные STT/TTS (под-агент, отчёт
+  сверен):
+  - `app/faster_whisper.py`: STT faster-whisper (default `small`, `STT_MODEL`), lazy load
+    (singleton+lock), CPU int8 (`STT_DEVICE`), lang ru, Silero-VAD onnx-фильтр
+    (галлюцинации на тишине), raw PCM16 и WAV (RIFF-парсинг, ресемплинг), молчание →
+    `text=""`.
+  - `app/silero.py`: TTS Silero v5 (`v5_ru`, 5 рус. спикеров) — прямой download официального
+    torch-пакета (pypi `silero` 0.5.5 — устаревшая обёртка), lazy load в
+    `services/voice/models/`, синтез 24 кГц → PCM16 16 кГц (контракт).
+  - `app/main.py`: `build_app(stt,tts)`; POST /api/v1/stt (multipart), POST /api/v1/tts
+    (audio/pcm, стрим ~250 мс, X-Sample-Rate/Channels/Bits, 400 на пустом), GET /health
+    (provider/model/device/loaded + speakers); выбор провайдеров по env (fake для CI).
+  - requirements.txt: faster-whisper, onnxruntime, numpy, scipy, torch (CPU-индекс),
+    python-multipart; Makefile install: venv --without-pip + get-pip + torch cpu ДО
+    requirements; .gitignore: services/voice/models/.
+  - Проверено: pytest 12 passed (включая e2e с реальными моделями: TTS→PCM, тишина→"",
+    раундтрип TTS→STT); smoke uvicorn (lazy loaded=false→true; tiny распознал фразу
+    conf 0.603; TTS 64КБ PCM). Модели: TTS v5_ru 139M локально, tiny ~75M HF-cache;
+    small (~480M) скачается лениво при первом /stt.
+  - Bэклог (решение #29): стриминг TTS по предложениям, GPU-конфиг, кэш моделей в образ,
+    STT_MODEL=small в CI.
+
 ## Next steps
-1. WP-5 (api: OpenAI-совместимый LLM-клиент + движок интервьюера: персоны, промпты по стадиям,
-   nudge при молчании, ревью кода по run_result, текстовый конвейер utterance→ai_text).
-2. WP-4 (voice Python: faster-whisper /api/v1/stt, Silero v5 /api/v1/tts, абстракция провайдера)
-   — можно параллельно с WP-5 (отдельный сервис).
+1. Коммиты WP-4 и WP-5 (изменения в working tree; тесты зелёные) — ждёт разрешения.
+2. Интеграция голосового конвейера (WP-4 STT в оркестратор: VAD-нарезка реплик PCM → /stt →
+   interviewer → /tts → PCM-кадры ИИ; сейчас — текстовый режим + анти-nudge по PCM).
 3. Frontend WP-7…WP-10 (кабинет, голосовая сессия, Live-Code, System Design).

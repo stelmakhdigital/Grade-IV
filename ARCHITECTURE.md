@@ -146,13 +146,27 @@ erDiagram
   `{"type":"degraded","mode":"text","reason":...}` (FR-V8) ·
   `{"type":"error","code":...,"msg":...}`
 - **S→C** (бинарные): кадры аудио ИИ — 4-байтный заголовок `{seq u16, flags u16}` + PCM16 16 кГц mono.
+- **Оркестрация (WP-5)**: `utterance` → движок интервьюера (LLM, ADR-005) → `ai_text`
+  + события `user_utterance`/`ai_utterance` (бессостойный к рестарту: контекст — из БД).
+  Приветствие — на подключении к новой сессии (stage voice, нет `ai_utterance`);
+  вход на `livecode` — `stage`-сообщение с `task` из банка sandbox + `ai_text`-комментарий;
+  вход на `design` — `ai_text`-представление стадии. Молчание > `SILENCE_NUDGE_S` на
+  активной voice-сессии → nudge-ход (`ai_text` + событие `ai_nudge`). Неудача LLM →
+  стандартная fallback-реплика (`ai_text`), сессия не прерывается (FR-V8).
+  PCM-кадры считаются активностью (анти-nudge); голосовой конвейер VAD+STT — WP-4/8.
+  `LLM_MOCK=1` — детерминированный мок (dev без LLM-узла, CI).
 
-### 4.3. voice-сервис
+### 4.3. voice-сервис (WP-4)
 | Метод | Путь | Контракт |
 |---|---|---|
-| POST | /api/v1/stt | multipart: `audio` (WAV/PCM16, 16 кГц) → `{"text","confidence","duration_s"}` |
-| POST | /api/v1/tts | `{"text","speaker"}` → 200 `audio/pcm` (PCM16 16 кГц, chunked-стрим) |
-| GET | /api/v1/health | `{"stt":{"model","device"},"tts":{"speakers":[]}}` |
+| POST | /api/v1/stt | multipart: `audio` (raw PCM16 или WAV, 16 кГц) + опц. `sample_rate` → `{"text","confidence","duration_s"}`; молчание/ошибка → `text=""` (не 500) |
+| POST | /api/v1/tts | `{"text","speaker?"}` → 200 `audio/pcm` (PCM16 mono 16 кГц, чанки ~250 мс; заголовки X-Sample-Rate/Channels/Bits); пустой текст → 400 |
+| GET | /api/v1/health | `{"stt":{"provider","model","device","loaded"},"tts":{"provider","model","speakers","loaded"}}` |
+
+Провайдеры (решение #16): faster-whisper (STT, ленивая загрузка модели `STT_MODEL`, VAD-фильтр
+против галлюцинаций на тишине) / Silero v5 (TTS, 5 рус. спикеров; нативные 24 кГц →
+ресемплинг в контрактные 16 кГц). `VOICE_STT_PROVIDER`/`VOICE_TTS_PROVIDER`:
+`faster-whisper`/`silero` (default) или `fake` (CI без ML-моделей).
 
 ### 4.4. sandbox-сервис (WP-6)
 | Метод | Путь | Контракт |
@@ -250,7 +264,8 @@ sequenceDiagram
 | `JWT_SECRET` / `JWT_EXPIRY_HOURS` | — / 168 | JWT-аутентификация (WP-2) |
 | `SANDBOX_URL` | http://localhost:8200 | адрес sandbox-сервиса |
 | `LOG_LEVEL` | info | уровень логов (NFR-9) |
-| `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` | http://localhost:8300/v1 / Qwen3-4B / "" | OpenAI-совместимый; prod: vLLM + Qwen3.8-27B на AI-узле (ЛВС) |
+| `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` | http://localhost:8300/v1 / Qwen3-4B / "" | OpenAI-совместимый (ADR-005); prod: vLLM + Qwen3.8-27B на AI-узле (ЛВС) |
+| `LLM_MOCK` | "" | `1` — детерминированный LLM-мок (dev без LLM-узла, CI) |
 | `VOICE_URL` | http://localhost:8100 | Адрес AI-узла (voice: `/api/v1/stt|tts`); prod — IP в ЛВС |
 | `STT_MODEL` | small (dev) / large-v3-russian (prod) | faster-whisper |
 | `TTS_SPEAKER` | ru_01 | спикер Silero v5 |
@@ -280,3 +295,7 @@ sequenceDiagram
   `timeout` в ответе, GET /api/v1/tasks, банк 12 задач go:embed), режимы docker/subprocess
   (рабочие каталоги вне /tmp — ограничение Go), api-прокси /runs + submissions + `code_run`
   + `run_result` по WS; MVP-отклонение: контейнер на run (long-lived — бэклог).
+- v0.4.4 (2026-09-14) — Implementation WP-4/WP-5: §4.3 — voice-контракты реализованы
+  (raw PCM/WAV, loaded-флаги, fake-режим, Silero v5 + ресемплинг 24→16 кГц); §4.2 —
+  оркестрация интервьюера (utterance → ai_text, приветствие, task на livecode, nudge по
+  SILENCE_NUDGE_S, LLM-fallback — FR-V8); §6 — LLM_MOCK; .env.example — полный набор.

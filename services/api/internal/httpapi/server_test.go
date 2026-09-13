@@ -12,6 +12,7 @@ import (
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 )
 
 func newTestEnv(t *testing.T) *httptest.Server {
@@ -32,7 +33,7 @@ func newTestEnv(t *testing.T) *httptest.Server {
 		t.Fatalf("migrate: %v", err)
 	}
 	logger := slog.New(slog.DiscardHandler)
-	srv := New(cfg, database, dialect, logger)
+	srv := NewWithLLM(cfg, database, dialect, logger, llm.NewMockProvider())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/interviewer"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/session"
 )
@@ -167,6 +169,28 @@ func (s *Server) handleSessionRuns(w http.ResponseWriter, r *http.Request) {
 		"exit_code": result.ExitCode, "stdout": result.Stdout, "stderr": result.Stderr,
 		"duration_ms": result.DurationMS, "passed": result.Passed, "tests": result.Tests,
 	})
+
+	// ИИ-ревью по результатам (WP-5): fire-and-forget, ai_text по WS (REST не ждём).
+	failed := 0
+	for _, t := range result.Tests {
+		if !t.Passed {
+			failed++
+		}
+	}
+	go func() {
+		rctx, cancel := context.WithTimeout(context.Background(), llm.DefaultTimeout)
+		defer cancel()
+		text, err := s.interviewer.OnCodeRun(rctx, id, map[string]any{
+			"task_id": body.TaskID, "passed": result.Passed, "exit_code": result.ExitCode,
+			"duration_ms": result.DurationMS, "tests_total": len(result.Tests), "tests_failed": failed,
+			"hint": interviewer.CodeRunHint(result.Passed, result.ExitCode, result.DurationMS, len(result.Tests), failed),
+		})
+		if err != nil {
+			s.log.Warn("runs: ИИ-ревью не удалось", "session", id, "err", err)
+			return
+		}
+		s.engine.SendTo(id, map[string]any{"type": "ai_text", "text": text})
+	}()
 
 	writeJSON(w, http.StatusOK, result)
 }

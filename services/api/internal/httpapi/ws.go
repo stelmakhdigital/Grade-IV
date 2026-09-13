@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/auth"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/interviewer"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/session"
 	"nhooyr.io/websocket"
@@ -74,14 +79,81 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 		s.wsSendError(id, conn, err)
 		return
 	}
-	// Стартовое сообщение: текущая стадия (task придёт с WP-5/6 — задачи Live-Code).
+	// Стартовое сообщение: текущая стадия.
 	s.engine.SendTo(id, map[string]any{"type": "stage", "name": snap.Stage, "task": nil})
 	s.log.Info("ws: клиент подключился", "session", id, "user", userID, "stage", snap.Stage)
 
-	s.readLoop(id, conn, ctx)
+	ws := &wsSession{id: id}
+	ws.touch()
+
+	// Первая реплика ИИ: кандидат ещё не говорил и ИИ не приветствовал (ai_utterance).
+	// session_created/события движка в списке — есть всегда, поэтому смотрим транскрипт.
+	if snap.Stage == models.StageVoice && !hasAIUtterance(ctx, s.sessions, id) {
+		text, err := s.interviewer.OnStageChanged(ctx, id,
+			"Кандидат только что начал интервью. Кратко поприветствуй и задай первый вопрос.")
+		s.sendInterviewerText(ctx, id, text, err)
+	}
+	go s.nudgeLoop(ws, ctx) // решение #7: ИИ заполняет долгие паузы
+
+	s.readLoop(id, conn, ctx, ws)
 
 	s.engine.Detach(id) // FR-S7: обрыв/отключение → пауза
 	s.log.Info("ws: клиент отключился", "session", id)
+}
+
+// wsSession — состояние WS-соединения сессии (для nudge по молчанию).
+type wsSession struct {
+	id         int64
+	lastActive int64 // unixnano
+}
+
+func (w *wsSession) touch() { atomic.StoreInt64(&w.lastActive, time.Now().UnixNano()) }
+
+func (w *wsSession) silentS() int {
+	return int(time.Since(time.Unix(0, atomic.LoadInt64(&w.lastActive))).Seconds())
+}
+
+// nudgeLoop — раз в секунду: если сессия активна, стадия voice и кандидат молчит
+// больше SILENCE_NUDGE_S — nudge-ход (решение #7). Пишет в conn только через
+// engine.SendTo (правило единственного писателя).
+func (s *Server) nudgeLoop(ws *wsSession, ctx context.Context) {
+	if s.cfg.SilenceNudgeS <= 0 {
+		return
+	}
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		snap, err := s.engine.Snapshot(ws.id)
+		if err != nil || snap.Status != models.StatusActive || snap.Stage != models.StageVoice {
+			continue
+		}
+		silent := ws.silentS()
+		if silent < s.cfg.SilenceNudgeS {
+			continue
+		}
+		text, err := s.interviewer.Nudge(ctx, ws.id, silent)
+		if err != nil {
+			s.log.Debug("nudge: ошибка LLM", "session", ws.id, "err", err)
+			continue
+		}
+		ws.touch()
+		s.engine.SendTo(ws.id, map[string]any{"type": "ai_text", "text": text})
+	}
+}
+
+// sendInterviewerText — ai_text по WS или стандартный fallback при ошибке LLM.
+func (s *Server) sendInterviewerText(ctx context.Context, id int64, result string, err error) {
+	if err != nil {
+		s.log.Warn("interviewer: LLM-ход не удался", "session", id, "err", err)
+		s.engine.SendTo(id, map[string]any{"type": "ai_text", "text": interviewer.FallbackText})
+		return
+	}
+	s.engine.SendTo(id, map[string]any{"type": "ai_text", "text": result})
 }
 
 // wsSendError — сообщение error по протоколу (с кодом по ошибке).
@@ -103,7 +175,7 @@ func (s *Server) wsSendError(id int64, conn *websocket.Conn, err error) {
 }
 
 // readLoop — чтение кадров до закрытия соединения или завершения контекста.
-func (s *Server) readLoop(id int64, conn *websocket.Conn, ctx context.Context) {
+func (s *Server) readLoop(id int64, conn *websocket.Conn, ctx context.Context, ws *wsSession) {
 	var pcmFrames, pcmBytes int
 	for {
 		select {
@@ -116,10 +188,11 @@ func (s *Server) readLoop(id int64, conn *websocket.Conn, ctx context.Context) {
 			s.log.Debug("ws: pcm-статистика", "session", id, "frames", pcmFrames, "bytes", pcmBytes)
 			return
 		}
+		ws.touch() // любая активность сдвигает отсчёт nudge
 		switch typ {
 		case websocket.MessageBinary:
-			// PCM16 16 кГц mono (ADR-001). Голосовой конвейер (STT/LLM/TTS)
-			// подключается в WP-4/5; в WP-3 кадры принимаются (учёт для метрик).
+			// PCM16 16 кГц mono (ADR-001). Голосовой конвейер (VAD+STT) — WP-4;
+			// пока кадры принимаются (учёт для метрик + анти-nudge).
 			pcmFrames++
 			pcmBytes += len(data)
 			s.log.Debug("ws: pcm-кадр", "session", id, "bytes", len(data), "frames", pcmFrames)
@@ -160,6 +233,15 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage) {
 			s.engine.SendTo(id, wsErr("invalid_state", err.Error()))
 			return
 		}
+		// Вход на стадии — первая реплика ИИ (WP-5).
+		switch p.Stage {
+		case models.StageLiveCode:
+			s.enterLiveCode(ctx, id)
+		case models.StageDesign:
+			text, err := s.interviewer.OnStageChanged(ctx, id,
+				"Кандидат переходит к System Design. Представь формат стадии и задай первую задачу на проектирование.")
+			s.sendInterviewerText(ctx, id, text, err)
+		}
 
 	case "finish":
 		if _, err := s.engine.Finish(id); err != nil {
@@ -175,7 +257,7 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage) {
 		_, _ = s.eventData(ctx, id, "whiteboard_save", map[string]any{"payload": json.RawMessage(msg.Payload)})
 
 	case "utterance":
-		// Текстовая реплика кандидата (деградация в текстовый режим, FR-V8 / тесты).
+		// Реплика кандидата (текстовый режим / FR-V8 / тесты; голосовой STT — WP-4).
 		var p struct {
 			Text string `json:"text"`
 		}
@@ -183,7 +265,12 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage) {
 			s.engine.SendTo(id, wsErr("invalid_request", "payload.text обязателен"))
 			return
 		}
-		_, _ = s.eventData(ctx, id, "user_utterance", map[string]any{"text": strings.TrimSpace(p.Text)})
+		text := strings.TrimSpace(p.Text)
+		_, _ = s.eventData(ctx, id, "user_utterance", map[string]any{"text": text})
+		// Конвейер (WP-5): реплика → LLM → ai_text. Синхронно: правило единственного
+		// писателя + детерминизм хода; голосовая асинхронная оркестрация — WP-4.
+		reply, err := s.interviewer.OnUserUtterance(ctx, id, text)
+		s.sendInterviewerText(ctx, id, reply, err)
 
 	default:
 		s.engine.SendTo(id, wsErr("unknown_ui_event", "неизвестное событие: "+msg.Name))
@@ -201,6 +288,85 @@ func (s *Server) eventData(ctx context.Context, sessionID int64, kind string, da
 
 func wsErr(code, msg string) map[string]any {
 	return map[string]any{"type": "error", "code": code, "msg": msg}
+}
+
+// liveCodeTask — задача Live-Code из банка sandbox (ARCHITECTURE.md §4.4).
+type liveCodeTask struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Statement string `json:"statement"`
+}
+
+// enterLiveCode — вход на стадию Live-Code (WP-5/6): выбрать задачу из банка,
+// отправить её в сообщении stage, прокомментировать ИИ-интервьюер.
+func (s *Server) enterLiveCode(ctx context.Context, id int64) {
+	sess, err := s.sessions.Get(ctx, id)
+	if err != nil {
+		return
+	}
+	var task *liveCodeTask
+	if tasks, err := s.fetchLiveCodeTasks(ctx, string(sess.Stack), string(sess.Grade)); err == nil && len(tasks) > 0 {
+		// MVP: первая подходящая задача (выборка по случайному смещению — бэклог;
+		// детерминизм упрощает тесты и воспроизведение).
+		task = &tasks[0]
+	} else if err != nil {
+		s.log.Warn("livecode: банк задач недоступен", "session", id, "err", err)
+	}
+
+	if task != nil {
+		s.engine.SendTo(id, map[string]any{
+			"type": "stage", "name": models.StageLiveCode,
+			"task": map[string]any{"id": task.ID, "title": task.Title, "statement": task.Statement},
+		})
+	}
+	text, err := s.interviewer.OnStageChanged(ctx, id, stageNote(task))
+	s.sendInterviewerText(ctx, id, text, err)
+}
+
+// stageNote — контекст входа на Live-Code для LLM (задача, если выбрана).
+func stageNote(task *liveCodeTask) string {
+	if task == nil {
+		return "Задача ещё не назначена (банк задач недоступен). Спроси, готов ли кандидат, и напомни формат стадии."
+	}
+	return fmt.Sprintf("Задача: «%s» (id=%s). Условие: %s", task.Title, task.ID, task.Statement)
+}
+
+// fetchLiveCodeTasks — GET {SANDBOX_URL}/api/v1/tasks?stack=&grade= (5 с).
+func (s *Server) fetchLiveCodeTasks(ctx context.Context, stack, grade string) ([]liveCodeTask, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		s.cfg.SandboxURL+"/api/v1/tasks?stack="+url.QueryEscape(stack)+"&grade="+url.QueryEscape(grade), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("sandbox /tasks: HTTP %d", resp.StatusCode)
+	}
+	var tasks []liveCodeTask
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&tasks); err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+// hasAIUtterance — в событиях сессии есть ai_utterance (ИИ уже приветствовал/отвечал).
+func hasAIUtterance(ctx context.Context, sessions *db.SessionStore, id int64) bool {
+	events, err := sessions.ListEvents(ctx, id)
+	if err != nil {
+		return true // при ошибке не спамим приветствием
+	}
+	for _, ev := range events {
+		if ev.Kind == "ai_utterance" {
+			return true
+		}
+	}
+	return false
 }
 
 func stageKnown(s models.Stage) bool {

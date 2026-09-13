@@ -24,6 +24,8 @@ type Config struct {
 	LLMAPIKey      string // ключ LLM (LLM_API_KEY)
 	SandboxURL     string // sandbox-сервис (SANDBOX_URL)
 	LogLevel       string // уровень логов (LOG_LEVEL)
+	SilenceNudgeS  int    // тишина > порога → nudge от ИИ, с (SILENCE_NUDGE_S)
+	LLMMock        bool   // LLM-мок вместо реального эндпоинта (LLM_MOCK=1; dev/CI, ADR-005)
 }
 
 func getEnv(key, def string) string {
@@ -57,6 +59,8 @@ func Load() (*Config, error) {
 		LLMAPIKey:      os.Getenv("LLM_API_KEY"),
 		SandboxURL:     getEnv("SANDBOX_URL", "http://localhost:8200"),
 		LogLevel:       getEnv("LOG_LEVEL", "info"),
+		SilenceNudgeS:  getEnvInt("SILENCE_NUDGE_S", 8),
+		LLMMock:        getEnv("LLM_MOCK", "") == "1",
 	}
 	if c.JWTExpiryHours <= 0 {
 		return nil, fmt.Errorf("JWT_EXPIRY_HOURS должен быть > 0 (получено %d)", c.JWTExpiryHours)

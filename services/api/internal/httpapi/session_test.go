@@ -264,10 +264,13 @@ func TestSessionWS(t *testing.T) {
 	conn := dialWS(t, ts, token, id)
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
-	// Стартовое сообщение: stage voice.
-	types := wsReadTypes(t, conn, 1, 3*time.Second)
+	// Стартовое: stage voice + ai_text приветствия (WP-5, новая сессия).
+	types := wsReadTypes(t, conn, 2, 3*time.Second)
 	if types[0] != "stage/voice" {
 		t.Fatalf("стартовое сообщение: %v", types)
+	}
+	if !strings.HasPrefix(types[1], "ai_text/") {
+		t.Fatalf("приветствие: %v", types)
 	}
 
 	// Бинарный PCM-кадр принимается без ошибки.
@@ -277,12 +280,15 @@ func TestSessionWS(t *testing.T) {
 	}
 	cancel()
 
-	// ui: stage_action livecode → stage livecode.
+	// ui: stage_action livecode → stage livecode + ai_text (комментарий входа, WP-5).
 	wsWriteJSON(t, conn, map[string]any{"type": "ui", "name": "stage_action",
 		"payload": map[string]string{"stage": "livecode"}})
-	types = wsReadTypes(t, conn, 1, 3*time.Second)
+	types = wsReadTypes(t, conn, 2, 3*time.Second)
 	if types[0] != "stage/livecode" {
 		t.Fatalf("stage_action: %v", types)
+	}
+	if !strings.HasPrefix(types[1], "ai_text/") {
+		t.Fatalf("AI-комментарий входа: %v", types)
 	}
 
 	// ui: недопустимый переход livecode→report (у Middle report — из design) → error.
