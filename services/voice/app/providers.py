@@ -30,7 +30,11 @@ class STTProvider(Protocol):
     name: str
 
     def transcribe(self, audio: bytes, sample_rate: int = SAMPLE_RATE) -> STTResult:
-        """audio — PCM16 mono."""
+        """audio — PCM16 mono (raw или WAV)."""
+        ...
+
+    def health(self) -> dict:
+        """Состояние провайдера для GET /api/v1/health: {"provider","model","device","loaded"}."""
         ...
 
 
@@ -43,6 +47,10 @@ class TTSProvider(Protocol):
         """Возвращает PCM16 mono @ 16 кГц (чистый стриминг по чанкам — WP-4)."""
         ...
 
+    def health(self) -> dict:
+        """Состояние провайдера для GET /api/v1/health: {"provider","speakers":[],"loaded"}."""
+        ...
+
 
 class FakeSTT:
     """Dev-провайдер STT: возвращает фиктивный текст и длительность аудио (WP-1)."""
@@ -50,8 +58,13 @@ class FakeSTT:
     name = "fake"
 
     def transcribe(self, audio: bytes, sample_rate: int = SAMPLE_RATE) -> STTResult:
+        if not audio:
+            return STTResult(text="", confidence=0.0, duration_s=0.0)
         duration = len(audio) / 2 / sample_rate
         return STTResult(text="[fake stt]", confidence=1.0, duration_s=round(duration, 3))
+
+    def health(self) -> dict:
+        return {"provider": self.name, "model": None, "device": None, "loaded": False}
 
 
 class FakeTTS:
@@ -66,3 +79,6 @@ class FakeTTS:
             for i in range(n)
         )
         return frames
+
+    def health(self) -> dict:
+        return {"provider": self.name, "model": None, "speakers": ["ru_01"], "loaded": False}

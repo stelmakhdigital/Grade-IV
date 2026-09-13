@@ -32,6 +32,9 @@ services/*/bin/
 # Python (тесты)
 .pytest_cache/
 
+# ML-модели voice (скачиваются лениво; ~145 МБ + HF-cache)
+services/voice/models/
+
 # Данные (SQLite)
 data/
 *.db

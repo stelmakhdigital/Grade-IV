@@ -19,7 +19,13 @@ help:
 install:
 	@for m in $(GO_MODULES); do (cd $$m && go mod download) || exit 1; done
 	@cd services/frontend && pnpm install
-	@cd services/voice && python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt
+	# voice: venv без ensurepip (get-pip bootstrap) + torch CPU ПЕРЕД requirements
+	# (иначе pip потянет nvidia-* ~2 ГБ; на GPU-узле torch ставится с CUDA-индексом).
+	@cd services/voice && rm -rf .venv && python3 -m venv --without-pip .venv \
+		&& curl -fsSL -o .get-pip.py https://bootstrap.pypa.io/get-pip.py \
+		&& .venv/bin/python .get-pip.py -q && rm .get-pip.py \
+		&& .venv/bin/pip install -q torch --index-url https://download.pytorch.org/whl/cpu \
+		&& .venv/bin/pip install -q -r requirements.txt
 
 test:
 	@set -e; for m in $(GO_MODULES); do echo "=== go test $$m ==="; (cd $$m && go vet ./... && go test ./...); done

@@ -1,9 +1,19 @@
 # grade-voice: STT/TTS-сервис (ARCHITECTURE.md §4.3, ADR-002).
 # WP-1: каркас FastAPI + фейковые провайдеры.
-# WP-4: реальные провайдеры — faster-whisper (STT) и Silero v5 (TTS):
-# faster-whisper>=1.0
-# silero[...]/torch — тянет ML-стек, устанавливается в WP-4 (AI-узел, GPU).
+# WP-4: реальные провайдеры — faster-whisper (STT) и Silero v5 (TTS).
 fastapi>=0.115
 uvicorn[standard]>=0.30
+python-multipart>=0.0.9  # multipart-загрузка /api/v1/stt
 pytest>=8.2
 httpx>=0.27
+# ML-стек (WP-4): STT — faster-whisper (ctranslate2) + Silero VAD (onnxruntime);
+# TTS — Silero v5 (torch-пакет v5_ru, для загрузки нужен scipy).
+# ВАЖНО: на CPU-машинах torch ставится ОТДЕЛЬНО до этого файла с CPU-индексом
+# (иначе pip потащит nvidia-* ~2 ГБ):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# (делает make install). GPU-узел: torch из PyPI с CUDA.
+faster-whisper>=1.2.1
+onnxruntime>=1.20
+numpy>=1.26
+scipy>=1.13
+torch>=2.4
