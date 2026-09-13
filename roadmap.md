@@ -39,6 +39,7 @@
 - [x] WP-4: voice (Python): /api/v1/stt (faster-whisper), /api/v1/tts (Silero v5), абстракция провайдеров, health — коммит 2026-09-14
 - [x] WP-5: api (Go): LLM-слой (OpenAI-совместимый клиент) + движок интервьюера (персона, промпты, рубрики, nudge, ревью кода) — коммит 2026-09-14
 - [x] WP-6: sandbox (Go): Docker-runner (лимиты, --network=none) + subprocess dev-mode + банк задач Go/Python (12 задач, теги по грейдам) + api-прокси /runs (submissions, code_run, run_result по WS) — коммит 2026-09-14
+- [x] WP-6a: голосовой конвейер (ADR-002) в api: PCM → энергетический VAD → /stt → движок интервьюера → /tts → бинарные кадры {seq,flags}+PCM16 (turn-taking, one-parallel-turn, graceful degradation) — коммит 2026-09-14
 - [ ] WP-7: Frontend: каркас Vite+React+TS, кабинет (auth, минуты, история)
 - [ ] WP-8: Frontend: голосовая сессия (AudioWorklet-микрофон → WS, PCM-воспроизведение, транскрипт, таймер)
 - [ ] WP-9: Frontend: Live-Code (Monaco, «Запустить тесты», ИИ-ревью, follow-up)
