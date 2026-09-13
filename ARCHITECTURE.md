@@ -103,7 +103,7 @@ erDiagram
 |---|---|
 | `users` | id, email (unique), password_hash, created_at, minutes_free=3600 |
 | `sessions` | id, user_id, grade, stack, stage (voice/livecode/design/report), status (active/paused/finished/aborted), duration_limit_s (45/50/60/75×60), active_seconds, paused_at, started_at, finished_at |
-| `session_events` | id, session_id, seq, ts, kind (stage_change/user_utterance/ai_utterance/ai_nudge/code_run/whiteboard_save/timer/degraded_text_mode), data JSONB |
+| `session_events` | id, session_id, seq, ts, kind (session_created/stage_change/paused/resumed/finished/aborted/user_utterance/ai_utterance/ai_nudge/code_run/whiteboard_save/timer/degraded_text_mode), data JSONB |
 | `submissions` | id, session_id, task_id, files JSONB (path→content), action, exit_code, stdout, stderr, duration_ms, tests JSONB, created_at |
 | `whiteboards` | id, session_id, state JSONB (Excalidraw elements+appState), blocks JSONB (извлечённая структура), png_path, updated_at |
 | `reports` | id, session_id, overall (взвешенный балл), grade_recommendation, criteria JSONB (критерий→балл), strengths[], weaknesses[], recommendations[], created_at |
@@ -129,8 +129,12 @@ erDiagram
 | GET | /api/v1/sessions/{id}/events | транскрипт/события (история, FR-A4) |
 
 ### 4.2. WS `/ws/session/{id}` (протокол, ADR-001)
+- **Аутентификация (WP-3)**: JWT — query-параметр `?token=...` (браузеры) или заголовок
+  `Authorization: Bearer`; при невалидном/отсутствующем токене — 401 **до** апгрейда.
+  Обрыв соединения ставит активную сессию в `paused` (FR-S7).
 - **C→S**: бинарные кадры — PCM16 16 кГц mono, ~250 мс; текстовые:
-  `{"type":"ui","name":"stage_action|whiteboard_saved|code_run_requested|submit_solution|finish","payload":{...}}`
+  `{"type":"ui","name":"stage_action|whiteboard_saved|code_run_requested|submit_solution|finish|utterance","payload":{...}}`
+  (`stage_action` → `{stage}`; `utterance` → `{text}` — текстовый режим/FR-V8 и тесты)
 - **S→C** (JSON):
   `{"type":"transcript","who":"user|ai","text":...,"ts":...}` ·
   `{"type":"stage","name":"voice|livecode|design|report","task":{...}}` (task: условие задачи
@@ -252,3 +256,6 @@ sequenceDiagram
 - v0.4 (2026-09-09) — бекэнд на Go (api, sandbox; ADR-006), voice остаётся Python (ML).
 - v0.4.1 (2026-09-10) — Implementation WP-1/WP-2: синхронизация §6 (ADDR, JWT_*, SANDBOX_URL,
   LOG_LEVEL), JSON-логи — log/slog (Go).
+- v0.4.2 (2026-09-13) — Implementation WP-3: §4.2 — auth WS (token/Bearer, 401 до апгрейда),
+  ui-событие `utterance`; §3 — расширение kind в session_events (session_created/paused/resumed/
+  finished/aborted); пауза > порога → aborted (SESSION_PAUSE_TIMEOUT_S).

@@ -17,6 +17,7 @@ type Config struct {
 	JWTSecret      string // секрет подписи JWT (JWT_SECRET)
 	JWTExpiryHours int    // время жизни токена, ч (JWT_EXPIRY_HOURS)
 	MinutesFreeS   int    // стартовый грант минут, с (MINUTES_FREE_S)
+	PauseTimeoutS  int    // пауза дольше порога → aborted, с (SESSION_PAUSE_TIMEOUT_S, SRS §7)
 	VoiceURL       string // voice-сервис: /api/v1/stt, /api/v1/tts (VOICE_URL)
 	LLMBaseURL     string // OpenAI-совместимый LLM (LLM_BASE_URL)
 	LLMModel       string // модель LLM (LLM_MODEL)
@@ -49,6 +50,7 @@ func Load() (*Config, error) {
 		JWTSecret:      getEnv("JWT_SECRET", DevInsecureSecret),
 		JWTExpiryHours: getEnvInt("JWT_EXPIRY_HOURS", 168),
 		MinutesFreeS:   getEnvInt("MINUTES_FREE_S", 3600),
+		PauseTimeoutS:  getEnvInt("SESSION_PAUSE_TIMEOUT_S", 1800),
 		VoiceURL:       getEnv("VOICE_URL", "http://localhost:8100"),
 		LLMBaseURL:     getEnv("LLM_BASE_URL", "http://localhost:8300/v1"),
 		LLMModel:       getEnv("LLM_MODEL", "Qwen3-4B"),

@@ -3,27 +3,46 @@
 package httpapi
 
 import (
+	"bufio"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/session"
 )
 
 // Server — HTTP-сервер: хендлеры + зависимости.
 type Server struct {
-	cfg   *config.Config
-	users *db.UserStore
-	log   *slog.Logger
+	cfg      *config.Config
+	users    *db.UserStore
+	sessions *db.SessionStore
+	engine   *session.Engine
+	log      *slog.Logger
 }
 
 // New собирает сервер.
 func New(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, users: db.NewUserStore(database, dialect), log: log}
+	users := db.NewUserStore(database, dialect)
+	sessions := db.NewSessionStore(database, dialect)
+	engine := session.New(sessions, users, log,
+		session.WithPauseTimeout(time.Duration(cfg.PauseTimeoutS)*time.Second))
+	return &Server{
+		cfg:      cfg,
+		users:    users,
+		sessions: sessions,
+		engine:   engine,
+		log:      log,
+	}
 }
+
+// Engine — движок сессий (main: Stop при завершении).
+func (s *Server) Engine() *session.Engine { return s.engine }
 
 // Handler — корневой обработчик с маршрутами.
 func (s *Server) Handler() http.Handler {
@@ -32,6 +51,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/register", s.handleRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.Handle("GET /api/v1/auth/me", s.requireAuth(http.HandlerFunc(s.handleMe)))
+
+	// Сессии (WP-3, ARCHITECTURE.md §4.1).
+	mux.Handle("POST /api/v1/sessions", s.requireAuth(http.HandlerFunc(s.handleSessionsCreate)))
+	mux.Handle("GET /api/v1/sessions", s.requireAuth(http.HandlerFunc(s.handleSessionsList)))
+	mux.Handle("GET /api/v1/sessions/{id}", s.requireAuth(http.HandlerFunc(s.handleSessionGet)))
+	mux.Handle("POST /api/v1/sessions/{id}/{action}", s.requireAuth(http.HandlerFunc(s.handleSessionAction)))
+	mux.Handle("GET /api/v1/sessions/{id}/events", s.requireAuth(http.HandlerFunc(s.handleSessionEvents)))
+
+	// Голосовой канал (WP-3, ADR-001): auth — токен в query/заголовке.
+	mux.HandleFunc("GET /ws/session/{id}", s.handleSessionWS)
 	return s.withLogging(mux)
 }
 
@@ -64,6 +93,17 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack — прокидывание к внутреннему writer (нужно для WS-апгрейда, ADR-001):
+// http.ResponseWriter не включает Hijack в методную сигнатуру, поэтому
+// встраивание интерфейса его не промует.
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("ResponseWriter не поддерживает http.Hijacker")
+	}
+	return hj.Hijack()
 }
 
 // withLogging — middleware: JSON-лог каждого запроса (NFR-9).

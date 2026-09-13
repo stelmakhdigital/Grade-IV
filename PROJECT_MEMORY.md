@@ -59,6 +59,9 @@
 | 19 | 2026-09-09 | Dev-машина (16 ГБ RAM / 11 ГБ диск): dev-LLM — llama.cpp + Qwen3-4B Q4, dev-STT — `small`; prod — vLLM + Qwen3.8-27B (GPU) + large-v3-russian (ADR-005) |
 | 20 | 2026-09-09 | Деплой: рантайм-цель — отдельные серверы (dev-машина не используется); LLM (Qwen3.8-27B) и голосовые модели STT/TTS — на отдельном сервере в локальной сети (AI-узел); приложение (api/sandbox/frontend/БД) — на app-узле; связь по ЛВС через конфиг (`LLM_BASE_URL`, `VOICE_URL`) |
 | 21 | 2026-09-09 | Язык бекэнда: **Go** (api, sandbox — ADR-006); Python — только voice-сервис (faster-whisper/Silero — ML, torch), изолирован за /api/v1/stt|tts + VOICE_URL |
+| 22 | 2026-09-13 | WP-3: WS-auth — JWT в `?token=` (браузеры) или `Authorization: Bearer`; 401 до апгрейда. Обрыв WS → сессия `paused` (FR-S7); пауза > SESSION_PAUSE_TIMEOUT_S (по умолч. 30 мин) → `aborted` + списание факт. времени (SRS §7) |
+| 23 | 2026-09-13 | WP-3: тарификация — начисляется только активное время; pause/обрыв/пауза не тарифицируются; списание в minutes_ledger при финализации (finished/aborted); 402 при 0 минут на создание |
+| 24 | 2026-09-13 | WP-3: переход на стадию `report` финализирует сессию (finished) — совпадает с моментом «отчёт сгенерирован» из SRS §7 (генерация отчёта — WP-11) |
 
 ## Ограничения
 - Общение с пользователем — на русском.
@@ -128,10 +131,39 @@
   - Тесты зелёные: go test (api: auth/db/httpapi), go test (sandbox), pytest (voice),
     vitest (frontend) + tsc/vite build; smoke-тест собранного api (healthz→register→me).
   - ARCHITECTURE.md → v0.4.1 (§6: ADDR/JWT_*/SANDBOX_URL/LOG_LEVEL).
-  - Ожидается разрешение на коммит WP-1/WP-2.
+  - WP-1/WP-2 закоммичены (коммит 8194f66).
+
+- **2026-09-13** (Фаза 3) — WP-3: api (Go) — сессии + WS + тарификация:
+  - `internal/session`: `state.go` — машина состояний (стадии voice→livecode→[design]→report;
+    Junior без design, возврат на 1 стадию назад, report терминальная; статусы
+    active↔paused → finished/aborted). `engine.go` — движок: Create (402-проверка минут),
+    Pause/Resume/Finish, Transition (валидация по грейду), Detach (обрыв → paused, FR-S7),
+    pause > порога → aborted (SRS §7), секундный тик (начисление, авто-финализация по лимиту,
+    timer-сообщения 1 раз/5 с, персист active_seconds), рекавери при старте (active → paused),
+    биллинг в minutes_ledger (−округлённые активные секунды) при финализации.
+  - `internal/db/sessionstore.go` — SessionStore (CRUD сессий, GetOwned, события c seq,
+    MarkPaused/MarkActive/Finalize/PersistActiveSeconds, ListByStatus для рекавери).
+  - REST (httpapi): POST/GET /api/v1/sessions, GET /sessions/{id}, POST .../pause|resume|finish,
+    GET .../events; маппинг ошибок (402 out_of_minutes, 404, 409 invalid_state).
+  - WS `/ws/session/{id}` (nhooyr.io/websocket): auth JWT (?token / Bearer, 401 до апгрейда),
+    Attach/Detach (обрыв → paused), binaрные PCM-кадры принимаются (конвейер — WP-4/5),
+    ui-события: stage_action, finish, code_run_requested/submit_solution (→ code_run),
+    whiteboard_saved, utterance (→ user_utterance); S→C: stage (стартовое), timer, error.
+  - Middleware: `statusRecorder.Hijack()` — прокидка для WS-апгрейда (интерфейс
+    http.ResponseWriter не промует Hijack — ловушка Go).
+  - ENV: SESSION_PAUSE_TIMEOUT_S (по умолч. 1800 с) подключён к движку.
+  - Тесты зелёные: go test + go test -race (session: state/engine — fake-часы; httpapi:
+    REST + WS через httptest), go vet; live-smoke: REST-цикл (register→create→pause/resume/
+    finish→events) и WS-цикл (stage→pcm→stage_action→finish→timer/stage report) на собранном
+    бинарнике.
+  - ARCHITECTURE.md → v0.4.2 (§4.2 auth WS + utterance, §3 kind событий).
+  - Среда: Go 1.26.8 установлен в ~/.local/go-toolchain (PATH: $HOME/.local/go-toolchain/bin);
+    PATH в новых bash-сессиях не сохраняется — перед go-командами:
+    `export PATH=$PATH:$HOME/.local/go-toolchain/bin`.
+  - WP-3 закоммичен и отмечен [x] в roadmap (2026-09-13, разрешение получено).
 
 ## Next steps
-1. Коммит WP-1/WP-2 (разрешение ожидается) → отметить [x] в roadmap.
-2. WP-3: api (Go) — машина состояний сессий (voice→livecode→design→report), WS-протокол
-   (nhooyr.io/websocket), тарификация (pause/resume/finish, лимит 60 мин, таймер).
-3. Параллельно: WP-4 (voice: faster-whisper + Silero), WP-5 (LLM-клиент + движок интервьюера).
+1. WP-4 (voice: faster-whisper + Silero) / WP-5 (LLM-клиент + движок интервьюера) /
+   WP-6 (sandbox docker-runner + банк задач) — параллельные потоки (WP-3 закрыт: поток
+   WP-4/5/6 разблокирован).
+3. Frontend WP-7…WP-10 (кабинет, голосовая сессия, Live-Code, System Design).

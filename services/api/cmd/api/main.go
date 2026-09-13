@@ -42,7 +42,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	engineCtx, engineCancel := context.WithCancel(ctx)
+	defer engineCancel()
 	server := httpapi.New(cfg, conn, dialect, logger)
+	go server.Engine().Run(engineCtx)
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           server.Handler(),
@@ -65,5 +68,7 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("shutdown", "err", err)
 	}
+	// После остановки HTTP останавливаем таймер сессий (Detach/рекавери уже не нужны).
+	server.Engine().Stop()
 	logger.Info("api stopped")
 }
