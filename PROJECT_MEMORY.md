@@ -62,6 +62,9 @@
 | 22 | 2026-09-13 | WP-3: WS-auth — JWT в `?token=` (браузеры) или `Authorization: Bearer`; 401 до апгрейда. Обрыв WS → сессия `paused` (FR-S7); пауза > SESSION_PAUSE_TIMEOUT_S (по умолч. 30 мин) → `aborted` + списание факт. времени (SRS §7) |
 | 23 | 2026-09-13 | WP-3: тарификация — начисляется только активное время; pause/обрыв/пауза не тарифицируются; списание в minutes_ledger при финализации (finished/aborted); 402 при 0 минут на создание |
 | 24 | 2026-09-13 | WP-3: переход на стадию `report` финализирует сессию (finished) — совпадает с моментом «отчёт сгенерирован» из SRS §7 (генерация отчёта — WP-11) |
+| 25 | 2026-09-14 | WP-6: MVP-отклонение от ADR-003 — контейнер на каждый run (упрощение; long-lived контейнер на сессию — бэклог Operations). Docker недоступен в dev-среде → дефолт `SANDBOX_MODE=subprocess` (dev), prod — docker (fail-closed 503 без демона) |
+| 26 | 2026-09-14 | WP-6: рабочие каталоги sandbox **не в /tmp** (Go игнорирует go.mod в системном temp-root, golang.org/issue/26708) — базовый каталог `~/.local/share/grade-sandbox` (override: `SANDBOX_WORKDIR_BASE`); TMPDIR в env запуска не ставится |
+| 27 | 2026-09-14 | WP-6: банк задач — 12 задач (6 Go + 6 Python), go:embed, только stdlib (GOPROXY=off, --network=none); тесты задач пишутся на `pytest` (Python) и `go test -json` (Go); в этой среде pytest стоит колёсами в `~/.local/pydeps` (нет pip), subprocess-раннер прокидывает PYTHONPATH |
 
 ## Ограничения
 - Общение с пользователем — на русском.
@@ -160,10 +163,43 @@
   - Среда: Go 1.26.8 установлен в ~/.local/go-toolchain (PATH: $HOME/.local/go-toolchain/bin);
     PATH в новых bash-сессиях не сохраняется — перед go-командами:
     `export PATH=$PATH:$HOME/.local/go-toolchain/bin`.
-  - WP-3 закоммичен и отмечен [x] в roadmap (2026-09-13, разрешение получено).
+  - WP-3 закоммичен (`68afcf5`) и отмечен [x] в roadmap (2026-09-13, разрешение получено);
+    запушен в origin/master (8194f66..68afcf5). Примечание: ~/.ssh/id_ed25519 защищён
+    passphrase — push из этой среды делается через SSH_ASKPASS_REQUIRE=force + временный
+    askpass-хелпер (passphrase предоставил пользователь).
+
+- **2026-09-14** (Фаза 3) — WP-6: sandbox (Go) — runner + банк задач + api-прокси /runs:
+  - `services/sandbox/internal/tasks`: банк — 12 задач (6 Go: reverse-string, two-sum,
+    fizzbuzz, strstr, lru-cache, parallel-sum; 6 Python: palindrome, two-sum, word-count,
+    flatten, lru-cache, rate-limiter), теги junior/middle/senior/staff, go:embed, stdlib-only.
+    Каждая: стартовый стуб + скрытые тесты; валидация решаемости подтверждена (корректные
+    решения проходят, стобы — нет). Исправлен кейс go-two-sum в банке (ошибочные ожидаемые
+    индексы).
+  - `services/sandbox/internal/runner`: два режима ADR-003 — `subprocess` (dev-дефолт):
+    честный интерпретатор хоста, изолированный cwd (вне /tmp — решение #26), минимальный
+    env (GOPROXY=off для Go), таймаут 10 с + убийство группы процессов (Setpgid), cap вывода
+    1 МБ, валидация путей (no ..); `docker`: `docker run --rm --network=none --cpus=1
+    -m 512m --pids-limit=128 --read-only --tmpfs /tmp --user 1000:1000`, образы
+    golang:1.24 / python:3.12-slim (в этой среде docker нет — проверяется на docker-узле).
+    Result: `{exit_code, stdout, stderr, duration_ms, passed, timeout, tests[]}`;
+    Go tests[] — парсинг `go test -json`, Python — единый pytest-вход.
+  - HTTP sandbox: POST /api/v1/sessions/{id}/runs `{stack, files, action, task_id?}`
+    (400/503 маппинг), GET /api/v1/tasks?stack=&grade=, /healthz {mode, tasks}.
+  - api (Go): POST /api/v1/sessions/{id}/runs (requireAuth, только стадия livecode, иначе 409;
+    прокси в SANDBOX_URL 15 с) → сохранение в submissions (db.SubmissionStore), событие
+    code_run, run_result по WS (engine.SendTo). Роут более специфичный, чем {action}
+    (литеральный сегмент — приоритет Go mux).
+  - Тесты зелёные: go test + go test -race (sandbox: runner/httptest; api: runs-прокси с
+    mock-sandbox, submissions, events). E2E: банк (12/12 стартуют), live-интеграция
+    (register→create→WS livecode→runs через реальный sandbox subprocess→events).
+  - ARCHITECTURE.md → v0.4.3 (§4.1/§4.4: контракт runs + tasks, режимы, банк, прокси,
+    MVP-отклонение).
+  - Среда: pytest для dev-subprocess установлен колёсами в ~/.local/pydeps (нет pip в
+    системе); PYTHONPATH=$HOME/.local/pydeps при запуске sandbox (раннер прокидывает).
 
 ## Next steps
-1. WP-4 (voice: faster-whisper + Silero) / WP-5 (LLM-клиент + движок интервьюера) /
-   WP-6 (sandbox docker-runner + банк задач) — параллельные потоки (WP-3 закрыт: поток
-   WP-4/5/6 разблокирован).
+1. WP-5 (api: OpenAI-совместимый LLM-клиент + движок интервьюера: персоны, промпты по стадиям,
+   nudge при молчании, ревью кода по run_result, текстовый конвейер utterance→ai_text).
+2. WP-4 (voice Python: faster-whisper /api/v1/stt, Silero v5 /api/v1/tts, абстракция провайдера)
+   — можно параллельно с WP-5 (отдельный сервис).
 3. Frontend WP-7…WP-10 (кабинет, голосовая сессия, Live-Code, System Design).

@@ -1,0 +1,169 @@
+[
+  {
+    "id": "go-reverse-string",
+    "stack": "go",
+    "grades": [
+      "junior"
+    ],
+    "title": "Разворот строки",
+    "statement": "Реализуйте функцию Reverse: возвращает строку s, развёрнутую по ранунам (учитывайте юникод — len/индексация по байтам здесь не подойдут).",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// Reverse возвращает строку s, развёрнутую по ранунам.\nfunc Reverse(s string) string {\n\treturn \"\" // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport \"testing\"\n\nfunc TestReverse(t *testing.T) {\n\tcases := map[string]string{\n\t\t\"\":             \"\",\n\t\t\"abc\":          \"cba\",\n\t\t\"абв\":          \"вба\",\n\t\t\"hello world\":  \"dlrow olleh\",\n\t\t\"aяbяc\":        \"cяbяa\",\n\t}\n\tfor in, want := range cases {\n\t\tif got := Reverse(in); got != want {\n\t\t\tt.Errorf(\"Reverse(%q) = %q, want %q\", in, got, want)\n\t\t}\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-two-sum",
+    "stack": "go",
+    "grades": [
+      "junior"
+    ],
+    "title": "Two Sum",
+    "statement": "Реализуйте TwoSum: возвратите индексы двух чисел (i < j), в сумме дающих target. Если такой пары нет — пустой срез. Гарантировано, что решение (если есть) единственно; одно число нельзя использовать дважды.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// TwoSum возвращает индексы двух чисел (i < j), в сумме дающих target.\n// Если пары нет, возвращает пустой срез.\nfunc TwoSum(nums []int, target int) []int {\n\treturn nil // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport (\n\t\"reflect\"\n\t\"testing\"\n)\n\nfunc TestTwoSum(t *testing.T) {\n\tcases := []struct {\n\t\tnums   []int\n\t\ttarget int\n\t\twant   []int\n\t}{\n\t\t{[]int{2, 7, 11, 15}, 9, []int{0, 1}},\n\t\t{[]int{3, 2, 4}, 6, []int{1, 2}},\n\t\t{[]int{1, 1}, 2, []int{0, 1}},\n\t\t{[]int{3, 3}, 6, []int{0, 1}},\n\t\t{[]int{-10, 8, 6, -4, 2}, -14, []int{0, 3}},\n\t\t{[]int{1, 2, 3}, 100, nil},\n\t}\n\tfor _, c := range cases {\n\t\tgot := TwoSum(c.nums, c.target)\n\t\tif !reflect.DeepEqual(got, c.want) {\n\t\t\tt.Errorf(\"TwoSum(%v, %d) = %v, want %v\", c.nums, c.target, got, c.want)\n\t\t}\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-fizzbuzz",
+    "stack": "go",
+    "grades": [
+      "junior",
+      "middle"
+    ],
+    "title": "FizzBuzz",
+    "statement": "Реализуйте FizzBuzz(n): возвращает срез длины n для чисел 1..n — кратные 3 → \"Fizz\", кратные 5 → \"Buzz\", кратные обоим → \"FizzBuzz\", иначе — запись числа.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// FizzBuzz возвращает срез длины n: для чисел 1..n кратные 3 — \"Fizz\",\n// кратные 5 — \"Buzz\", кратные обоим — \"FizzBuzz\", иначе запись числа.\nfunc FizzBuzz(n int) []string {\n\treturn nil // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport (\n\t\"reflect\"\n\t\"testing\"\n)\n\nfunc TestFizzBuzz(t *testing.T) {\n\twant := []string{\"1\", \"2\", \"Fizz\", \"4\", \"Buzz\", \"Fizz\", \"7\", \"8\", \"Fizz\", \"Buzz\",\n\t\t\"11\", \"Fizz\", \"13\", \"14\", \"FizzBuzz\"}\n\tif got := FizzBuzz(15); !reflect.DeepEqual(got, want) {\n\t\tt.Errorf(\"FizzBuzz(15) = %v\", got)\n\t}\n\tif got := FizzBuzz(0); len(got) != 0 {\n\t\tt.Errorf(\"FizzBuzz(0) = %v, want []\", got)\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-strstr",
+    "stack": "go",
+    "grades": [
+      "middle"
+    ],
+    "title": "Поиск подстроки",
+    "statement": "Реализуйте FindSubstr(haystack, needle): индекс первого вхождения needle в haystack или -1. Пустая needle считается вхождением в 0-ю позицию.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// FindSubstr возвращает индекс первого вхождения needle в haystack, или -1.\n// Пустая needle вхождением в позицию 0 считается.\nfunc FindSubstr(haystack, needle string) int {\n\treturn -1 // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport \"testing\"\n\nfunc TestFindSubstr(t *testing.T) {\n\tcases := []struct{ haystack, needle string; want int }{\n\t\t{\"hello world\", \"world\", 6},\n\t\t{\"hello\", \"xyz\", -1},\n\t\t{\"abcabc\", \"abc\", 0},\n\t\t{\"абвабв\", \"бв\", 1},\n\t\t{\"anything\", \"\", 0},\n\t\t{\"\", \"\", 0},\n\t\t{\"\", \"x\", -1},\n\t}\n\tfor _, c := range cases {\n\t\tif got := FindSubstr(c.haystack, c.needle); got != c.want {\n\t\t\tt.Errorf(\"FindSubstr(%q, %q) = %d, want %d\", c.haystack, c.needle, got, c.want)\n\t\t}\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-lru-cache",
+    "stack": "go",
+    "grades": [
+      "senior",
+      "staff"
+    ],
+    "title": "LRU-кэш",
+    "statement": "Реализуйте LRU-кэш ёмкости capacity (методы Get/Put). Get по ключу возвращает значение и помечает ключ недавно использованным; Put добавляет/обновляет, а при переполнении вытесняет давно не использовавшийся ключ. Get несуществующего ключа → (\"\", false).",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// LRU — LRU-кэш строковых значений.\ntype LRU struct{}\n\n// NewLRU создаёт кэш ёмкости capacity (capacity >= 1).\nfunc NewLRU(capacity int) *LRU {\n\treturn &LRU{} // TODO: реализуйте\n}\n\n// Get возвращает значение и помечает ключ recently used.\nfunc (c *LRU) Get(key string) (string, bool) {\n\treturn \"\", false // TODO: реализуйте\n}\n\n// Put добавляет или обновляет пару key/value.\nfunc (c *LRU) Put(key, value string) {\n\t// TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport \"testing\"\n\nfunc TestLRUEviction(t *testing.T) {\n\tc := NewLRU(2)\n\tc.Put(\"a\", \"1\")\n\tc.Put(\"b\", \"2\")\n\tif v, ok := c.Get(\"a\"); !ok || v != \"1\" {\n\t\tt.Fatalf(\"Get(a) = %q, %v; want 1, true\", v, ok)\n\t}\n\t// a только что использовался — вытеснится b.\n\tc.Put(\"c\", \"3\")\n\tif _, ok := c.Get(\"b\"); ok {\n\t\tt.Error(\"b должен быть вытеснен\")\n\t}\n\tif v, ok := c.Get(\"a\"); !ok || v != \"1\" {\n\t\tt.Errorf(\"Get(a) после вытеснения = %q, %v\", v, ok)\n\t}\n\tif v, ok := c.Get(\"c\"); !ok || v != \"3\" {\n\t\tt.Errorf(\"Get(c) = %q, %v\", v, ok)\n\t}\n}\n\nfunc TestLRUUpdate(t *testing.T) {\n\tc := NewLRU(1)\n\tc.Put(\"a\", \"1\")\n\tc.Put(\"a\", \"2\")\n\tif v, ok := c.Get(\"a\"); !ok || v != \"2\" {\n\t\tt.Errorf(\"обновление не сработало: %q, %v\", v, ok)\n\t}\n\tif _, ok := c.Get(\"nope\"); ok {\n\t\tt.Error(\"несуществующий ключ вернул ok=true\")\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-parallel-sum",
+    "stack": "go",
+    "grades": [
+      "senior",
+      "staff"
+    ],
+    "title": "Параллельная сумма",
+    "statement": "Реализуйте ParallelSum(nums, workers): сумму элементов nums, вычисленную на workers горутинах (workers >= 1; больше длины срезa — допустимо). Пустой срез → 0. Не гоняйте данные (race) — проверят -race.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// ParallelSum суммирует элементы nums, используя workers горутины.\nfunc ParallelSum(nums []int, workers int) int {\n\treturn 0 // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport \"testing\"\n\nfunc TestParallelSum(t *testing.T) {\n\tif got := ParallelSum(nil, 4); got != 0 {\n\t\tt.Errorf(\"пустой срез: %d\", got)\n\t}\n\tnums := make([]int, 10_000)\n\twant := 0\n\tfor i := range nums {\n\t\tnums[i] = i\n\t\twant += i\n\t}\n\tfor _, w := range []int{1, 2, 4, 8, 100} {\n\t\tif got := ParallelSum(nums, w); got != want {\n\t\t\tt.Errorf(\"workers=%d: got %d, want %d\", w, got, want)\n\t\t}\n\t}\n\tif got := ParallelSum([]int{-1, 1, -2, 2}, 2); got != 0 {\n\t\tt.Errorf(\"знаки: %d\", got)\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "py-palindrome",
+    "stack": "python",
+    "grades": [
+      "junior"
+    ],
+    "title": "Палиндром",
+    "statement": "Реализуйте is_palindrome(s): True, если строка s — палиндром, если сравнивать только буквы и цифры (в нижнем регистре). Пустая строка — палиндром.",
+    "files": {
+      "solution.py": "def is_palindrome(s: str) -> bool:\n    \"\"\"True, если s — палиндром по буквам и цифрам (без регистра и знаков).\"\"\"\n    return False  # TODO: реализуйте\n",
+      "test_solution.py": "import pytest\n\nfrom solution import is_palindrome\n\n\n@pytest.mark.parametrize(\n    \"s, want\",\n    [\n        (\"A man, a plan, a canal: Panama\", True),\n        (\"12321\", True),\n        (\"abac\", False),\n        (\"\", True),\n        (\"race a car\", False),\n        (\"А роза упала на лапу Азора\", True),\n    ],\n)\ndef test_is_palindrome(s, want):\n    assert is_palindrome(s) is want\n"
+    }
+  },
+  {
+    "id": "py-two-sum",
+    "stack": "python",
+    "grades": [
+      "junior"
+    ],
+    "title": "Two Sum",
+    "statement": "Реализуйте two_sum(nums, target): кортеж индексов (i < j) двух чисел, в сумме дающих target, или None. Одно число нельзя использовать дважды.",
+    "files": {
+      "solution.py": "def two_sum(nums, target):\n    \"\"\"Индексы (i < j) двух чисел с суммой target, или None.\"\"\"\n    return None  # TODO: реализуйте\n",
+      "test_solution.py": "from solution import two_sum\n\n\ndef test_two_sum():\n    assert two_sum([2, 7, 11, 15], 9) == (0, 1)\n    assert two_sum([3, 2, 4], 6) == (1, 2)\n    assert two_sum([1, 1], 2) == (0, 1)\n    assert two_sum([-1, -2, -3], -5) == (0, 2)\n    assert two_sum([1, 2, 3], 100) is None\n"
+    }
+  },
+  {
+    "id": "py-word-count",
+    "stack": "python",
+    "grades": [
+      "junior",
+      "middle"
+    ],
+    "title": "Счётчик слов",
+    "statement": "Реализуйте word_count(text): словарь слово→вхождения (слово — в нижнем регистре, разбиение по пробельным символам; пустая строка → пустой словарь).",
+    "files": {
+      "solution.py": "def word_count(text: str) -> dict:\n    \"\"\"Словарь слово (lowercase) -> количество вхождений.\"\"\"\n    return {}  # TODO: реализуйте\n",
+      "test_solution.py": "from solution import word_count\n\n\ndef test_word_count():\n    assert word_count(\"\") == {}\n    assert word_count(\"   \") == {}\n    assert word_count(\"the cat and the dog\") == {\"the\": 2, \"cat\": 1, \"and\": 1, \"dog\": 1}\n    assert word_count(\"A a A\") == {\"a\": 3}\n"
+    }
+  },
+  {
+    "id": "py-flatten",
+    "stack": "python",
+    "grades": [
+      "middle"
+    ],
+    "title": "Распрямление списка",
+    "statement": "Реализуйте flatten(nested): возвращает плоский список из вложенных списков/кортежей произвольной глубины. Скаляры остаются как есть.",
+    "files": {
+      "solution.py": "def flatten(nested):\n    \"\"\"Плоский список из вложенных списков/кортежей произвольной глубины.\"\"\"\n    return []  # TODO: реализуйте\n",
+      "test_solution.py": "from solution import flatten\n\n\ndef test_flatten():\n    assert flatten([]) == []\n    assert flatten([1, 2, 3]) == [1, 2, 3]\n    assert flatten([1, [2, [3, [4]]], (5, 6)]) == [1, 2, 3, 4, 5, 6]\n    assert flatten([[[1]]]) == [1]\n    assert flatten([\"a\", [\"b\", (\"c\", [\"d\"])]]) == [\"a\", \"b\", \"c\", \"d\"]\n"
+    }
+  },
+  {
+    "id": "py-lru-cache",
+    "stack": "python",
+    "grades": [
+      "senior"
+    ],
+    "title": "LRU-кэш",
+    "statement": "Реализуйте make_lru(capacity): объект с методами get(key) -> значение или None и put(key, value). Get помечает ключ недавно использованным; при переполнении вытесняется давно не использовавшийся ключ.",
+    "files": {
+      "solution.py": "def make_lru(capacity: int):\n    \"\"\"Объект-кэш: obj.get(key) -> значение или None; obj.put(key, value).\n\n    Поведание: LRU, ёмкость capacity.\n    \"\"\"\n    raise NotImplementedError  # TODO: реализуйте\n",
+      "test_solution.py": "from solution import make_lru\n\n\ndef test_lru_eviction():\n    c = make_lru(2)\n    c.put(\"a\", 1)\n    c.put(\"b\", 2)\n    assert c.get(\"a\") is 1\n    c.put(\"c\", 3)  # вытесняется \"b\"\n    assert c.get(\"b\") is None\n    assert c.get(\"a\") is 1\n    assert c.get(\"c\") is 3\n\n\ndef test_lru_update():\n    c = make_lru(1)\n    c.put(\"a\", 1)\n    c.put(\"a\", 2)\n    assert c.get(\"a\") is 2\n    assert c.get(\"x\") is None\n"
+    }
+  },
+  {
+    "id": "py-rate-limiter",
+    "stack": "python",
+    "grades": [
+      "senior",
+      "staff"
+    ],
+    "title": "Ограничитель частоты",
+    "statement": "Реализуйте RateLimiter — ограничитель типа «конвейер с токенами» (token bucket) ёмкости 1: rate_per_sec токенов в секунду, источник времени now() (инъекция для тестов, по умолчанию time.monotonic). allow() возвращает True, если доступен токен (потребляет его); при нехватке — False.Bucket не должен превышать 1 токен.",
+    "files": {
+      "solution.py": "import time\n\n\nclass RateLimiter:\n    \"\"\"Ограничитель «bucket с токенами» ёмкости 1.\n\n    Args:\n        rate_per_sec: токенов в секунду.\n        now: источник времени (по умолчанию time.monotonic) — для тестов.\n    \"\"\"\n\n    def __init__(self, rate_per_sec: float, now=None):\n        # TODO: реализуйте\n        raise NotImplementedError\n\n    def allow(self) -> bool:\n        \"\"\"Try consume a token.\"\"\"\n        raise NotImplementedError  # TODO: реализуйте\n",
+      "test_solution.py": "from solution import RateLimiter\n\n\nclass Clock:\n    def __init__(self):\n        self.t = 0.0\n\n    def __call__(self):\n        return self.t\n\n    def advance(self, dt):\n        self.t += dt\n\n\ndef test_rate_limiter():\n    clk = Clock()\n    rl = RateLimiter(rate_per_sec=2.0, now=clk)\n    assert rl.allow() is True      # стартовый токен\n    assert rl.allow() is False     # бакет пуст\n    clk.advance(0.5)               # 2.0 * 0.5 = 1 токен\n    assert rl.allow() is True\n    assert rl.allow() is False\n    clk.advance(10.0)              # переполнение ограничен ёмкостью 1\n    assert rl.allow() is True\n    assert rl.allow() is False\n"
+    }
+  }
+]

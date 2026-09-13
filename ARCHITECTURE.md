@@ -123,7 +123,7 @@ erDiagram
 | POST | /api/v1/sessions | `{grade, stack}` → `{id, ws_url, duration_limit_s}`; при 0 минут — 402 |
 | GET | /api/v1/sessions/{id} | состояние: stage, status, time_left_s, task (если назначена) |
 | POST | /api/v1/sessions/{id}/pause · /resume · /finish | управление (FR-S6, FR-B4, US-8) |
-| POST | /api/v1/sessions/{id}/runs | `{files, action:"test"}` → результат (4.4) |
+| POST | /api/v1/sessions/{id}/runs | `{files, action:"test", task_id?}` → результат (4.4); только стадия `livecode`, иначе 409 |
 | PUT | /api/v1/sessions/{id}/whiteboard | `{state, png?}` — сохранение холста |
 | GET | /api/v1/sessions/{id}/report | отчёт (202, пока генерируется) |
 | GET | /api/v1/sessions/{id}/events | транскрипт/события (история, FR-A4) |
@@ -154,13 +154,30 @@ erDiagram
 | POST | /api/v1/tts | `{"text","speaker"}` → 200 `audio/pcm` (PCM16 16 кГц, chunked-стрим) |
 | GET | /api/v1/health | `{"stt":{"model","device"},"tts":{"speakers":[]}}` |
 
-### 4.4. sandbox-сервис
+### 4.4. sandbox-сервис (WP-6)
 | Метод | Путь | Контракт |
 |---|---|---|
-| POST | /api/v1/sessions/{id}/runs | `{files{path:content}, action:"test"}` → `{exit_code, stdout, stderr, duration_ms, passed, tests[{name,passed}]}` (≤ 10 с, ADR-003) |
+| POST | /api/v1/sessions/{id}/runs | `{stack:"go"\|"python", files{path:content}, action:"test", task_id?}` → `{exit_code, stdout, stderr, duration_ms, passed, timeout, tests[{name,passed}]}` (≤ 10 с, ADR-003) |
+| GET | /api/v1/tasks?stack=&grade= | банк задач: `[{id, stack, grades[], title, statement, files}]` |
+| GET | /healthz | `{status, service, mode, tasks}` |
 
-Жизненный цикл контейнера ведёт оркестратор: create — на входе в Live-Code, destroy — по
-завершении сессии (fail-closed: без контейнера стадии Live-Code недоступна, 503).
+**Режимы (ADR-003).** `SANDBOX_MODE=docker` — `docker run --rm --network=none --cpus=1
+--memory=512m --pids-limit=128 --read-only --tmpfs /tmp:size=128m --user 1000:1000`
+(образы `golang:1.24` / `python:3.12-slim`); без docker-демона — fail-closed, 503.
+`SANDBOX_MODE=subprocess` (dev-по-умолчанию) — интерпретатор хоста в изолированном cwd
+(рабочие каталоги **не в /tmp**: Go игнорирует `go.mod` в системном temp-root),
+минимальный env, таймаут 10 с (убийство группы процессов), ограничение вывода 1 МБ,
+`GOPROXY=off`. Команды: Go — `go test -count=1 -json ./...` (tests[] — парсинг `-json`),
+Python — `python3 -m pytest -q`.
+
+**Банк задач** — 12 задач (6 Go + 6 Python), теги по грейдам, `go:embed`; зависимости —
+только stdlib (сеть в контейнере запрещена). Задача: стартовый `solution.*` (стуб) +
+скрытые тесты; `task_id` в `/runs` — валидация по банку и запись в `submissions`.
+
+api-прокси: `POST /api/v1/sessions/{id}/runs` (requireAuth, стадия `livecode`) → sandbox
+`SANDBOX_URL` (15 с) → сохранение в `submissions` + событие `code_run` + `run_result` по WS.
+**Отклонение от ADR-003 (MVP):** контейнер на каждый run (простота); long-lived контейнер
+на сессию — бэклог Operations.
 
 ## 5. Последовательности
 
@@ -259,3 +276,7 @@ sequenceDiagram
 - v0.4.2 (2026-09-13) — Implementation WP-3: §4.2 — auth WS (token/Bearer, 401 до апгрейда),
   ui-событие `utterance`; §3 — расширение kind в session_events (session_created/paused/resumed/
   finished/aborted); пауза > порога → aborted (SESSION_PAUSE_TIMEOUT_S).
+- v0.4.3 (2026-09-14) — Implementation WP-6: §4.4 — контракт sandbox (stack/files/task_id,
+  `timeout` в ответе, GET /api/v1/tasks, банк 12 задач go:embed), режимы docker/subprocess
+  (рабочие каталоги вне /tmp — ограничение Go), api-прокси /runs + submissions + `code_run`
+  + `run_result` по WS; MVP-отклонение: контейнер на run (long-lived — бэклог).

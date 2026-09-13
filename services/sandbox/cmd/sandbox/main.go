@@ -1,6 +1,6 @@
 // Command sandbox — сандбокс выполнения кода кандидата (ARCHITECTURE.md §4.4, ADR-003).
-// WP-1: health + заглушка /runs (501). WP-6: Docker-runner (лимиты, --network=none)
-// и dev-fallback subprocess.
+// WP-6: runner (docker --network=none + лимиты / subprocess dev-fallback),
+// банк задач (go:embed), POST /runs, GET /tasks, GET /healthz.
 package main
 
 import (
@@ -13,6 +13,9 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/stelmakhdigital/grade-iv/services/sandbox/internal/runner"
+	"github.com/stelmakhdigital/grade-iv/services/sandbox/internal/tasks"
 )
 
 func getenv(key, def string) string {
@@ -23,39 +26,103 @@ func getenv(key, def string) string {
 }
 
 // buildMux — маршруты сервиса (вынесено для тестов).
-func buildMux(mode string, log *slog.Logger) *http.ServeMux {
+func buildMux(mode string, bank *tasks.Bank, rn *runner.Runner, log *slog.Logger) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"status":  "ok",
 			"service": "grade-sandbox",
 			"mode":    mode,
+			"tasks":   bank.Count(),
 		})
 	})
-	mux.HandleFunc("POST /api/v1/sessions/{id}/runs", func(w http.ResponseWriter, r *http.Request) {
-		sessionID := r.PathValue("id")
-		log.Info("runs: ожидает реализации (WP-6)", "session", sessionID)
-		writeJSON(w, http.StatusNotImplemented, map[string]string{
-			"code":    "not_implemented",
-			"message": "sandbox runner — реализация в WP-6",
-		})
-	})
+	mux.HandleFunc("GET /api/v1/tasks", handleTasksList(bank))
+	mux.HandleFunc("POST /api/v1/sessions/{id}/runs", handleRun(mode, bank, rn, log))
 	return mux
+}
+
+// handleTasksList — GET /api/v1/tasks?stack=go&grade=middle.
+func handleTasksList(bank *tasks.Bank) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		writeJSON(w, http.StatusOK, bank.List(q.Get("stack"), q.Get("grade")))
+	}
+}
+
+// runRequest — тело POST /runs (ARCHITECTURE.md §4.4).
+type runRequest struct {
+	Stack  string            `json:"stack"` // go | python
+	Action string            `json:"action"`
+	Files  map[string]string `json:"files"`
+	TaskID string            `json:"task_id"`
+}
+
+// handleRun — POST /api/v1/sessions/{id}/runs → {exit_code, stdout, stderr, duration_ms, passed, tests[]}.
+func handleRun(mode string, bank *tasks.Bank, rn *runner.Runner, log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sessionID := r.PathValue("id")
+		var req runRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, errBody("invalid_request", "ожидается JSON {stack, action, files}"))
+			return
+		}
+		if req.Action == "" {
+			req.Action = "test"
+		}
+		if req.Action != "test" {
+			writeJSON(w, http.StatusBadRequest, errBody("unsupported_action", "MVP: только action=test"))
+			return
+		}
+		if req.TaskID != "" {
+			if _, ok := bank.Get(req.TaskID); !ok {
+				writeJSON(w, http.StatusBadRequest, errBody("unknown_task", "задача не найдена в банке: "+req.TaskID))
+				return
+			}
+		}
+		log.Info("run", "session", sessionID, "stack", req.Stack, "task", req.TaskID, "mode", mode)
+		res, err := rn.Run(r.Context(), req.Stack, req.Files)
+		if err != nil {
+			switch {
+			case errors.Is(err, runner.ErrUnsupportedStack),
+				errors.Is(err, runner.ErrBadFiles):
+				writeJSON(w, http.StatusBadRequest, errBody("invalid_request", err.Error()))
+			case errors.Is(err, runner.ErrNoDocker):
+				writeJSON(w, http.StatusServiceUnavailable, errBody("sandbox_unavailable",
+					"docker недоступен на узле (SANDBOX_MODE=docker)"))
+			default:
+				log.Error("run", "session", sessionID, "err", err)
+				writeJSON(w, http.StatusBadGateway, errBody("sandbox_error", "ошибка запуска кода"))
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+	}
+}
+
+func errBody(code, msg string) map[string]string {
+	return map[string]string{"code": code, "message": msg}
 }
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	addr := getenv("ADDR", ":8200")
-	mode := getenv("SANDBOX_MODE", "docker")
+	mode := getenv("SANDBOX_MODE", "subprocess") // dev-по-умолчанию: без docker-демона (prod: docker, compose)
+
+	bank, err := tasks.Default()
+	if err != nil {
+		logger.Error("tasks", "err", err)
+		os.Exit(1)
+	}
+	rn := runner.New(runner.Config{Mode: mode})
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           withLogging(buildMux(mode, logger), logger),
+		Handler:           withLogging(buildMux(mode, bank, rn, logger), logger),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	go func() {
-		logger.Info("sandbox started", "addr", addr, "mode", mode)
+		logger.Info("sandbox started", "addr", addr, "mode", mode, "tasks", bank.Count())
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("listen", "err", err)
 			os.Exit(1)

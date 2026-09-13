@@ -19,25 +19,28 @@ import (
 
 // Server — HTTP-сервер: хендлеры + зависимости.
 type Server struct {
-	cfg      *config.Config
-	users    *db.UserStore
-	sessions *db.SessionStore
-	engine   *session.Engine
-	log      *slog.Logger
+	cfg         *config.Config
+	users       *db.UserStore
+	sessions    *db.SessionStore
+	submissions *db.SubmissionStore
+	engine      *session.Engine
+	log         *slog.Logger
 }
 
 // New собирает сервер.
 func New(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *slog.Logger) *Server {
 	users := db.NewUserStore(database, dialect)
 	sessions := db.NewSessionStore(database, dialect)
+	submissions := db.NewSubmissionStore(database, dialect)
 	engine := session.New(sessions, users, log,
 		session.WithPauseTimeout(time.Duration(cfg.PauseTimeoutS)*time.Second))
 	return &Server{
-		cfg:      cfg,
-		users:    users,
-		sessions: sessions,
-		engine:   engine,
-		log:      log,
+		cfg:         cfg,
+		users:       users,
+		sessions:    sessions,
+		submissions: submissions,
+		engine:      engine,
+		log:         log,
 	}
 }
 
@@ -57,6 +60,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/sessions", s.requireAuth(http.HandlerFunc(s.handleSessionsList)))
 	mux.Handle("GET /api/v1/sessions/{id}", s.requireAuth(http.HandlerFunc(s.handleSessionGet)))
 	mux.Handle("POST /api/v1/sessions/{id}/{action}", s.requireAuth(http.HandlerFunc(s.handleSessionAction)))
+	// Более специфичный путь (литеральный сегмент) — приоритет над {action}.
+	mux.Handle("POST /api/v1/sessions/{id}/runs", s.requireAuth(http.HandlerFunc(s.handleSessionRuns)))
 	mux.Handle("GET /api/v1/sessions/{id}/events", s.requireAuth(http.HandlerFunc(s.handleSessionEvents)))
 
 	// Голосовой канал (WP-3, ADR-001): auth — токен в query/заголовке.
