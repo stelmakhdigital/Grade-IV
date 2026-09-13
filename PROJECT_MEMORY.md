@@ -68,6 +68,7 @@
 | 28 | 2026-09-14 | WP-5: движок интервьюера бессостойный к рестарту — контекст хода всегда из БД (сессия + последние 20 реплик из session_events); LLM — синхронный ход в read-loop (детерминизм + правило единственного писателя), неготовность LLM → стандартная fallback-реплика ai_text (FR-V8), сессия не прерывается; `LLM_MOCK=1` — мок для dev/CI (ADR-005). Голосовая асинхронная оркестрация (VAD+STT+стриминг TTS) — WP-4/8 |
 | 29 | 2026-09-14 | WP-4: STT faster-whisper (lazy load singleton+lock, CPU int8, VAD-фильтр Silero-onnx против галлюцинаций, принимает raw PCM16 и WAV, молчание → text=""); TTS Silero v5 (официальный torch-пакет v5_ru с models.silero.ai — pypi-обёртка silero 0.5.5 оказалась устаревшей; 5 рус. спикеров; нативные 24 кГц → ресемплинг 24→16 кГц (линейная интерполяция) в контракт; `TTS_SPEAKER` с fallback + warning). `VOICE_STT_PROVIDER`/`VOICE_TTS_PROVIDER`: реальные по умолчанию, `fake` для CI. Bэклог: стриминг TTS по предложениям, GPU-конфиг, кэш моделей в docker-образ |
 | 30 | 2026-09-14 | WP-4/WP-6: окружение без pip/ensurepip — venv создаётся `python3 -m venv --without-pip` + get-pip.py; torch ставится с CPU-индекса pytorch.org/whl/cpu (иначе nvidia-* ~2GB); make install учитывает (Makefile, только voice-цель) |
+| 31 | 2026-09-14 | Голосовой конвейер (ADR-002) реализован в api: PCM-кадры → энергетический VAD (RMS-порог, тишина-хвост, мин/макс реплики) → voice /stt → движок интервьюера → voice /tts → бинарные кадры {seq,flags LE}+PCM16. Ходовой режим: turn-taking (время TTS/занятость конвейера — микрофон не слушается, barge-in вне скоупа), один параллельный голосовой ход. MVP-упрощение VAD — энергетический (без onnx в Go; точная Silero-VAD-модель — бэклог). Kонтракт кадров зафиксирован: 4-байтный заголовок LE, 250 мс, bit0 flags — конец потока. LLM-ответ и приветствие озвучиваются; сбой voice — warn-лог, текстовый режим жив |
 
 ## Ограничения
 - Общение с пользователем — на русском.
@@ -244,8 +245,33 @@
   - Bэклог (решение #29): стриминг TTS по предложениям, GPU-конфиг, кэш моделей в образ,
     STT_MODEL=small в CI.
 
+- **2026-09-14** (Фаза 3) — Шаг «голосовой конвейер» (ADR-002) в api (Go):
+  - `internal/voicesvc`: HTTP-клиент voice-сервиса: STT (multipart, PCM16 16 кГц,
+    молчание → text=""), TTS (PCM в память, MVP), Healthy; таймауты 30/60 с.
+  - `internal/vad`: энергетический VAD реплик (RMS-порог `VAD_RMS_THRESHOLD`,
+    конец по тишине `VAD_END_SILENCE_MS`, MinSpeechMS 400, MaxSpeechMS 20000 —
+    принудительный срез); юнит-тесты (тишина/хвост/всплеск/срез/пауза внутри реплики).
+  - Пайплайн (`voice_pipeline.go` + ws.go): бинарные кадры → VAD → goroutine
+    STT → `runCandidateTurn` (общий с текстовым `utterance`): событие
+    user_utterance + transcript(user) → LLM → transcript(ai) + ai_text →
+    streamAIAudio (TTS → кадры {seq,flags LE}+PCM16 через `engine.SendBinary`).
+    Приветствие озвучивается. Turn-taking: busy/ttsActive — микрофон не слушается
+    (SRS §8), один параллельный ход; nudge-цикл тоже уважает busy/ttsActive.
+  - Движок: `SendBinary` (тот же connMu — правило единственного писателя).
+  - Конфиг: VAD_END_SILENCE_MS (900), VAD_RMS_THRESHOLD (500).
+  - Тесты: voicesvc (httptest-мок voice), vad (6 кейсов), WS-интеграционные:
+    полный контур (тон → transcript/ai_text → TTS-кадры, события) + формат
+    заголовков кадров (seq монотонен, end-флаг на последнем). go vet + go test
+    + go test -race — зелёные.
+  - Live-smoke (api + voice uvicorn с fake-провайдерами + mock-LLM): старт →
+    приветствие + 2 TTS-кадра → «речь» (синусоидальные кадры) → VAD → STT
+    → transcript/user → ИИ → transcript/ai + ai_text + 2 TTS-кадра → события
+    user_utterance/ai_utterance. LIVE6 VOICE SMOKE OK.
+  - ARCHITECTURE.md v0.4.5 (контракт кадров, пайплайн, VAD_RMS_THRESHOLD).
+  - Подводный камень nhooyr: Read с истёкшим ctx **закрывает соединение**
+    (timeoutLoop) — тесты/клиенты не делают «висящие» чтения с дедлайном.
+
 ## Next steps
-1. Коммиты WP-4 и WP-5 (изменения в working tree; тесты зелёные) — ждёт разрешения.
-2. Интеграция голосового конвейера (WP-4 STT в оркестратор: VAD-нарезка реплик PCM → /stt →
-   interviewer → /tts → PCM-кадры ИИ; сейчас — текстовый режим + анти-nudge по PCM).
-3. Frontend WP-7…WP-10 (кабинет, голосовая сессия, Live-Code, System Design).
+1. Коммит шага «голосовой конвейер» — ждёт разрешения (WP-4/WP-5 уже закоммичены: 253bca9, 68be782; roadmap: ebf5537).
+2. Frontend WP-7…WP-10 (кабинет, голосовая сессия с AudioWorklet-микрофоном, Live-Code, System Design).
+3. Бэклоги: стриминг TTS по предложениям, точная Silero-VAD в Go (onnx), GPU-конфиг, long-lived контейнеры sandbox.

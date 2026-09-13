@@ -145,7 +145,12 @@ erDiagram
   `{"type":"report_ready"}` ·
   `{"type":"degraded","mode":"text","reason":...}` (FR-V8) ·
   `{"type":"error","code":...,"msg":...}`
-- **S→C** (бинарные): кадры аудио ИИ — 4-байтный заголовок `{seq u16, flags u16}` + PCM16 16 кГц mono.
+- **S→C** (бинарные): кадры аудио ИИ — 4-байтный заголовок `{seq u16 LE, flags u16 LE}`
+  (все little-endian) + PCM16 16 кГц mono; `seq` — индекс кадра в потоке реплики
+  (с 0 на каждую новую реплику), `flags` bit0 (0x01) — последний кадр потока.
+  Кадры по 250 мс (8000 байт). Реализовано (шаг «голосовой конвейер»): стримит
+  `engine.SendBinary` (правило единственного писателя), источники — приветствие,
+  ответы на реплики (TTS).
 - **Оркестрация (WP-5)**: `utterance` → движок интервьюера (LLM, ADR-005) → `ai_text`
   + события `user_utterance`/`ai_utterance` (бессостойный к рестарту: контекст — из БД).
   Приветствие — на подключении к новой сессии (stage voice, нет `ai_utterance`);
@@ -155,6 +160,16 @@ erDiagram
   стандартная fallback-реплика (`ai_text`), сессия не прерывается (FR-V8).
   PCM-кадры считаются активностью (анти-nudge); голосовой конвейер VAD+STT — WP-4/8.
   `LLM_MOCK=1` — детерминированный мок (dev без LLM-узла, CI).
+- **Голосовой конвейер (ADR-002, шаг 2026-09-14)**: бинарные кадры кандидата (PCM16,
+  ~250 мс) → энергетический VAD в api (`internal/vad`, порог RMS `VAD_RMS_THRESHOLD`,
+  конец реплики по тишине `VAD_END_SILENCE_MS`, реплика < `MinSpeechMS` — шум,
+  >= `MaxSpeechMS` — срез) → `voice /stt` (multipart) → ход кандидата (текстовый путь и
+  `utterance` — одна функция `runCandidateTurn`) → `voice /tts` → бинарные кадры S→C.
+  Ходовой режим (SRS §8): пока конвейер занят или ИИ «говорит» (TTS-стрим),
+  микрофон не слушается (barge-in — вне скоупа); следующий голосовой ход один
+  (повторные реплики в буфере VAD теряются). Сбой voice-сервиса — только warn-лог,
+  текстовый режим (`utterance`) продолжает работать. Точная VAD-модель (Silero onnx
+  в Go) — бэклог (в voice-сервисе VAD-фильтр STT уже есть).
 
 ### 4.3. voice-сервис (WP-4)
 | Метод | Путь | Контракт |
@@ -266,6 +281,7 @@ sequenceDiagram
 | `LOG_LEVEL` | info | уровень логов (NFR-9) |
 | `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` | http://localhost:8300/v1 / Qwen3-4B / "" | OpenAI-совместимый (ADR-005); prod: vLLM + Qwen3.8-27B на AI-узле (ЛВС) |
 | `LLM_MOCK` | "" | `1` — детерминированный LLM-мок (dev без LLM-узла, CI) |
+| `VAD_RMS_THRESHOLD` | 500 | VAD: порог RMS int16 — выше «речь есть» (шаблон: голос ~1000–10000, тишина < 200) |
 | `VOICE_URL` | http://localhost:8100 | Адрес AI-узла (voice: `/api/v1/stt|tts`); prod — IP в ЛВС |
 | `STT_MODEL` | small (dev) / large-v3-russian (prod) | faster-whisper |
 | `TTS_SPEAKER` | ru_01 | спикер Silero v5 |
@@ -295,6 +311,11 @@ sequenceDiagram
   `timeout` в ответе, GET /api/v1/tasks, банк 12 задач go:embed), режимы docker/subprocess
   (рабочие каталоги вне /tmp — ограничение Go), api-прокси /runs + submissions + `code_run`
   + `run_result` по WS; MVP-отклонение: контейнер на run (long-lived — бэклог).
+- v0.4.5 (2026-09-14) — Implementation «голосовой конвейер» (ADR-002): §4.2 —
+  контракт бинарных кадров ({seq,flags} LE, 250 мс) и пайплайн PCM→VAD→STT→LLM→TTS→кадры
+  (turn-taking, один параллельный ход, sбой voice — graceful degradation),
+  `engine.SendBinary`, `internal/vad` (энергетический VAD), `internal/voicesvc` (клиент
+  /stt-/tts); §6 — VAD_RMS_THRESHOLD.
 - v0.4.4 (2026-09-14) — Implementation WP-4/WP-5: §4.3 — voice-контракты реализованы
   (raw PCM/WAV, loaded-флаги, fake-режим, Silero v5 + ресемплинг 24→16 кГц); §4.2 —
   оркестрация интервьюера (utterance → ai_text, приветствие, task на livecode, nudge по

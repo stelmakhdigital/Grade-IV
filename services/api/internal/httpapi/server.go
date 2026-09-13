@@ -17,6 +17,7 @@ import (
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/interviewer"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/session"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/voicesvc"
 )
 
 // Server — HTTP-сервер: хендлеры + зависимости.
@@ -27,6 +28,7 @@ type Server struct {
 	submissions *db.SubmissionStore
 	engine      *session.Engine
 	interviewer *interviewer.Interviewer
+	voice       *voicesvc.Client
 	log         *slog.Logger
 }
 
@@ -50,6 +52,7 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 	engine := session.New(sessions, users, log,
 		session.WithPauseTimeout(time.Duration(cfg.PauseTimeoutS)*time.Second))
 	interviewer := interviewer.New(provider, sessions, log)
+	voice := voicesvc.NewClient(cfg.VoiceURL)
 	return &Server{
 		cfg:         cfg,
 		users:       users,
@@ -57,6 +60,7 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		submissions: submissions,
 		engine:      engine,
 		interviewer: interviewer,
+		voice:       voice,
 		log:         log,
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/interviewer"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/session"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/vad"
 	"nhooyr.io/websocket"
 )
 
@@ -83,7 +84,10 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 	s.engine.SendTo(id, map[string]any{"type": "stage", "name": snap.Stage, "task": nil})
 	s.log.Info("ws: клиент подключился", "session", id, "user", userID, "stage", snap.Stage)
 
-	ws := &wsSession{id: id}
+	vadCfg := vad.DefaultConfig()
+	vadCfg.EndSilenceMS = s.cfg.VADEndSilenceMS
+	vadCfg.RMSThreshold = s.cfg.VADRMSThreshold
+	ws := &wsSession{id: id, ctx: ctx, vad: vad.New(vadCfg)}
 	ws.touch()
 
 	// Первая реплика ИИ: кандидат ещё не говорил и ИИ не приветствовал (ai_utterance).
@@ -92,6 +96,9 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 		text, err := s.interviewer.OnStageChanged(ctx, id,
 			"Кандидат только что начал интервью. Кратко поприветствуй и задай первый вопрос.")
 		s.sendInterviewerText(ctx, id, text, err)
+		if err == nil {
+			s.streamAIAudio(ws, text) // приветствие озвучивается (TTS)
+		}
 	}
 	go s.nudgeLoop(ws, ctx) // решение #7: ИИ заполняет долгие паузы
 
@@ -101,10 +108,15 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 	s.log.Info("ws: клиент отключился", "session", id)
 }
 
-// wsSession — состояние WS-соединения сессии (для nudge по молчанию).
+// wsSession — состояние WS-соединения сессии: nudge по молчанию, VAD и
+// голосовой пайплайн (ADR-002). Пишет в conn только через engine (одно писательство).
 type wsSession struct {
 	id         int64
-	lastActive int64 // unixnano
+	ctx        context.Context // контекст соединения (отмена при обрыве)
+	lastActive int64           // unixnano
+	vad        *vad.Detector
+	busy       atomic.Bool // голосовой ход занят (один параллельный, turn-taking)
+	ttsActive  atomic.Bool // ИИ говорит (стрим TTS) — микрофон не слушается
 }
 
 func (w *wsSession) touch() { atomic.StoreInt64(&w.lastActive, time.Now().UnixNano()) }
@@ -131,6 +143,9 @@ func (s *Server) nudgeLoop(ws *wsSession, ctx context.Context) {
 		snap, err := s.engine.Snapshot(ws.id)
 		if err != nil || snap.Status != models.StatusActive || snap.Stage != models.StageVoice {
 			continue
+		}
+		if ws.busy.Load() || ws.ttsActive.Load() {
+			continue // ход/речь ИИ в процессе — nudge не нужен
 		}
 		silent := ws.silentS()
 		if silent < s.cfg.SilenceNudgeS {
@@ -185,17 +200,16 @@ func (s *Server) readLoop(id int64, conn *websocket.Conn, ctx context.Context, w
 		}
 		typ, data, err := conn.Read(ctx)
 		if err != nil {
-			s.log.Debug("ws: pcm-статистика", "session", id, "frames", pcmFrames, "bytes", pcmBytes)
+			s.log.Debug("ws: pcm-статистика", "session", id, "frames", pcmFrames, "bytes", pcmBytes, "err", err)
 			return
 		}
 		ws.touch() // любая активность сдвигает отсчёт nudge
 		switch typ {
 		case websocket.MessageBinary:
-			// PCM16 16 кГц mono (ADR-001). Голосовой конвейер (VAD+STT) — WP-4;
-			// пока кадры принимаются (учёт для метрик + анти-nudge).
+			// PCM16 16 кГц mono (ADR-001) → VAD → голосовой пайплайн (ADR-002).
 			pcmFrames++
 			pcmBytes += len(data)
-			s.log.Debug("ws: pcm-кадр", "session", id, "bytes", len(data), "frames", pcmFrames)
+			s.feedVAD(ws, data)
 		case websocket.MessageText:
 			var msg wsMessage
 			if err := json.Unmarshal(data, &msg); err != nil {
@@ -210,14 +224,14 @@ func (s *Server) readLoop(id int64, conn *websocket.Conn, ctx context.Context, w
 				})
 				continue
 			}
-			s.handleUIEvent(id, &msg)
+			s.handleUIEvent(id, &msg, ws)
 		default: // ping/pong — обрабатывает библиотека
 		}
 	}
 }
 
 // handleUIEvent — диспетчеризация ui-событий (ARCHITECTURE.md §4.2).
-func (s *Server) handleUIEvent(id int64, msg *wsMessage) {
+func (s *Server) handleUIEvent(id int64, msg *wsMessage, ws *wsSession) {
 	ctx := context.Background()
 	switch msg.Name {
 	case "stage_action":
@@ -266,11 +280,8 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage) {
 			return
 		}
 		text := strings.TrimSpace(p.Text)
-		_, _ = s.eventData(ctx, id, "user_utterance", map[string]any{"text": text})
-		// Конвейер (WP-5): реплика → LLM → ai_text. Синхронно: правило единственного
-		// писателя + детерминизм хода; голосовая асинхронная оркестрация — WP-4.
-		reply, err := s.interviewer.OnUserUtterance(ctx, id, text)
-		s.sendInterviewerText(ctx, id, reply, err)
+		// Конвейер хода (WP-5/ADR-002): событие + transcript → LLM → ai_text → TTS.
+		s.runCandidateTurn(ws, text)
 
 	default:
 		s.engine.SendTo(id, wsErr("unknown_ui_event", "неизвестное событие: "+msg.Name))

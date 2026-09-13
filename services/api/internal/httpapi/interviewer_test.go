@@ -3,8 +3,12 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +19,9 @@ import (
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 	"nhooyr.io/websocket"
 )
+
+// discardLog — логгер тестов (по умолчанию тишина; VOCE_TEST_LOG=1 — в stderr).
+var discardLog = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // interviewEnv — окружение с управляемым mock-LLM (NewWithLLM).
 type interviewEnv struct {
@@ -27,6 +34,9 @@ type interviewEnv struct {
 
 func newInterviewEnv(t *testing.T) *interviewEnv {
 	t.Helper()
+	if os.Getenv("VOCE_TEST_LOG") == "1" {
+		discardLog = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	}
 	cfg := &config.Config{
 		Addr:           ":0",
 		DatabaseURL:    "sqlite://:memory:",
@@ -45,7 +55,7 @@ func newInterviewEnv(t *testing.T) *interviewEnv {
 		t.Fatalf("migrate: %v", err)
 	}
 	mock := llm.NewMockProvider()
-	srv := NewWithLLM(cfg, database, dialect, discardLogger(), mock)
+	srv := NewWithLLM(cfg, database, dialect, discardLog, mock)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -174,7 +184,8 @@ func TestInterviewerTerminalSession(t *testing.T) {
 	}
 }
 
-// TestWSUtteranceFlow — полный WS-конвейер: utterance → ai_text (mock-LLM).
+// TestWSUtteranceFlow — полный WS-конвейер: utterance → transcript(user) →
+// transcript(ai) → ai_text (mock-LLM) + событие user_utterance.
 func TestWSUtteranceFlow(t *testing.T) {
 	e := newInterviewEnv(t)
 	conn := dialWS(t, e.ts, e.token, e.session)
@@ -186,12 +197,48 @@ func TestWSUtteranceFlow(t *testing.T) {
 		t.Fatalf("старт: %v", types)
 	}
 
-	// Реплика кандидата → ai_text.
+	// Реплика кандидата → transcript(user), transcript(ai), ai_text.
 	wsWriteJSON(t, conn, map[string]any{"type": "ui", "name": "utterance",
 		"payload": map[string]string{"text": "Расскажи, с чего начать?"}})
-	types = wsReadTypes(t, conn, 1, 3*time.Second)
-	if !startsWith(types[0], "ai_text/") {
-		t.Fatalf("utterance: %v", types)
+	msgs := wsReadRaw(t, conn, 3, 3*time.Second)
+	var whos, types2 []string
+	for _, raw := range msgs {
+		var m map[string]any
+		_ = json.Unmarshal(raw, &m)
+		types2 = append(types2, fmt.Sprint(m["type"]))
+		whos = append(whos, fmt.Sprint(m["who"]))
+	}
+	if types2[0] != "transcript" || whos[0] != "user" {
+		t.Fatalf("transcript user: %v %v", types2, whos)
+	}
+	if types2[1] != "transcript" || whos[1] != "ai" {
+		t.Fatalf("transcript ai: %v %v", types2, whos)
+	}
+	if types2[2] != "ai_text" {
+		t.Fatalf("ai_text: %v", types2)
+	}
+
+	// Событие user_utterance зафиксировано (эндпоинт /events — массив).
+	req, _ := http.NewRequest("GET", e.ts.URL+fmt.Sprintf("/api/v1/sessions/%d/events", e.session), nil)
+	req.Header.Set("Authorization", "Bearer "+e.token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("events: %d", resp.StatusCode)
+	}
+	var events []map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&events)
+	found := false
+	for _, ev := range events {
+		if ev["kind"] == "user_utterance" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("нет события user_utterance: %v", events)
 	}
 }
 
@@ -256,6 +303,30 @@ func TestWSLiveCodeTask(t *testing.T) {
 	if !found {
 		t.Fatalf("задача не передана LLM: %+v", last.Messages)
 	}
+}
+
+// wsReadRaw — прочитать n текстовых сообщений (сырые кадры), таймаут на всё.
+func wsReadRaw(t *testing.T, conn *websocket.Conn, n int, timeout time.Duration) [][]byte {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	out := make([][]byte, 0, n)
+	for len(out) < n {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), remaining)
+		typ, data, err := conn.Read(ctx)
+		cancel()
+		if err != nil {
+			t.Fatalf("ws read raw (%d/%d): %v", len(out), n, err)
+		}
+		if typ != websocket.MessageText {
+			t.Fatalf("ожидался текстовый кадр, получен %v", typ)
+		}
+		out = append(out, data)
+	}
+	return out
 }
 
 func startsWith(s, prefix string) bool {

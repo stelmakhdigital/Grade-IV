@@ -593,6 +593,24 @@ func clamp0(n int) int {
 // SendTo — публичная отправка JSON-сообщения клиенту сессии (безопасно: один писатель).
 func (e *Engine) SendTo(id int64, v any) { e.sendJSON(id, v) }
 
+// SendBinary — отправка бинарного кадра (PCM аудио ИИ, ADR-001; один писатель).
+func (e *Engine) SendBinary(id int64, data []byte) {
+	rt := e.rt(id)
+	if rt == nil {
+		return
+	}
+	rt.connMu.Lock()
+	defer rt.connMu.Unlock()
+	if rt.conn == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := rt.conn.Write(ctx, websocket.MessageBinary, data); err != nil {
+		e.log.Warn("ws: ошибка записи binary", "session", id, "err", err)
+	}
+}
+
 // sendJSON — отправка JSON-сообщения клиенту (безопасно: один писатель).
 func (e *Engine) sendJSON(id int64, v any) {
 	rt := e.rt(id)
