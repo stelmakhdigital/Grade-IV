@@ -303,9 +303,12 @@ func wsErr(code, msg string) map[string]any {
 
 // liveCodeTask — задача Live-Code из банка sandbox (ARCHITECTURE.md §4.4).
 type liveCodeTask struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Statement string `json:"statement"`
+	ID        string            `json:"id"`
+	Title     string            `json:"title"`
+	Statement string            `json:"statement"`
+	// Files — полный набор файлов задачи (включая тесты из банка, §4.4):
+	// кандидат видит их в редакторе и сдаёт обратно в /runs.
+	Files map[string]string `json:"files,omitempty"`
 }
 
 // enterLiveCode — вход на стадию Live-Code (WP-5/6): выбрать задачу из банка,
@@ -327,7 +330,9 @@ func (s *Server) enterLiveCode(ctx context.Context, id int64) {
 	if task != nil {
 		s.engine.SendTo(id, map[string]any{
 			"type": "stage", "name": models.StageLiveCode,
-			"task": map[string]any{"id": task.ID, "title": task.Title, "statement": task.Statement},
+			"task": map[string]any{
+				"id": task.ID, "title": task.Title, "statement": task.Statement, "files": task.Files,
+			},
 		})
 	}
 	text, err := s.interviewer.OnStageChanged(ctx, id, stageNote(task))

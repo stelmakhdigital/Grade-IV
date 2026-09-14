@@ -7,6 +7,7 @@ import {
   login,
   me,
   register,
+  runTests,
   setToken,
   getToken,
 } from './api';
@@ -87,6 +88,22 @@ describe('api-клиент (WP-7)', () => {
     fetchMock.mockResolvedValue(jsonResponse(200, [{ seq: 1, kind: 'finished' }]));
     await listEvents(7);
     expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/sessions/7/events');
+  });
+
+  it('runTests: POST /sessions/{id}/runs {files, action, task_id}', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { exit_code: 0, stdout: 'ok', stderr: '', duration_ms: 12, passed: true, tests: [{ name: 'TestMain', passed: true }] }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const r = await runTests(9, { 'main.go': 'package main' }, 'go-rev');
+    expect(r.passed).toBe(true);
+    const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/v1/sessions/9/runs');
+    expect(JSON.parse(opts.body as string)).toEqual({
+      files: { 'main.go': 'package main' },
+      action: 'test',
+      task_id: 'go-rev',
+    });
   });
 
   it('setToken(null) убирает токен', () => {

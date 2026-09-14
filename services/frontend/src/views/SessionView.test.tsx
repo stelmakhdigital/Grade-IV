@@ -146,6 +146,50 @@ describe('SessionView (WP-8)', () => {
     expect(await screen.findByText('Нет доступа к микрофону.')).toBeInTheDocument();
   }, 10000);
 
+  it('стадия livecode: панель Live-Code, запуск → POST /runs', async () => {
+    const S_LIVECODE = { ...S_ACTIVE, stage: 'livecode' };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/auth/me')) return json(200, ME);
+      if (url.endsWith('/sessions/9')) return json(200, S_LIVECODE);
+      if (init?.method === 'POST' && url.endsWith('/runs')) {
+        return json(200, { exit_code: 0, stdout: '', stderr: '', duration_ms: 10, passed: true, tests: [] });
+      }
+      if (url.includes('/events')) return json(200, []);
+      if (url.includes('/sessions')) return json(200, []);
+      return json(404, {});
+    });
+    renderSession(fetchMock);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const fake = FakeWebSocket.instances[0];
+    await flush();
+    // WS сообщает стадию + задачу
+    fake.deliver(JSON.stringify({
+      type: 'stage', name: 'livecode',
+      task: {
+        id: 'go-rev', title: 'Разворот строки', statement: 'Разверните строку',
+        files: { 'solution.go': 'package task\n' },
+      },
+    }));
+    expect(await screen.findByTestId('task-title')).toHaveTextContent('Разворот строки');
+    // редактор (Monaco) в jsdom не работает — панель должна отрендериться
+    // с дефолтным редактором; клик по «Запустить тесты»:
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('run-tests'));
+    await waitFor(() => {
+      const call = (fetchMock.mock.calls as unknown[][]).find(
+        (c) => String(c[0]).endsWith('/runs'),
+      );
+      expect(call).toBeDefined();
+    });
+    const call = (fetchMock.mock.calls as unknown[][]).find((c) => String(c[0]).endsWith('/runs'));
+    const body = JSON.parse((call?.[1] as RequestInit).body as string);
+    expect(body).toEqual({
+      files: { 'main.go': expect.any(String) },
+      action: 'test',
+      task_id: 'go-rev',
+    });
+  }, 15000);
+
   it('stage_action: «К Live-Code» шлёт ui-событие', async () => {
     renderSession(mockApi({ session: S_ACTIVE }));
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));

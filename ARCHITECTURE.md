@@ -74,6 +74,16 @@ flowchart TB
 ограничен балансом (лимит по грейду 45/50/60/75 мин). Dev-прокси Vite: `/api`,
 `/healthz`, `/ws` → `:8000`; prod — nginx.conf (location `/api/`, `/healthz`, `/ws`).
 
+**Live-Code UI (WP-9)**: на стадии `livecode` (вместо голосовой панели) —
+`LiveCodePanel`: Monaco-редактор (файлы задачи из `stage.task.files`, вкладки),
+«Запустить тесты» → `POST /sessions/{id}/runs` (полный набор файлов, `task_id`),
+вывод: тесты ✓/✗ + stdout/stderr, статус/длительность; ИИ-ревью — последний
+`ai_text` после запуска (движок шлёт fire-and-forget, §4.1). Задача назначается
+движком при входе на стадию: `stage.task {id,title,statement,files}` (файлы —
+из банка sandbox, включая тесты; api передаёт их в WS-сообщении).
+Ограничения MVP: один активный файл (вкладки), тесты задачи видны (редактируемы
+— запрет — бэклог), без live-форматирования/автодополнения за пределами Monaco.
+
 **Голосовая сессия UI (WP-8)**: `SessionView` — WS-подключение
 (`/ws/session/{id}?token=`, тот же JWT), таймер (`timer.remaining_s`), живой
 транскрипт (`transcript`), подписи ИИ (`ai_text`), стадии (кнопки
@@ -143,7 +153,7 @@ erDiagram
 | POST | /api/v1/sessions | `{grade, stack}` → `{id, ws_url, duration_limit_s}`; при 0 минут — 402 |
 | GET | /api/v1/sessions/{id} | состояние: stage, status, time_left_s, task (если назначена) |
 | POST | /api/v1/sessions/{id}/pause · /resume · /finish | управление (FR-S6, FR-B4, US-8) |
-| POST | /api/v1/sessions/{id}/runs | `{files, action:"test", task_id?}` → результат (4.4); только стадия `livecode`, иначе 409 |
+| POST | /api/v1/sessions/{id}/runs | `{files, action:"test", task_id?}` → результат (4.4); только стадия `livecode`, иначе 409. `files` — полный набор файлов задачи (кандидат получает их в `stage.task.files`, WP-9) |
 | PUT | /api/v1/sessions/{id}/whiteboard | `{state, png?}` — сохранение холста |
 | GET | /api/v1/sessions/{id}/report | отчёт (202, пока генерируется) |
 | GET | /api/v1/sessions/{id}/events | транскрипт/события (история, FR-A4) |
@@ -317,6 +327,10 @@ sequenceDiagram
 Алерты: p95 `turn_e2e_ms` > 6000 мс; `stt_errors` > 2%/5 мин; sandbox OOM/таймауты > 5/час.
 
 ## 7. История
+- v0.4.8 (2026-09-14) — Implementation WP-9 (Live-Code UI): §1 —
+  LiveCodePanel (Monaco, файлы задачи из stage.task.files, «Запустить тесты»
+  → /runs, вывод тестов/stdout/stderr, ИИ-ревью); api: stage.task теперь
+  несёт `files` (банк задач sandbox); §4.1 — уточнение /runs.
 - v0.4.7 (2026-09-14) — Implementation WP-8 (голосовая сессия UI): §1 —
   SessionView (WS-клиент, AudioWorklet-микрофон → PCM-кадры 250 мс, PCM-плеер
   TTS-кадров, таймер/транскрипт/подписи, stage_action/finish); чистый модуль

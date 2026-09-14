@@ -11,6 +11,8 @@ export interface StageTask {
   id?: string;
   title?: string;
   statement?: string;
+  /** Полный набор файлов задачи (включая тесты) — Live-Code (WP-9). */
+  files?: Record<string, string>;
 }
 
 export type WsMessage =

@@ -17,6 +17,7 @@ import { PcmPlayer } from '../audio/player';
 import { SessionWS, type StageTask, type WsMessage } from '../ws';
 import { apiErrorMessage } from './LoginView';
 import { eventKindLabel, eventText, statusLabel, stageLabel } from '../labels';
+import { LiveCodePanel } from './livecode/LiveCodePanel';
 
 interface Line {
   who: 'user' | 'ai' | 'system';
@@ -27,7 +28,9 @@ export function SessionView({ id }: { id: number }) {
   const { user, logout } = useAuth();
   const [session, setSession] = useState<Session | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
+  // Текущая стадия UI: из session.stage (REST) и WS stage-сообщений.
   const [stage, setStage] = useState<string>('voice');
+  const [runReview, setRunReview] = useState<string>('');
   const [task, setTask] = useState<StageTask | null>(null);
   const [remainingS, setRemainingS] = useState<number | null>(null);
   const [lastAiText, setLastAiText] = useState<string>('');
@@ -40,6 +43,7 @@ export function SessionView({ id }: { id: number }) {
   const wsRef = useRef<SessionWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);
   const playerRef = useRef<PcmPlayer | null>(null);
+  const stageRef = useRef<string>('voice');
 
   const live = session !== null && (session.status === 'active' || session.status === 'paused');
 
@@ -51,6 +55,8 @@ export function SessionView({ id }: { id: number }) {
         const s = await getSession(id);
         if (!alive) return;
         setSession(s);
+        stageRef.current = s.stage;
+        setStage(s.stage);
         if (s.status === 'finished' || s.status === 'aborted') {
           const ev = await listEvents(id);
           if (!alive) return;
@@ -86,7 +92,9 @@ export function SessionView({ id }: { id: number }) {
         switch (m.type) {
           case 'stage':
             setStage(m.name);
+            stageRef.current = m.name;
             setTask(m.task ?? null);
+            setRunReview('');
             setRemainingS(null);
             break;
           case 'timer':
@@ -94,6 +102,9 @@ export function SessionView({ id }: { id: number }) {
             break;
           case 'ai_text':
             setLastAiText(m.text);
+            if (stageRef.current === 'livecode') {
+              setRunReview(m.text);
+            }
             break;
           case 'transcript':
             setLines((prev) => [
@@ -111,6 +122,7 @@ export function SessionView({ id }: { id: number }) {
             break;
           case 'run_result':
             pushLine('system', runResultLine(m));
+            setRunReview('');
             break;
           case 'report_ready':
             pushLine('system', 'Отчёт готов.');
@@ -251,6 +263,17 @@ export function SessionView({ id }: { id: number }) {
             {mic === 'running' && <span className="listening">микрофон: включён</span>}
           </div>
 
+          {stage === 'livecode' && session !== null ? (
+            <LiveCodePanel
+              sessionId={id}
+              stack={session.stack}
+              taskId={task?.id}
+              taskTitle={task?.title}
+              taskFiles={task?.files ?? null}
+              review={runReview}
+            />
+          ) : (
+            <>
           {task !== null && task.statement !== undefined && (
             <div className="task-box">
               <strong>{task.title ?? task.id}</strong>
@@ -288,6 +311,8 @@ export function SessionView({ id }: { id: number }) {
               </button>
             )}
           </div>
+            </>
+          )}
           {error !== null && (
             <p className="form-error" role="alert">{error}</p>
           )}

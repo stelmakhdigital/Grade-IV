@@ -64,6 +64,21 @@ export interface SessionEvent {
   data: Record<string, unknown>;
 }
 
+export interface RunTest {
+  name: string;
+  passed: boolean;
+  output?: string;
+}
+
+export interface RunResult {
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+  duration_ms: number;
+  passed: boolean;
+  tests: RunTest[];
+}
+
 /** Токен для запроса (localStorage). */
 export function getToken(): string | null {
   return localStorage.getItem(STORAGE_TOKEN);
@@ -152,6 +167,17 @@ export function getSession(id: number): Promise<Session> {
 
 export function listEvents(id: number): Promise<SessionEvent[]> {
   return request<SessionEvent[]>(`/sessions/${id}/events`, { auth: true });
+}
+
+/** Live-Code: запуск тестов решения (POST /sessions/{id}/runs, §4.4). */
+export function runTests(
+  id: number,
+  files: Record<string, string>,
+  taskId?: string,
+): Promise<RunResult> {
+  return request<RunResult>(`/sessions/${id}/runs`, {
+    body: { files, action: 'test', task_id: taskId },
+  });
 }
 
 /** Проверка доступности grade-api (GET /healthz, без авторизации). */

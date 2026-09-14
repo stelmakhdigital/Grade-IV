@@ -322,7 +322,35 @@
   - ARCHITECTURE.md v0.4.7.
   - WP-7 (кабинет) закоммичен (e5af092) и запушен; roadmap: 3199d7d.
 
+- **2026-09-14** (Фаза 3) — Шаг «WP-9: Live-Code (frontend)» + api (файлы задачи в WS):
+  - api (ws.go): `stage.task` теперь несёт `files` (полный набор файлов задачи
+    из банка sandbox, включая тесты) — кандидат сдаёт их обратно в /runs.
+  - `src/ws.ts`: StageTask.files; `api.ts`: runTests() + RunResult/RunTest.
+  - `CodeEditor.tsx`: Monaco (@monaco-editor/react, динамическая загрузка —
+    бандл кабинета остаётся лёгким).
+  - `LiveCodePanel.tsx`: вкладки файлов задачи (solution.go активен —
+    solutionFile()), Monaco, «Запустить тесты» → POST /runs (все файлы +
+    task_id), вывод: тесты ✓/✗ (+output), stdout/stderr, «Тесты: n/m · ms»,
+    ИИ-ревью (last ai_text на стадии livecode); без task.files — шаблон
+    main.go/main.py. Ошибки sandbox — «Sandbox: …».
+  - SessionView: на стадии livecode — панель вместо голосового блока
+    (таймер/finish/статусы остаются); run_result → системная строка транскрипта
+    + сброс review (ждём свежее ai_text).
+  - Тесты: +runTests (api), +LiveCodePanel 6 (дефолт, запуск+вывод, sandbox-error,
+    review, python, файлы задачи), +SessionView livecode (задача с files,
+    /runs body) — frontend 45; api: go vet + go test — зелёные.
+  - e2e live-smoke на бинарниках (api LLM_MOCK + sandbox subprocess):
+    create → WS → stage_action livecode → задача go-fizzbuzz (3 файла) →
+    решение FizzBuzz → /runs passed=true (go test) → run_result по WS →
+    ИИ-ревью → события. LIVE9 LIVECODE SMOKE OK.
+  - Подводные камни: движок шлёт stage(task=null) при Transition, затем
+    оркестратор — stage с task (UI применяет оба; клиенты ждут task!=null);
+    sandbox subprocess ищет go в PATH процесса; task-файлы (в т.ч. тесты)
+    клиенту приходят только через stage.task.files.
+  - ARCHITECTURE.md v0.4.8.
+  - WP-8 закоммичен (09a4af8) и запушен; roadmap: f50548f.
+
 ## Next steps
-1. Коммит WP-8 — ждёт разрешения.
-2. WP-9: Live-Code UI (Monaco, «Запустить тесты» → POST /runs, ИИ-ревью, follow-up).
-3. Бэклоги: AEC/эхо-подавление, стриминг TTS по предложениям, точная Silero-VAD в Go (onnx), GPU-конфиг, long-lived контейнеры sandbox.
+1. Коммит WP-9.
+2. WP-10: System Design (Excalidraw + палитра 12 блоков, сохранение, ИИ-оценка).
+3. Бэклоги: AEC/эхо-подавление, запрет редактирования тестов задачи, стриминг TTS по предложениям, точная Silero-VAD в Go (onnx), GPU-конфиг, long-lived контейнеры sandbox.
