@@ -191,6 +191,10 @@ export function SessionView({ id }: { id: number }) {
     try {
       await micCap.start({
         onChunk: (pcm) => {
+          // Эхо-подавление (бэклог AEC, упрощение MVP): пока ИИ говорит
+          // (плеер воспроизводит TTS-буфер) — микрофон не шлём (иначе
+          // динамик → микрофон → VAD «речь кандидата»).
+          if (playerRef.current?.isSpeaking()) return;
           wsRef.current?.sendPcm(pcm);
         },
         onState: (s) => setMic(s),
