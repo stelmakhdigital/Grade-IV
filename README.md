@@ -38,21 +38,93 @@ scripts/     smoke.sh — REST e2e-смоук
 
 Требования: Go ≥ 1.26, Node ≥ 22 + pnpm ≥ 12, Python ≥ 3.12.
 
-```sh
-make install        # go mod download, pnpm install, voice venv (torch CPU)
-cp .env.example .env # при необходимости заполнить (по умолчанию dev-значения)
+### Шаг 1. Установить зависимости
 
-make run-api        # :8000 — sqlite, LLM_MOCK=1 (без LLM-узла)
-make run-sandbox    # :8200 — subprocess-режим (без docker-демона)
-make run-voice      # :8100 — STT/TTS (или fake-провайдеры: VOICE_STT_PROVIDER=fake)
-make run-frontend   # :5173 — dev-сервер Vite (прокси /api, /healthz, /ws → :8000)
+```sh
+make install        # go mod download, pnpm install, voice venv (torch CPU + ML-стек)
 ```
 
-Открыть http://localhost:5173 — регистрация, «Новое интервью», голосовая сессия.
+### Шаг 2. Скачать модели (STT/TTS)
 
-Полезные dev-переменные (см. [`ARCHITECTURE.md` §6](ARCHITECTURE.md)):
-`LLM_MOCK=1` (детерминированный LLM), `VOICE_STT_PROVIDER=fake` /
-`VOICE_TTS_PROVIDER=fake` (без ML-моделей), `SANDBOX_MODE=subprocess`.
+Модели скачиваются в `FOR_RUN/` (в `.gitignore`, не попадает в git):
+- **faster-whisper small** (STT) → `FOR_RUN/stt/Systran/faster-whisper-small/` (~460 МБ)
+- **Silero TTS v5 RU** → `FOR_RUN/tts/silero-tts-v5_ru.pt` (~150 МБ)
+- **Silero VAD onnx** — в комплекте с faster-whisper (не скачивается)
+
+```sh
+make models         # или: MODELS_DIR=$PWD/FOR_RUN bash scripts/download-models.sh
+```
+
+LLM-модель (Qwen3.8-27B, ~60 ГБ) не скачивается (опционально в скрипте) — для dev
+достаточно `LLM_MOCK=1` (эхо-ответы) или внешний LLM-узел (см. Шаг 4).
+
+### Шаг 3. Запустить сервисы (4 терминала)
+
+```sh
+# Терминал 1: sandbox (:8200)
+make run-sandbox
+
+# Терминал 2: voice (:8100) — STT/TTS на этом ПК (модели из FOR_RUN/)
+STT_MODEL=small STT_DOWNLOAD_ROOT=$PWD/FOR_RUN/stt TTS_MODEL_DIR=$PWD/FOR_RUN/tts make run-voice
+
+# Терминал 3: api (:8000) — LLM_MOCK=1 (без LLM-узла)
+LLM_MOCK=1 make run-api
+
+# Терминал 4: frontend (:5173)
+make run-frontend
+```
+
+### Шаг 4. (Опционально) Подключить реальный LLM-узел
+
+Если у вас есть LLM-узел (vLLM + Qwen3.8-27B или любой OpenAI-совместимый сервер),
+задайте в api:
+
+```sh
+# Вместо LLM_MOCK=1:
+LLM_MOCK=0 \
+LLM_BASE_URL=http://IP_УЗЛА:8000/v1 \
+LLM_MODEL=qwen3.8-27b-dflash2 \
+make run-api
+```
+
+Модель на узле скачается автоматически (HuggingFace) или заранее:
+```sh
+# На LLM-узле:
+huggingface-cli download Qwen/Qwen3.8-27B-Instruct --local-dir /mnt/models/llm
+vllm serve Qwen/Qwen3.8-27B-Instruct --port 8000 --max-model-len 32768
+```
+
+### Шаг 5. Открыть браузер
+
+Открыть **http://localhost:5173** → регистрация → «Новое интервью» → голосовая сессия.
+
+**Проверка:**
+```sh
+# REST-смоук (полный контур: регистрация → сессия → report):
+make smoke
+```
+
+### Полезные dev-переменные (см. [`ARCHITECTURE.md` §6](ARCHITECTURE.md))
+
+| Переменная | Значение | Описание |
+|------------|----------|----------|
+| `LLM_MOCK` | `1` / `0` | `1` — детерминированный эхо-LLM (без узла), `0` — реальный LLM |
+| `LLM_BASE_URL` | `http://IP:8000/v1` | Адрес LLM-узла (OpenAI-совместимый API) |
+| `LLM_MODEL` | `qwen3.8-27b-dflash2` | Имя модели на узле |
+| `STT_MODEL` | `small` / `tiny` / `large-v3` | Модель STT (faster-whisper) |
+| `STT_DOWNLOAD_ROOT` | `FOR_RUN/stt` | Директория кэша STT-моделей |
+| `TTS_MODEL_DIR` | `FOR_RUN/tts` | Директория TTS-модели (Silero) |
+| `SANDBOX_MODE` | `subprocess` / `docker` | `subprocess` — без docker (dev), `docker` — prod |
+| `VOICE_STT_PROVIDER` | `faster-whisper` / `fake` | `fake` — без ML-моделей (детерминизм) |
+| `VOICE_TTS_PROVIDER` | `silero` / `fake` | `fake` — без ML-моделей (детерминизм) |
+
+### Остановка сервисов
+
+```sh
+# Если запущены вручную (не make):
+kill $(cat /tmp/sbxrun.pid /tmp/voicerun.pid /tmp/apirun.pid /tmp/front.pid)
+# или Ctrl+C в каждом терминале (make run-*)
+```
 
 ## Тесты и сборка
 
