@@ -84,6 +84,20 @@ flowchart TB
 Ограничения MVP: один активный файл (вкладки), тесты задачи видны (редактируемы
 — запрет — бэклог), без live-форматирования/автодополнения за пределами Monaco.
 
+**System Design UI (WP-10)**: на стадии `design` (вместо голосовой панели) —
+`DesignPanel`: палитра 12 блоков (ADR-004: Client, Load Balancer, API-сервис,
+Worker, SQL-БД, NoSQL, Кэш, Очередь, Message Broker, CDN, Внешний API,
+Monitoring) — клик вставляет группу «прямоугольник + подпись» на холст
+(Excalidraw 0.18, динамическая загрузка; вставка — `updateScene`, т.к.
+`addElements` в 0.18 убран), свободное рисование — нативные инструменты.
+«Оценить схему» → `PUT /sessions/{id}/whiteboard` `{state (elements+appState),
+structure {blocks, links}}` — сохранение (таблица `whiteboards`) + событие
+`whiteboard_save` + ИИ-оценка (fire-and-forget `OnDesignSubmit`: рубрика —
+покрытие/масштабируемость/отказоустойчивость/trade-offs + устный ответ из
+транскрипта) → `ai_text` по WS → блок «Оценка ИИ». PNG-экспорт (vision) —
+бэклог (оценка по структуре + устному ответу). Холст инжектится (prop `canvas`)
+— jsdom-тесты с моком.
+
 **Голосовая сессия UI (WP-8)**: `SessionView` — WS-подключение
 (`/ws/session/{id}?token=`, тот же JWT), таймер (`timer.remaining_s`), живой
 транскрипт (`transcript`), подписи ИИ (`ai_text`), стадии (кнопки
@@ -93,7 +107,7 @@ flowchart TB
 в `AudioContext` (16 кГц); индикатор «ИИ говорит» (turn-taking, SRS §8).
 Живые зависимости браузера (AudioContext, worklet) изолированы за чистыми
 модулями (`audio/resample.ts` — юнит-тесты), `ws.ts` — thin-обёртка WebSocket.
-Live-Code/System Design — плейсхолдеры до WP-9/WP-10.
+Live-Code (WP-9) и System Design (WP-10) — панели, описанные выше.
 
 ## 2. Топологии развёртывания
 
@@ -154,7 +168,7 @@ erDiagram
 | GET | /api/v1/sessions/{id} | состояние: stage, status, time_left_s, task (если назначена) |
 | POST | /api/v1/sessions/{id}/pause · /resume · /finish | управление (FR-S6, FR-B4, US-8) |
 | POST | /api/v1/sessions/{id}/runs | `{files, action:"test", task_id?}` → результат (4.4); только стадия `livecode`, иначе 409. `files` — полный набор файлов задачи (кандидат получает их в `stage.task.files`, WP-9) |
-| PUT | /api/v1/sessions/{id}/whiteboard | `{state, png?}` — сохранение холста |
+| PUT | /api/v1/sessions/{id}/whiteboard | `{state, png?, structure? {blocks, links}}` — сохранение холста (`whiteboards`, upsert) + событие `whiteboard_save` + ИИ-оценка `OnDesignSubmit` → `ai_text` (WP-10); 400 без state, 404 чужая, 409 завершена |
 | GET | /api/v1/sessions/{id}/report | отчёт (202, пока генерируется) |
 | GET | /api/v1/sessions/{id}/events | транскрипт/события (история, FR-A4) |
 
@@ -327,6 +341,11 @@ sequenceDiagram
 Алерты: p95 `turn_e2e_ms` > 6000 мс; `stt_errors` > 2%/5 мин; sandbox OOM/таймауты > 5/час.
 
 ## 7. История
+- v0.4.9 (2026-09-14) — Implementation WP-10 (System Design UI): §1 —
+  DesignPanel (палитра 12 блоков ADR-004, Excalidraw 0.18 canvas,
+  «Оценить схему» → PUT /whiteboard, «Оценка ИИ»); §4.1 — контракт
+  PUT /whiteboard (structure, ИИ-оценка); interviewer: OnDesignSubmit
+  (рубрика по ADR-004).
 - v0.4.8 (2026-09-14) — Implementation WP-9 (Live-Code UI): §1 —
   LiveCodePanel (Monaco, файлы задачи из stage.task.files, «Запустить тесты»
   → /runs, вывод тестов/stdout/stderr, ИИ-ревью); api: stage.task теперь

@@ -1,9 +1,20 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { createElement } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setToken } from '../api';
 import { AuthProvider } from '../auth';
 import { SessionView } from './SessionView';
+
+// Excalidraw не рендерится в jsdom — лёгкий мок (динамический импорт
+// подхватит фабрику; холст DesignPanel получает apiRef — мок не ставит).
+vi.mock('@excalidraw/excalidraw', () => ({
+  Excalidraw: (props: { theme?: string }) =>
+    createElement('div', {
+      'data-testid': 'excalidraw-mock',
+      'data-theme': props.theme ?? 'light',
+    }),
+}));
 
 /** Минимальный fake WebSocket (совместим с SessionWS). */
 class FakeWebSocket {
@@ -163,6 +174,7 @@ describe('SessionView (WP-8)', () => {
     const fake = FakeWebSocket.instances[0];
     await flush();
     // WS сообщает стадию + задачу
+    // WS сообщает стадию + задачу (файлы задачи из банка)
     fake.deliver(JSON.stringify({
       type: 'stage', name: 'livecode',
       task: {
@@ -184,10 +196,40 @@ describe('SessionView (WP-8)', () => {
     const call = (fetchMock.mock.calls as unknown[][]).find((c) => String(c[0]).endsWith('/runs'));
     const body = JSON.parse((call?.[1] as RequestInit).body as string);
     expect(body).toEqual({
-      files: { 'main.go': expect.any(String) },
+      files: { 'solution.go': 'package task\n' },
       action: 'test',
       task_id: 'go-rev',
     });
+  }, 15000);
+
+  it('стадия design: панель System Design с палитрой и холстом', async () => {
+    const S_DESIGN = { ...S_ACTIVE, stage: 'design' };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/auth/me')) return json(200, ME);
+      if (url.endsWith('/sessions/9')) return json(200, S_DESIGN);
+      if (init?.method === 'PUT' && url.endsWith('/whiteboard')) {
+        return json(200, { saved: true, structure: { blocks: [], links: 0 } });
+      }
+      if (url.includes('/events')) return json(200, []);
+      if (url.includes('/sessions')) return json(200, []);
+      return json(404, {});
+    });
+    renderSession(fetchMock);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const fake = FakeWebSocket.instances[0];
+    await flush();
+    fake.deliver(JSON.stringify({ type: 'stage', name: 'design', task: null }));
+    expect(await screen.findByTestId('design-panel')).toBeInTheDocument();
+    // палитра 12 блоков
+    expect(screen.getByRole('button', { name: 'Load Balancer' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Monitoring' })).toBeInTheDocument();
+    // холст (мок Excalidraw)
+    expect(await screen.findByTestId('excalidraw-mock')).toBeInTheDocument();
+    // ИИ-оценка (ai_text) на стадии design → блок «Оценка ИИ»
+    fake.deliver(JSON.stringify({ type: 'ai_text', text: 'Схема: хорошо учтён кэш.' }));
+    expect(await screen.findByTestId('design-review')).toHaveTextContent(
+      'Схема: хорошо учтён кэш',
+    );
   }, 15000);
 
   it('stage_action: «К Live-Code» шлёт ui-событие', async () => {

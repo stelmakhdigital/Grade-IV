@@ -148,6 +148,42 @@ func (i *Interviewer) OnCodeRun(ctx context.Context, sessionID int64, summary ma
 	return resp.Content, nil
 }
 
+// OnDesignSubmit — оценка схемы System Design (ADR-004, WP-10): структура
+// блоков/связей (из холста) + устный ответ стадии → ревью по рубрике
+// (покрытие, масштабируемость, отказоустойчивость, trade-offs) + follow-up.
+func (i *Interviewer) OnDesignSubmit(ctx context.Context, sessionID int64, structure map[string]any) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, llm.DefaultTimeout)
+	defer cancel()
+
+	sess, err := i.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if session.IsTerminalStatus(sess.Status) {
+		return "", ErrSessionEnded
+	}
+
+	raw, _ := json.Marshal(structure)
+	userMsg := "Кандидат представил схему System Design. Структура (JSON: блоки и связи): " +
+		string(raw) +
+		"\nОцени по рубрике: (1) покрытие (клиент, балансировка, сервисы, БД/кэш, очереди, мониторинг), " +
+		"(2) масштабируемость, (3) отказоустойчивость, (4) обоснование trade-offs. " +
+		"В конце задай один follow-up вопрос. Устно: "
+	msgs := i.buildMessages(sess, userMsg)
+	resp, err := i.llm.Chat(ctx, llm.Request{
+		Messages:    msgs,
+		Temperature: 0.5,
+		MaxTokens:   400,
+	})
+	if err != nil {
+		return "", err
+	}
+	i.saveEvent(ctx, sessionID, "ai_utterance", map[string]any{
+		"text": resp.Content, "stage": sess.Stage, "note": "design_review",
+	})
+	return resp.Content, nil
+}
+
 // Nudge — кандидат молчит больше порога: ИИ сам заполняет паузу (решение #7).
 func (i *Interviewer) Nudge(ctx context.Context, sessionID int64, silentS int) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, llm.DefaultTimeout)

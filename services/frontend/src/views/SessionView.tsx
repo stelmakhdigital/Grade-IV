@@ -18,6 +18,7 @@ import { SessionWS, type StageTask, type WsMessage } from '../ws';
 import { apiErrorMessage } from './LoginView';
 import { eventKindLabel, eventText, statusLabel, stageLabel } from '../labels';
 import { LiveCodePanel } from './livecode/LiveCodePanel';
+import { DesignPanel } from './design/DesignPanel';
 
 interface Line {
   who: 'user' | 'ai' | 'system';
@@ -31,6 +32,7 @@ export function SessionView({ id }: { id: number }) {
   // Текущая стадия UI: из session.stage (REST) и WS stage-сообщений.
   const [stage, setStage] = useState<string>('voice');
   const [runReview, setRunReview] = useState<string>('');
+  const [designReview, setDesignReview] = useState<string>('');
   const [task, setTask] = useState<StageTask | null>(null);
   const [remainingS, setRemainingS] = useState<number | null>(null);
   const [lastAiText, setLastAiText] = useState<string>('');
@@ -95,6 +97,7 @@ export function SessionView({ id }: { id: number }) {
             stageRef.current = m.name;
             setTask(m.task ?? null);
             setRunReview('');
+            setDesignReview('');
             setRemainingS(null);
             break;
           case 'timer':
@@ -104,6 +107,8 @@ export function SessionView({ id }: { id: number }) {
             setLastAiText(m.text);
             if (stageRef.current === 'livecode') {
               setRunReview(m.text);
+            } else if (stageRef.current === 'design') {
+              setDesignReview(m.text);
             }
             break;
           case 'transcript':
@@ -272,6 +277,8 @@ export function SessionView({ id }: { id: number }) {
               taskFiles={task?.files ?? null}
               review={runReview}
             />
+          ) : stage === 'design' ? (
+            <DesignPanel sessionId={id} review={designReview} />
           ) : (
             <>
           {task !== null && task.statement !== undefined && (

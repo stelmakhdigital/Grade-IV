@@ -350,7 +350,51 @@
   - ARCHITECTURE.md v0.4.8.
   - WP-8 закоммичен (09a4af8) и запушен; roadmap: f50548f.
 
+- **2026-09-14** (Фаза 3) — Шаг «WP-10: System Design (frontend + backend)»:
+  - Backend:
+    - db: WhiteboardStore (Save upsert/Get, таблица whiteboards — со WP-3,
+      store был недостающим звеном); ErrWhiteboardNotFound.
+    - interviewer: OnDesignSubmit — оценка схемы по рубрике ADR-004
+      (покрытие/масштабируемость/отказоустойчивость/trade-offs) + follow-up,
+      транскрипт устного ответа — из контекста стадии; событие ai_utterance
+      (note design_review).
+    - PUT /sessions/{id}/whiteboard: {state (JSON Excalidraw), png? (base64,
+      MVP не обязателен), structure {blocks, links}} → upsert whiteboards +
+      событие whiteboard_save + ИИ-оценка fire-and-forget (ai_text по WS).
+      400 без state, 404 чужая сессия, 409 завершена; лимит тела 8 МБ.
+  - Frontend:
+    - api.ts: saveWhiteboard() + DesignStructure; **исправлен реальный баг**:
+      request() читал поле msg, а бэкенд шлёт message (writeError) — теперь
+      оба варианта, и человеческие сообщения ошибок работают.
+    - DesignPanel.tsx: палитра 12 блоков (ADR-004), холст инжектится
+      (prop canvas, дефолт — ExcalidrawCanvas), «Оценить схему» (заблокирована
+      без блоков) → PUT /whiteboard (state из snapshot() + структура),
+      ошибки — «Схема: …», блок «Оценка ИИ» (ai_text стадии design).
+    - ExcalidrawCanvas.tsx: Excalidraw 0.18 (динамический import), вставка
+      блока — группа rectangle+text через updateScene (addElements в 0.18
+      убран), snapshot: getSceneElements/getAppState + число стрелок.
+    - SessionView: стадия design → DesignPanel (designReview из ai_text,
+      сброс на stage).
+  - Тесты: backend +TestWhiteboardPut/Errors (save+структура+событие, 400/404;
+    подвох: разные env = разные in-memory БД, но общий JWT-secret — «чужой»
+    пользователь создавать внутри env); frontend +DesignPanel 6 (палитра,
+    вставка, PUT body {state, structure{blocks,links}}, disabled, ошибка,
+    ревью) + SessionView «стадия design» (мок @excalidraw/excalidraw через
+    vi.mock — jsdom) — frontend 52, api зелёные, tsc/vite build зелёные.
+  - **Нашёл баг WP-9 (исправлен)**: LiveCodePanel не синхронизировал
+    taskFiles после монтирования — панель монтировалась по REST stage ещё до
+    WS stage.task, и шло main.go вместо файлов задачи. useEffect по taskFiles.
+    Тест SessionView livecode теперь ждёт solution.go.
+  - e2e live-smoke (api LLM_MOCK): voice → livecode → design (переходы только
+    по одной стадии) → PUT /whiteboard (структура 5 блоков/4 связи) →
+    ИИ-оценка по WS → события whiteboard_save+ai_utterance. LIVE10 DESIGN SMOKE OK.
+  - ARCHITECTURE.md v0.4.9.
+  - WP-9 закоммичен (d51bc05) и запушен; roadmap: b8f824e.
+
 ## Next steps
-1. Коммит WP-9.
-2. WP-10: System Design (Excalidraw + палитра 12 блоков, сохранение, ИИ-оценка).
-3. Бэклоги: AEC/эхо-подавление, запрет редактирования тестов задачи, стриминг TTS по предложениям, точная Silero-VAD в Go (onnx), GPU-конфиг, long-lived контейнеры sandbox.
+1. Коммит WP-10.
+2. WP-11: UI отчёта (критерии, сильные/слабые стороны, рекомендации,
+   grade-рекомендация; backend /report уже считает по завершении).
+3. Бэклоги: AEC/эхо-подавление, PNG-экспорт холста + vision-оценка (ADR-004),
+   запрет редактирования тестов задачи, стриминг TTS по предложениям,
+   точная Silero-VAD в Go (onnx), GPU-конфиг, long-lived контейнеры sandbox.

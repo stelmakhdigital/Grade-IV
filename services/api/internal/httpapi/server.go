@@ -26,6 +26,7 @@ type Server struct {
 	users       *db.UserStore
 	sessions    *db.SessionStore
 	submissions *db.SubmissionStore
+	whiteboards *db.WhiteboardStore
 	engine      *session.Engine
 	interviewer *interviewer.Interviewer
 	voice       *voicesvc.Client
@@ -49,6 +50,7 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 	users := db.NewUserStore(database, dialect)
 	sessions := db.NewSessionStore(database, dialect)
 	submissions := db.NewSubmissionStore(database, dialect)
+	whiteboards := db.NewWhiteboardStore(database, dialect)
 	engine := session.New(sessions, users, log,
 		session.WithPauseTimeout(time.Duration(cfg.PauseTimeoutS)*time.Second))
 	interviewer := interviewer.New(provider, sessions, log)
@@ -58,6 +60,7 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		users:       users,
 		sessions:    sessions,
 		submissions: submissions,
+		whiteboards: whiteboards,
 		engine:      engine,
 		interviewer: interviewer,
 		voice:       voice,
@@ -84,6 +87,7 @@ func (s *Server) Handler() http.Handler {
 	// Более специфичный путь (литеральный сегмент) — приоритет над {action}.
 	mux.Handle("POST /api/v1/sessions/{id}/runs", s.requireAuth(http.HandlerFunc(s.handleSessionRuns)))
 	mux.Handle("GET /api/v1/sessions/{id}/events", s.requireAuth(http.HandlerFunc(s.handleSessionEvents)))
+	mux.Handle("PUT /api/v1/sessions/{id}/whiteboard", s.requireAuth(http.HandlerFunc(s.handleWhiteboardPut)))
 
 	// Голосовой канал (WP-3, ADR-001): auth — токен в query/заголовке.
 	mux.HandleFunc("GET /ws/session/{id}", s.handleSessionWS)

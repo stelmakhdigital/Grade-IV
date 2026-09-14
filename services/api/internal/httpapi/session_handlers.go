@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -8,9 +9,13 @@ import (
 	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/session"
 )
+
+// whiteboardMaxBodyBytes — лимит тела PUT /whiteboard (state + base64-картинка).
+const whiteboardMaxBodyBytes = 8 << 20
 
 // DTO сессии для REST (ARCHITECTURE.md §4.1).
 type sessionDTO struct {
@@ -215,4 +220,82 @@ func (s *Server) writeSessionEngineError(w http.ResponseWriter, err error) {
 		s.log.Error("session engine", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal", "внутренняя ошибка")
 	}
+}
+
+// handleWhiteboardPut — PUT /api/v1/sessions/{id}/whiteboard (ADR-004, WP-10).
+// {state (JSON Excalidraw), png? (base64, MVP — не обязателен),
+//
+//	structure? {blocks: [имена], links: n}} — структура схемы для оценки ИИ.
+//
+// После сохранения — fire-and-forget ИИ-оценка (ai_text по WS, как code review).
+func (s *Server) handleWhiteboardPut(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseSessionID(w, r)
+	if !ok {
+		return
+	}
+	userID := userIDFromContext(r.Context())
+	m, err := s.sessions.GetOwned(r.Context(), id, userID)
+	if errors.Is(err, db.ErrSessionNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "сессия не найдена")
+		return
+	}
+	if err != nil {
+		s.log.Error("get session", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal", "не удалось получить сессию")
+		return
+	}
+	if session.IsTerminalStatus(m.Status) {
+		writeError(w, http.StatusConflict, "invalid_state", "сессия завершена")
+		return
+	}
+
+	var body struct {
+		State     json.RawMessage `json:"state"`
+		Png       string          `json:"png"`
+		Structure *struct {
+			Blocks []string `json:"blocks"`
+			Links  int      `json:"links"`
+		} `json:"structure"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, whiteboardMaxBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request",
+			"ожидается JSON {state, png?, structure?}")
+		return
+	}
+	if len(body.State) == 0 || string(body.State) == "null" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "state обязателен (JSON Excalidraw)")
+		return
+	}
+
+	// Структура (детерминированная часть оценки, ADR-004): блоки и связи.
+	blocksJSON := []byte("{}")
+	structure := map[string]any{"blocks": []string{}, "links": 0}
+	if body.Structure != nil {
+		structure = map[string]any{"blocks": body.Structure.Blocks, "links": body.Structure.Links}
+	}
+	blocksJSON, _ = json.Marshal(structure)
+
+	if err := s.whiteboards.Save(r.Context(), id, body.State, blocksJSON, nil); err != nil {
+		s.log.Error("whiteboard save", "session", id, "err", err)
+		writeError(w, http.StatusInternalServerError, "internal", "ошибка сохранения холста")
+		return
+	}
+	_, _ = s.sessions.AddEvent(r.Context(), id, "whiteboard_save", mustMarshal(structure))
+	s.log.Info("whiteboard сохранён", "session", id, "blocks", len(structure["blocks"].([]string)))
+
+	// ИИ-оценка по рубрике (fire-and-forget; транскрипт устного ответа
+	// стадии подтягивает interviewer из событий).
+	go func() {
+		rctx, cancel := context.WithTimeout(context.Background(), llm.DefaultTimeout)
+		defer cancel()
+		text, err := s.interviewer.OnDesignSubmit(rctx, id, structure)
+		if err != nil {
+			s.log.Warn("design: ИИ-оценка не удалась", "session", id, "err", err)
+			return
+		}
+		s.engine.SendTo(id, map[string]any{"type": "ai_text", "text": text})
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "structure": structure})
 }

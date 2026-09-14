@@ -527,3 +527,33 @@ p {
   flex-wrap: wrap;
   margin-bottom: 8px;
 }
+
+/* System Design (WP-10) */
+.design {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.palette {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.palette-item {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #333);
+  background: var(--panel, #1c1e22);
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+}
+.palette-item:hover {
+  border-color: #58a6ff;
+}
+.design-canvas {
+  border: 1px solid var(--border, #333);
+  border-radius: 10px;
+  overflow: hidden;
+  height: 420px;
+}

@@ -4,7 +4,7 @@
  * Редактор инжинирится (prop `editor`), чтобы логику можно было
  * тестировать в jsdom без Monaco.
  */
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ApiError, runTests, type RunResult, type Stack } from '../../api';
 import { apiErrorMessage } from '../LoginView';
 import { CodeEditor } from './CodeEditor';
@@ -84,6 +84,15 @@ export function LiveCodePanel({
       : { [MAIN_FILE[stack]]: DEFAULT_CODE[stack] },
   );
   const [activeFile, setActiveFile] = useState<string>(() => solutionFile(stack, taskFiles));
+
+  // stage.task может прийти по WS после монтирования панели (REST уже дал
+  // стадию) — синхронизируем файлы задачи, не трогая кандидата при отсутствии taskFiles.
+  useEffect(() => {
+    if (taskFiles !== undefined && taskFiles !== null && Object.keys(taskFiles).length > 0) {
+      setFiles(taskFiles);
+      setActiveFile(solutionFile(stack, taskFiles));
+    }
+  }, [taskFiles, stack]);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<RunResult | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -123,9 +123,11 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     let code = 'internal';
     let msg = `ошибка ${res.status}`;
     try {
-      const j = (await res.json()) as { code?: string; msg?: string };
+      // Бэкенд шлёт {code, message} (writeError); msg — историческое имя.
+      const j = (await res.json()) as { code?: string; msg?: string; message?: string };
       if (j.code) code = j.code;
-      if (j.msg) msg = j.msg;
+      if (j.message) msg = j.message;
+      else if (j.msg) msg = j.msg;
     } catch {
       // тело не JSON — оставляем общие коды
     }
@@ -177,6 +179,24 @@ export function runTests(
 ): Promise<RunResult> {
   return request<RunResult>(`/sessions/${id}/runs`, {
     body: { files, action: 'test', task_id: taskId },
+  });
+}
+
+/** Структура схемы System Design для оценки ИИ (ADR-004). */
+export interface DesignStructure {
+  blocks: string[];
+  links: number;
+}
+
+/** Сохранение холста System Design (PUT /sessions/{id}/whiteboard, ADR-004). */
+export function saveWhiteboard(
+  id: number,
+  state: unknown,
+  structure: DesignStructure,
+): Promise<{ saved: boolean; structure: DesignStructure }> {
+  return request(`/sessions/${id}/whiteboard`, {
+    method: 'PUT',
+    body: { state, structure },
   });
 }
 
