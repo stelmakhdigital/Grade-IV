@@ -32,7 +32,7 @@
 - [x] WBS Implementation: WP-1…WP-12 (Фаза 3)
 - [x] Review архитектуры с пользователем (phase gate, 2026-09-09; правка «бекэнд = Go» — ADR-006, v0.4)
 
-## Фаза 3: Implementation —  ВСЕ WP ВЫПОЛНЕНЫ (WP-1…WP-12, коммиты 2026-09-13…14; phase gate: одобрение пользователя перед Фазой 4)
+## Фаза 3: Implementation — ЗАВЕРШЕНА (WP-1…WP-12, коммиты 2026-09-13…14; phase gate: одобрение пользователя перед Фазой 4)
 - [x] WP-1: Каркас: services/api (Go), services/sandbox (Go), services/voice (Python), services/frontend (Vite+React+TS), infra/, Makefile; тесты: go test + vitest + pytest
 - [x] WP-2: api (Go): модель данных (7 таблиц, DDL) + аутентификация (JWT, bcrypt)
 - [x] WP-3: api (Go): машина состояний сессий + WS-протокол + тарификация (pause/resume/finish, лимит 60 мин, таймер) — коммит 2026-09-13
