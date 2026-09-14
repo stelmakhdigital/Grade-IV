@@ -32,7 +32,7 @@
 - [x] WBS Implementation: WP-1…WP-12 (Фаза 3)
 - [x] Review архитектуры с пользователем (phase gate, 2026-09-09; правка «бекэнд = Go» — ADR-006, v0.4)
 
-## Фаза 3: Implementation (бекэнд — Go (api, sandbox), voice — Python ML; WBS; зависимости: WP-1 → все; WP-4/5/6 → поток WP-3; WP-7 → WP-8/9/10)
+## Фаза 3: Implementation —  ВСЕ WP ВЫПОЛНЕНЫ (WP-1…WP-12, коммиты 2026-09-13…14; phase gate: одобрение пользователя перед Фазой 4)
 - [x] WP-1: Каркас: services/api (Go), services/sandbox (Go), services/voice (Python), services/frontend (Vite+React+TS), infra/, Makefile; тесты: go test + vitest + pytest
 - [x] WP-2: api (Go): модель данных (7 таблиц, DDL) + аутентификация (JWT, bcrypt)
 - [x] WP-3: api (Go): машина состояний сессий + WS-протокол + тарификация (pause/resume/finish, лимит 60 мин, таймер) — коммит 2026-09-13
@@ -45,7 +45,7 @@
 - [x] WP-9: Frontend: Live-Code (Monaco, «Запустить тесты», ИИ-ревью, follow-up) — коммит 2026-09-14 (см. git log)
 - [x] WP-10: Frontend: System Design (Excalidraw + палитра 12 блоков, сохранение, ИИ-оценка) — коммит 2026-09-14 (см. git log)
 - [x] WP-11: Отчёт (генерация по критериям §12, UI, история) — коммит 2026-09-14 (см. git log)
-- [ ] WP-12: Инфра и доки: docker-compose (profiles default/gpu), .env.example, Makefile, README, e2e-smoke скрипт
+- [x] WP-12: Инфра и доки: docker-compose (profiles default/gpu), .env.example, Makefile, README, e2e-smoke скрипт — коммит 2026-09-14 (см. git log)
 
 ## Фаза 4: Testing
 - [ ] План тестирования (юнит, интеграция, E2E, load)
