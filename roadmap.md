@@ -41,7 +41,7 @@
 - [x] WP-6: sandbox (Go): Docker-runner (лимиты, --network=none) + subprocess dev-mode + банк задач Go/Python (12 задач, теги по грейдам) + api-прокси /runs (submissions, code_run, run_result по WS) — коммит 2026-09-14
 - [x] WP-6a: голосовой конвейер (ADR-002) в api: PCM → энергетический VAD → /stt → движок интервьюера → /tts → бинарные кадры {seq,flags}+PCM16 (turn-taking, one-parallel-turn, graceful degradation) — коммит 2026-09-14
 - [x] WP-7: Frontend: каркас Vite+React+TS, кабинет (auth, минуты, история) — коммит 2026-09-14 (e5af092)
-- [ ] WP-8: Frontend: голосовая сессия (AudioWorklet-микрофон → WS, PCM-воспроизведение, транскрипт, таймер)
+- [x] WP-8: Frontend: голосовая сессия (AudioWorklet-микрофон → WS, PCM-воспроизведение, транскрипт, таймер) — коммит 2026-09-14 (09a4af8)
 - [ ] WP-9: Frontend: Live-Code (Monaco, «Запустить тесты», ИИ-ревью, follow-up)
 - [ ] WP-10: Frontend: System Design (Excalidraw + палитра 12 блоков, сохранение, ИИ-оценка)
 - [ ] WP-11: Отчёт (генерация по критериям §12, UI, история)
