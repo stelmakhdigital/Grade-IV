@@ -503,13 +503,25 @@
   - Отчёт: docs/test-results/sandbox-2026-09-14.md.
   - Регресс: sandbox go vet+test зелёные, api 7 ок, tsc, vitest 57/57.
 
+- **2026-09-14** (Фаза 4) — Шаг «Load-тест real-time» (TEST_PLAN §5):
+  - load_test.go (httpapi, в make test): 50 параллельных WS-голосовых сессий
+    × 20 с, непрерывный PCM-поток (VAD активен), LLM-мок. Результат: 50/50
+    сессий живы, 200 тиков таймера (по 4, без срывов/дублей), 0 клиентских
+    ошибок, 20.2 с wall. MVP-нагрузка выдержана с запасом.
+  - Подводной камень: в тестах timer-сообщения не приходят, пока не запущен
+    Engine().Run (в проде — cmd/api) — load-тест поднимает свой env c
+    NewWithLLM + go srv.Engine().Run(ctx) + Cleanup(Stop).
+  - Отчёт: раздел в docs/test-results/voice-latency-2026-09-14.md (load-секция).
+  - Регресс: api go vet+test зелёные (httpapi 24 с — с load), frontend tsc +
+    57/57, sandbox 2 пакета.
+
 ## Next steps
-1. Коммит шага «Тесты сандбокса» (+roadmap [x]).
-2. Фаза 4: load-тест (Go WS-клиент, 50 сессий, LLM-мок + voice fake) —
-   p95 tick ≤1 с, без потерь кадров, отчёт docs/test-results/load-*.md.
-3. Фаза 4: regression-прогон (make test ×3, build, smoke) + закрыть фазу
-   (критерии TEST_PLAN §6) → phase gate пользователю.
-4. Бэклоги: AEC/эхо-подавление, PNG-экспорт холста + vision-оценка (ADR-004),
+1. Коммит шага «Load-тест» (+roadmap [x]).
+2. Фаза 4: regression-прогон (make test ×3, make build, make smoke) +
+   закрыть фазу (критерии TEST_PLAN §6) → phase gate: явное одобрение
+   пользователя (AGENTS.md — на выходе фазы; коммиты — по стоящему
+   разрешению).
+3. Бэклоги: AEC/эхо-подавление, PNG-экспорт холста + vision-оценка (ADR-004),
    запрет редактирования тестов задачи, стриминг TTS (+pacing), Silero-VAD onnx
    в Go, стриминговый STT, GPU-конфиг (large-v3), long-lived контейнеры
    sandbox, баг LOG_LEVEL, rlimit subprocess, docker-пробы в CI.

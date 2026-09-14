@@ -51,7 +51,7 @@
 - [x] План тестирования (юнит, интеграция, E2E, load) — docs/TEST_PLAN.md v1.0, 2026-09-14
 - [x] Тесты голосового контура: latency end-to-end, качество STT/TTS — docs/test-results/voice-latency-2026-09-14.md (probe + эталон 20, small ≥0.85), 2026-09-14
 - [x] Тесты сандбокса кода (изоляция, лимиты ресурсов, доверенность тестов) — пробы subprocess + фикс бага таймаута, docs/test-results/sandbox-2026-09-14.md, 2026-09-14
-- [ ] Load-тест real-time нагрузки (одновременные сессии)
+- [x] Load-тест real-time нагрузки (одновременные сессии) — 50 WS-сессий в make test, отчёт docs/test-results/voice-latency-2026-09-14.md (load), 2026-09-14
 - [ ] Исправление багов, regression-прогон
 
 ## Фаза 5: Deployment
