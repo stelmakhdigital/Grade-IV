@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/binary"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/voicesvc"
@@ -44,39 +45,109 @@ func (s *Server) runCandidateTurn(ws *wsSession, text string) {
 }
 
 // streamAIAudio — TTS ответа ИИ → бинарные кадры {seq,flags}+PCM16 (через engine.SendBinary).
+// Стриминг по предложениям (бэклог TTS-стриминг): текст реплики разбивается на
+// предложения, каждое синтезируется отдельно и отправляется сразу (первый звук —
+// через ~0.3 с после LLM, а не после синтеза всего ответа). seq сквозной по
+// реплике; end-флаг — только на последнем кадре последнего предложения.
 func (s *Server) streamAIAudio(ws *wsSession, text string) {
 	if s.voice == nil || strings.TrimSpace(text) == "" {
 		return
 	}
-	pcm, err := s.voice.TTS(ws.ctx, text)
-	if err != nil {
-		s.log.Warn("tts: синтез не удался", "session", ws.id, "err", err)
-		return
-	}
+	sentences := splitSentences(text)
 	ws.ttsActive.Store(true)
 	defer ws.ttsActive.Store(false)
 
 	seq := 0
-	for off := 0; off < len(pcm); off += ttsChunkBytes {
+	for i, sentence := range sentences {
 		if ws.ctx.Err() != nil {
 			return
 		}
-		end := off + ttsChunkBytes
-		if end > len(pcm) {
-			end = len(pcm)
+		pcm, err := s.voice.TTS(ws.ctx, sentence)
+		if err != nil {
+			s.log.Warn("tts: синтез предложения не удался", "session", ws.id, "sentence", i+1, "err", err)
+			// Дegrade: пропускаем предложение, идём дальше (голос не критичен, текст уже есть).
+			continue
 		}
-		frame := make([]byte, 0, 4+end-off)
-		var hdr [4]byte
-		binary.LittleEndian.PutUint16(hdr[0:2], uint16(seq))
-		if end == len(pcm) {
-			binary.LittleEndian.PutUint16(hdr[2:4], ttsFlagEnd)
+		isLast := i == len(sentences)-1
+		for off := 0; off < len(pcm); off += ttsChunkBytes {
+			if ws.ctx.Err() != nil {
+				return
+			}
+			end := off + ttsChunkBytes
+			if end > len(pcm) {
+				end = len(pcm)
+			}
+			frame := make([]byte, 0, 4+end-off)
+			var hdr [4]byte
+			binary.LittleEndian.PutUint16(hdr[0:2], uint16(seq))
+			if isLast && end == len(pcm) {
+				binary.LittleEndian.PutUint16(hdr[2:4], ttsFlagEnd)
+			}
+			frame = append(frame, hdr[:]...)
+			frame = append(frame, pcm[off:end]...)
+			s.engine.SendBinary(ws.id, frame)
+			seq++
 		}
-		frame = append(frame, hdr[:]...)
-		frame = append(frame, pcm[off:end]...)
-		s.engine.SendBinary(ws.id, frame)
-		seq++
 	}
 	ws.touch() // реплика ИИ завершена — отсчёт тишины кандидата
+}
+
+// splitSentences — разбивка текста на предложения для TTS-стриминга:
+// «!»/«?» — всегда (дальше пробел/конец); «.» — только перед ЗАГЛАВНОЙ буквой
+// (лат/кирл) или в конце текста — русские аббревиатуры («т.д.», «т.п.») с
+// малой буквой не дробят; многоточие «...» — разрыв.
+func splitSentences(text string) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	var parts []string
+	start := 0
+	flush := func(end int) {
+		part := strings.TrimSpace(text[start:end])
+		if part != "" {
+			parts = append(parts, part)
+		}
+		start = end
+	}
+	for i := 0; i < len(text); i++ {
+		// Многоточие «...» — разрыв.
+		if i+2 < len(text) && text[i] == '.' && text[i+1] == '.' && text[i+2] == '.' {
+			flush(i + 3)
+			i += 2
+			continue
+		}
+		boundary := false
+		switch text[i] {
+		case '!', '?':
+			boundary = true
+		case '.':
+			// «.» — только перед заглавной (новое предложение) или в конце.
+			// Пропускаем пробелы после точки.
+			j := i + 1
+			for j < len(text) && (text[j] == ' ' || text[j] == '\n' || text[j] == '\t') {
+				j++
+			}
+			boundary = j >= len(text) || isUpperNext(text, j)
+		}
+		if boundary && (i+1 >= len(text) || text[i+1] == ' ' || text[i+1] == '\n' || text[i+1] == '\t') {
+			flush(i + 1)
+		}
+	}
+	flush(len(text))
+	return parts
+}
+
+// isUpperNext — следующий после индекса i символ — заглавная (лат/кирл).
+func isUpperNext(text string, i int) bool {
+	if i >= len(text) {
+		return false
+	}
+	r, size := utf8.DecodeRuneInString(text[i:])
+	if size <= 1 {
+		return false // уже обработано ASCII-путём
+	}
+	return (r >= 'A' && r <= 'Z') || (r >= 0x0410 && r <= 0x042F)
 }
 
 // preSTTResult — предварительное распознавание (pre-STT): запущено на
