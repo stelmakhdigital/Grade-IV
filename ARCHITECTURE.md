@@ -65,14 +65,25 @@ flowchart TB
 Примечание: VAD (Silero) — в оркестраторе `api` (управление ходом речи, ADR-002);
 `voice` — безсостоятельные провайдеры STT/TTS, подменяемые через `/api/v1/*` (решение #16).
 
-**SPA (frontend, WP-7 — базовый каркас кабинета)**: Vite + React 18 + TypeScript,
+**SPA (frontend, WP-7/WP-8)**: Vite + React 18 + TypeScript,
 без фреймворков роутинга — hash-роутинг (корректно за nginx/статикой):
 `#/` — кабинет (или вход/регистрация без авторизации), `#/sessions/{id}` — страница
-сессии (метаданные + транскрипт из `/events`; голосовой интерфейс — WP-8). JWT — в
-localStorage, каждый запрос — `Authorization: Bearer`; 401/403 на `/auth/me` —
-разлогин. Минуты из `/auth/me` (`minutes_remaining_s`), старт сессии ограничен
-балансом (лимит по грейду 45/50/60/75 мин). Dev-прокси Vite: `/api`, `/healthz`,
-`/ws` → `:8000`; prod — nginx.conf (location `/api/`, `/healthz`, `/ws`).
+сессии: для активных — голосовой интерфейс (WP-8), для завершённых — запись диалога
+из `/events`. JWT — в localStorage, каждый запрос — `Authorization: Bearer`; 401/403 на
+`/auth/me` — разлогин. Минуты из `/auth/me` (`minutes_remaining_s`), старт сессии
+ограничен балансом (лимит по грейду 45/50/60/75 мин). Dev-прокси Vite: `/api`,
+`/healthz`, `/ws` → `:8000`; prod — nginx.conf (location `/api/`, `/healthz`, `/ws`).
+
+**Голосовая сессия UI (WP-8)**: `SessionView` — WS-подключение
+(`/ws/session/{id}?token=`, тот же JWT), таймер (`timer.remaining_s`), живой
+транскрипт (`transcript`), подписи ИИ (`ai_text`), стадии (кнопки
+`stage_action`), завершение (`finish`). Микрофон: `getUserMedia` → `AudioWorklet`
+(ресэмплинг до 16 кГц независимо от системной частоты) → чанки PCM16 250 мс →
+бинарные кадры C→S. TTS-кадры S→C `{seq,flags}`+PCM16 → очередь `AudioBuffer`
+в `AudioContext` (16 кГц); индикатор «ИИ говорит» (turn-taking, SRS §8).
+Живые зависимости браузера (AudioContext, worklet) изолированы за чистыми
+модулями (`audio/resample.ts` — юнит-тесты), `ws.ts` — thin-обёртка WebSocket.
+Live-Code/System Design — плейсхолдеры до WP-9/WP-10.
 
 ## 2. Топологии развёртывания
 
@@ -306,6 +317,11 @@ sequenceDiagram
 Алерты: p95 `turn_e2e_ms` > 6000 мс; `stt_errors` > 2%/5 мин; sandbox OOM/таймауты > 5/час.
 
 ## 7. История
+- v0.4.7 (2026-09-14) — Implementation WP-8 (голосовая сессия UI): §1 —
+  SessionView (WS-клиент, AudioWorklet-микрофон → PCM-кадры 250 мс, PCM-плеер
+  TTS-кадров, таймер/транскрипт/подписи, stage_action/finish); чистый модуль
+  audio/resample.ts (ресэмплинг, парсинг кадров {seq,flags}); ws.ts (JSON +
+  бинарные, ui-события); vitest: 37 тестов.
 - v0.4.6 (2026-09-14) — Implementation WP-7 (базовая часть): §1 — SPA-каркас
   кабинета (hash-роутинг, views: вход/регистрация, кабинет (профиль, минуты,
   «новое интервью», история), страница сессии (транскрипт)); типизированный

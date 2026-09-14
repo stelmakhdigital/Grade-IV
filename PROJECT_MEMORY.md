@@ -294,7 +294,35 @@
   - Осталось по WP-7: голосовая сессия UI (WP-8) — WebSocket-клиент,
     AudioWorklet-микрофон, PCM-воспроизведение, таймер, транскрипт вживую.
 
+- **2026-09-14** (Фаза 3) — Шаг «WP-8: голосовая сессия (frontend)»:
+  - `src/ws.ts`: SessionWS — WS-клиент сессии: /ws/session/{id}?token= (тот же
+    JWT), JSON-сообщения (stage/timer/ai_text/transcript/run_result/
+    report_ready/error) + бинарные TTS-кадры {seq,flags LE}+PCM16; sendUi
+    (stage_action/finish/utterance), sendPcm (микрофон), close 1011 → aborted.
+  - `src/audio/resample.ts` (чистый, юнит-тесты): float32→int16 16 кГц
+    (линейная интерполяция, сатурация), parseTtsFrame (заголовок {seq,flags}),
+    pcmDurationS.
+  - `src/audio/mic.ts`: MicCapture — getUserMedia → AudioWorklet (blob-скрипт,
+    ресэмплинг до 16 кГц при любой системной частоте) → чанки PCM16 250 мс;
+    заземление gain 0 (звук в динамики не идёт); статы idle/running/denied.
+  - `src/audio/player.ts`: PcmPlayer — очередь AudioBuffer (AudioContext 16 кГц),
+    планирование по времени, isSpeaking() — индикатор «ИИ говорит» (SRS §8).
+  - `SessionView` (заменила TranscriptView): активные/паузные — голосовой экран
+    (соединение, таймер mm:ss, живой транскрипт, подписи ai_text, микрофон,
+    «К Live-Code»/«К System Design» → stage_action, «Завершить интервью» →
+    finish, error/aborted); завершённые — запись из /events. Live-Code/
+    System Design — плейсхолдеры (WP-9/WP-10), задача стадии показывается
+    из stage.task.
+  - Тесты: +resample (7), +ws (6, fake WebSocket), +SessionView (4: запись,
+    таймер/транскрипт/finish, denied-mic, stage_action) — итого 37; tsc +
+    vitest (стабильно ×2) + vite build — зелёные.
+  - Ограничения MVP: без реконнекта WS (detach → paused, переподключение —
+    новая вкладка/кнопка «Продолжить»), без barge-in (turn-taking серверный),
+    без эхо-подавления (AEC — бэклог), livecode/design UI — плейсхолдеры.
+  - ARCHITECTURE.md v0.4.7.
+  - WP-7 (кабинет) закоммичен (e5af092) и запушен; roadmap: 3199d7d.
+
 ## Next steps
-1. Коммит WP-7 (кабинет) — ждёт разрешения.
-2. WP-8: голосовая сессия (AudioWorklet-микрофон → WS, PCM-воспроизведение, транскрипт, таймер).
-3. Бэклоги: стриминг TTS по предложениям, точная Silero-VAD в Go (onnx), GPU-конфиг, long-lived контейнеры sandbox.
+1. Коммит WP-8 — ждёт разрешения.
+2. WP-9: Live-Code UI (Monaco, «Запустить тесты» → POST /runs, ИИ-ревью, follow-up).
+3. Бэклоги: AEC/эхо-подавление, стриминг TTS по предложениям, точная Silero-VAD в Go (onnx), GPU-конфиг, long-lived контейнеры sandbox.

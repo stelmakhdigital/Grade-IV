@@ -1,14 +1,13 @@
 /**
  * Корень приложения (WP-7): hash-роутинг без зависимостей.
  *   #/            — кабинет (если нет авторизации — вход/регистрация)
- *   #/sessions/:id — страница сессии (метаданные + транскрипт;
- *                    голосовой интерфейс — WP-8)
+ *   #/sessions/:id — страница сессии: голосовая (WS, WP-8) / запись (история)
  */
 import { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './auth';
 import { CabinetView } from './views/CabinetView';
 import { LoginView } from './views/LoginView';
-import { TranscriptView } from './views/TranscriptView';
+import { SessionView } from './views/SessionView';
 
 function useHashRoute(): string {
   const [hash, setHash] = useState(() => window.location.hash || '#/');
@@ -43,7 +42,7 @@ function Routes() {
     return <LoginView />;
   }
   if (sessionId !== null) {
-    return <TranscriptView id={sessionId} />;
+    return <SessionView id={sessionId} />;
   }
   return <CabinetView />;
 }
