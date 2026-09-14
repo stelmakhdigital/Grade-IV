@@ -48,7 +48,7 @@
 - [x] WP-12: Инфра и доки: docker-compose (profiles default/gpu), .env.example, Makefile, README, e2e-smoke скрипт — коммит 2026-09-14 (см. git log)
 
 ## Фаза 4: Testing
-- [ ] План тестирования (юнит, интеграция, E2E, load)
+- [x] План тестирования (юнит, интеграция, E2E, load) — docs/TEST_PLAN.md v1.0, 2026-09-14
 - [ ] Тесты голосового контура: latency end-to-end, качество STT/TTS
 - [ ] Тесты сандбокса кода (изоляция, лимиты ресурсов, доверенность тестов)
 - [ ] Load-тест real-time нагрузки (одновременные сессии)

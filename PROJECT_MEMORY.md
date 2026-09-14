@@ -451,11 +451,28 @@
   - ARCHITECTURE.md v0.4.11.
   - WP-11 закоммичен (1f69796) и запушен; roadmap: 45860c6.
 
+- **2026-09-14** (Фаза 4) — Фаза 3 (Implementation) ЗАКРЫТА: все WP-1…WP-12
+  (последний — WP-12 «Инфра и доки»: README полный, compose gpu-профиль,
+  scripts/smoke.sh + make smoke [SMOKE OK], Makefile up-gpu/smoke; fix флейка
+  App.test — гонка /me и /sessions). Коммиты 35293da, 5621069, 86309ad,
+  roadmap «Фаза 3 — ЗАВЕРШЕНА».
+- **2026-09-14** (Фаза 4) — Шаг «План тестирования»: docs/TEST_PLAN.md v1.0 —
+  пирамида (юнит/интеграция/E2E/load), матрица «требование → тест» по FR-A/S/C/
+  S5/R и NFR; методики: голосовой latency (harness, p50/p95, эталон 20 фраз,
+  STT-сходство ≥0.85), сандбокс (timeout/OOM/network=none/FS), load
+  (50 WS-сессий, Go-клиент, p95 tick ≤1 с); регресс-прогон (make test ×3,
+  build, smoke, liveN) и критерии выхода фазы.
+  Подводные камни: в dev-окружении нет docker (compose-запуск — на nod);
+  stale-процессы api на занятых портах маскируют новый бинарник (pkill перед
+  e2e); jq отсутствует (smoke.sh — на python3).
+
 ## Next steps
-1. Коммит WP-12 + закрыть Фазу 3 (Implementation) в roadmap.
-2. Фаза 4 (Testing, по roadmap): сквозные сценарии, нагрузки, нагрузочный
-   smoke; выход фазы — явное одобрение пользователя.
-3. Бэклоги: AEC/эхо-подавление, PNG-экспорт холста + vision-оценка (ADR-004),
-   запрет редактирования тестов задачи, стриминг TTS по предложениям,
-   точная Silero-VAD в Go (onnx), GPU-конфиг (запуск compose gpu),
-   long-lived контейнеры sandbox.
+1. Коммит шага «План тестирования» (+roadmap [x]).
+2. Фаза 4: «Тесты голосового контура» — latency_probe (voice/scripts) +
+   эталон 20 фраз + замеры p50/p95 (LLM-мок + voice fake — детерминизм).
+3. Фаза 4: «Тесты сандбокса» — задачи-пробои (infinite loop, OOM, сеть, FS),
+   отчёт docs/test-results/sandbox-*.md.
+4. Фаза 4: load-тест (Go WS-клиент, 50 сессий) + regression-прогон.
+5. Бэклоги: AEC/эхо-подавление, PNG-экспорт холста + vision-оценка (ADR-004),
+   запрет редактирования тестов задачи, стриминг TTS, Silero-VAD onnx в Go,
+   GPU-конфиг, long-lived контейнеры sandbox.
