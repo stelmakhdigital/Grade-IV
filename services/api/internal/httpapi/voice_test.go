@@ -35,6 +35,7 @@ func (m *mockVoice) server(t *testing.T) *httptest.Server {
 			m.sttCalls++
 			body, _ := readAllLimited(r, 1<<20)
 			m.sttBytes += len(body)
+			time.Sleep(100 * time.Millisecond)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"text":"Здравствуйте, расскажите о себе","confidence":0.87,"duration_s":1.6}`))
 		case "/api/v1/tts":
@@ -290,4 +291,70 @@ func TestWSVoiceTTSHeaderFormat(t *testing.T) {
 func mustJSON(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// TestWSVoicePreSTT (бэклог: STT, перекрывающий VAD-хвост): mock voice с
+// задержкой STT (100 мс) — pre-STT должен завершиться ДО финализации VAD,
+// и ходовой конвейер возьмёт его результат (не запускать STT повторно).
+// Проверка: sttCalls == 1 (только pre-STT; повторный STT в ходовом конвейере не нужен).
+func TestWSVoicePreSTT(t *testing.T) {
+	ts, token, sessionID, m, _ := newVoiceEnv(t)
+	conn := dialWS(t, ts, token, sessionID)
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	// 1) Старт: stage + приветствие (ai_text).
+	msgs := wsReadMixed(t, conn, 2, 3*time.Second)
+	if msgs[0] != "text:stage/<nil>/<nil>" {
+		t.Fatalf("старт: %v", msgs)
+	}
+	if !startsWith(msgs[1], "text:ai_text/") {
+		t.Fatalf("приветствие: %v", msgs[1])
+	}
+
+	// 2) TTS приветствия: кадры 8000 байт (+4 заголовок).
+	frames := (m.ttsPCMSize + 7999) / 8000
+	for i := 0; i < frames; i++ {
+		got := wsReadMixed(t, conn, 1, 3*time.Second)
+		if len(got) != 1 || got[0] != "bin:8004" {
+			t.Fatalf("TTS-кадр %d: %v", i, got)
+		}
+	}
+
+	// 3) Говорим: 4 кадра тона (1 с) + тишина (хвост 500 мс → VAD завершает).
+	// Pre-STT: при первой тишине (PreSilenceMS=400, кадр 250 мс) запускается
+	// распознавание; mock STT с задержкой 100 мс — успевает до финализации.
+	writePCM := func(pcm []byte) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = conn.Write(ctx, websocket.MessageBinary, pcm)
+		cancel()
+	}
+	for i := 0; i < 4; i++ {
+		writePCM(tonePCM(250, 5000))
+	}
+	for i := 0; i < 3; i++ {
+		writePCM(silencePCM(250))
+	}
+
+	// 4) Ожидаем transcript(user) — приходит от pre-STT (не повторный STT).
+	var sawUser bool
+	for i := 0; i < 12 && !sawUser; i++ {
+		got := wsReadMixed(t, conn, 1, 2*time.Second)
+		if len(got) == 0 {
+			continue
+		}
+		if got[0] == "text:transcript/user/Здравствуйте, расскажите о себе" {
+			sawUser = true
+		}
+	}
+	if !sawUser {
+		t.Fatal("нет transcript(user) от pre-STT")
+	}
+
+	// 5) Проверка: sttCalls == 1 (только pre-STT; ходовой конвейер не запустил повторный STT).
+	// Ждём немного, чтобы ходовой конвейер завершил работу (если был бы повторный STT — он уже бы случился).
+	time.Sleep(200 * time.Millisecond)
+	if m.sttCalls != 1 {
+		t.Fatalf("sttCalls = %d, want 1 (pre-STT должен был покрыть ходовой конвейер)", m.sttCalls)
+	}
+	t.Logf("pre-STT: старт на PreSilence (400 мс тишины), завершён до VAD-финализации; стт вызовов: %d (только pre)", m.sttCalls)
 }

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -87,6 +88,7 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 	vadCfg := vad.DefaultConfig()
 	vadCfg.EndSilenceMS = s.cfg.VADEndSilenceMS
 	vadCfg.RMSThreshold = s.cfg.VADRMSThreshold
+	vadCfg.PreSilenceMS = s.cfg.VADPreSilenceMS
 	ws := &wsSession{id: id, ctx: ctx, vad: vad.New(vadCfg)}
 	ws.touch()
 
@@ -117,9 +119,31 @@ type wsSession struct {
 	vad        *vad.Detector
 	busy       atomic.Bool // голосовой ход занят (один параллельный, turn-taking)
 	ttsActive  atomic.Bool // ИИ говорит (стрим TTS) — микрофон не слушается
+	// Pre-STT (voice_pipeline.go): предварительное распознавание при первой
+	// тишине — перекрывает VAD-хвост, экономит время STT.
+	preSTTActive atomic.Bool  // pre-STT запущен (на текущий буфер)
+	preSTTBytes  atomic.Int64 // длина буфера на момент запуска (валидность)
+	preSTTMu     sync.Mutex
+	preSTT       *preSTTResult
 }
 
 func (w *wsSession) touch() { atomic.StoreInt64(&w.lastActive, time.Now().UnixNano()) }
+
+// setPreSTT / takePreSTT — доступ к pre-STT результату (mutex: гоутрутин
+// записывает, ходовой конвейер читает).
+func (w *wsSession) setPreSTT(p *preSTTResult) {
+	w.preSTTMu.Lock()
+	defer w.preSTTMu.Unlock()
+	w.preSTT = p
+}
+
+func (w *wsSession) takePreSTT() *preSTTResult {
+	w.preSTTMu.Lock()
+	defer w.preSTTMu.Unlock()
+	p := w.preSTT
+	w.preSTT = nil
+	return p
+}
 
 func (w *wsSession) silentS() int {
 	return int(time.Since(time.Unix(0, atomic.LoadInt64(&w.lastActive))).Seconds())

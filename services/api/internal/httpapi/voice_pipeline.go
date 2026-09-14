@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/voicesvc"
 )
 
 // Пайплайн голосового хода (ADR-002): PCM-кадры кандидата → VAD → voice /stt →
@@ -78,9 +79,20 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 	ws.touch() // реплика ИИ завершена — отсчёт тишины кандидата
 }
 
+// preSTTResult — предварительное распознавание (pre-STT): запущено на
+// текущем буфере реплики при первой тишине (PreSilence), перекрывает остаток
+// VAD-хвоста. Валидно, если реплика не расширялась после запуска.
+type preSTTResult struct {
+	res     voicesvc.STTResult
+	errored bool
+	done    chan struct{}
+}
+
 // handleVoiceUtterance — goroutine: завершённая VAD-реплика → STT → ход кандидата.
 // busy-флаг гарантирует один параллельный голосовой ход на соединение (остальные
 // реплики теряются — ходовой режим, barge-in вне скоупа).
+// preSTT: если распознание уже запущено (pre-STT при первой тишине) и реплика
+// не расширялась — ждём его результат (экономит время STT, ~0.7 с на CPU).
 func (s *Server) handleVoiceUtterance(ws *wsSession, pcm []byte) {
 	defer ws.busy.Store(false)
 	if s.voice == nil {
@@ -90,20 +102,41 @@ func (s *Server) handleVoiceUtterance(ws *wsSession, pcm []byte) {
 	if err != nil || snap.Stage != models.StageVoice || snap.Status != models.StatusActive {
 		return // голосовой конвейер работает только на активной voice-стадии
 	}
-	res, err := s.voice.STT(ws.ctx, pcm)
-	if err != nil {
-		s.log.Warn("stt: распознавание не удалось", "session", ws.id, "err", err)
-		return
+
+	// Pre-STT: результат, запущенный до завершения VAD-хвоста.
+	var res voicesvc.STTResult
+	var ok bool
+	if p := ws.takePreSTT(); p != nil && int64(len(pcm)) == ws.preSTTBytes.Load() {
+		select {
+		case <-p.done:
+			if !p.errored {
+				res, ok = p.res, true
+			}
+		case <-ws.ctx.Done():
+			return
+		}
+	}
+	if !ok {
+		// Обычный STT (pre-STT не было, не завершилось или реплика расширялась).
+		res, err = s.voice.STT(ws.ctx, pcm)
+		if err != nil {
+			s.log.Warn("stt: распознавание не удалось", "session", ws.id, "err", err)
+			return
+		}
 	}
 	text := strings.TrimSpace(res.Text)
 	if text == "" {
 		return // молчание/шум — без хода
 	}
-	s.log.Info("stt: реплика кандидата", "session", ws.id, "chars", len(text), "conf", res.Confidence)
+	s.log.Info("stt: реплика кандидата", "session", ws.id, "chars", len(text), "conf", res.Confidence, "pre", ok)
 	s.runCandidateTurn(ws, text)
 }
 
 // feedVAD — бинарный кадр PCM из readLoop: VAD; по завершённой реплике — конвейер.
+// Pre-STT: при первой тишине после речи (vad.PreSilence) запускаем распознавание
+// на текущем буфере реплики — оно перекрывает остаток VAD-хвоста и экономит
+// время STT (~0.7 с на CPU). Инвалидация при возобновлении речи (новые speech-
+// кадры расширяют буфер → preSTTBytes не совпадёт).
 func (s *Server) feedVAD(ws *wsSession, pcm []byte) {
 	// Пока ИИ говорит или ход занят — не слушаем (turn-taking, ADR-002).
 	if ws.ttsActive.Load() || ws.busy.Load() {
@@ -111,8 +144,28 @@ func (s *Server) feedVAD(ws *wsSession, pcm []byte) {
 	}
 	utterance, done := ws.vad.Feed(pcm)
 	if !done {
+		// Pre-STT: предварительное распознавание при первой тишине.
+		if ws.vad.PreSilence() && ws.preSTTActive.CompareAndSwap(false, true) {
+			buf := ws.vad.Utterance()
+			ws.preSTTBytes.Store(int64(len(buf)))
+			p := &preSTTResult{done: make(chan struct{})}
+			ws.setPreSTT(p)
+			go func() {
+				defer close(p.done)
+				r, err := s.voice.STT(ws.ctx, buf)
+				if err != nil {
+					p.errored = true
+					s.log.Debug("stt: pre-распознавание не удалось", "session", ws.id, "err", err)
+					return
+				}
+				p.res = r
+			}()
+			s.log.Debug("stt: pre-распознавание запущено", "session", ws.id, "bytes", len(buf))
+		}
 		return
 	}
+	// Реплика завершена: сбрасываем pre-STT-флаг (если ещё не сброшен).
+	ws.preSTTActive.Store(false)
 	if !ws.busy.CompareAndSwap(false, true) {
 		return // на границе занят — реплика теряется (допустимо в ходовом режиме)
 	}

@@ -17,6 +17,11 @@ type Config struct {
 	MinSpeechMS  int // короче — всплеск/шум, не реплика (default 400)
 	MaxSpeechMS  int // длиннее — принудительный срез (default 20000)
 	RMSThreshold int // порог «речь есть» по RMS int16 (default 500; ~0.015 amplitude)
+	// PreSilenceMS — «предварительная тишина»: тишина ≥ порога ПОСЛЕ речи,
+	// но ещё до EndSilenceMS (default 400). Сигнал для pre-STT: распознавание
+	// можно запустить на текущем буфере реплики — оно перекрывает остаток
+	// VAD-хвоста и экономит время STT в пайплайне (~0.7 с на CPU).
+	PreSilenceMS int
 }
 
 // DefaultConfig — пороки по умолчанию.
@@ -27,6 +32,7 @@ func DefaultConfig() Config {
 		MinSpeechMS:  400,
 		MaxSpeechMS:  20000,
 		RMSThreshold: 500,
+		PreSilenceMS: 400,
 	}
 }
 
@@ -58,11 +64,39 @@ func New(cfg Config) *Detector {
 	if cfg.RMSThreshold <= 0 {
 		cfg.RMSThreshold = 500
 	}
+	if cfg.PreSilenceMS <= 0 {
+		cfg.PreSilenceMS = 400
+	}
+	if cfg.PreSilenceMS > cfg.EndSilenceMS {
+		cfg.PreSilenceMS = cfg.EndSilenceMS / 2
+	}
 	return &Detector{cfg: cfg}
 }
 
 // InSpeech — идёт речь прямо сейчас (для UI/анти-nudge).
 func (d *Detector) InSpeech() bool { return d.inSpeech }
+
+// PreSilence — предварительная тишина: реплику можно предварительного
+// распознать (pre-STT) — речь уже ≥ 400 мс тишины, но EndSilenceMS ещё не
+// набрано (кандидат может продолжить). Инвалидация при новом speech-кадре.
+func (d *Detector) PreSilence() bool {
+	return d.inSpeech && d.silentMS >= d.cfg.PreSilenceMS
+}
+
+// UtteranceLen — текущая длина накопленного аудио реплики (в байтах).
+// Меняется только на speech-кадрах; тишина в реплику не входит.
+func (d *Detector) UtteranceLen() int { return len(d.utterance) }
+
+// Utterance — копия накопленного аудио реплики (для pre-STT: распознать
+// текущий буфер, пока VAD-хвост ещё не завершился).
+func (d *Detector) Utterance() []byte {
+	if len(d.utterance) == 0 {
+		return nil
+	}
+	buf := make([]byte, len(d.utterance))
+	copy(buf, d.utterance)
+	return buf
+}
 
 // FrameMS — длительность кадра в мс.
 func (d *Detector) FrameMS(pcm []byte) int {
