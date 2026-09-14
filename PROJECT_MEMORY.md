@@ -270,8 +270,31 @@
   - ARCHITECTURE.md v0.4.5 (контракт кадров, пайплайн, VAD_RMS_THRESHOLD).
   - Подводный камень nhooyr: Read с истёкшим ctx **закрывает соединение**
     (timeoutLoop) — тесты/клиенты не делают «висящие» чтения с дедлайном.
+  - Закоммичено (6fd8a33) и запушено; roadmap WP-6a → [x] (bfda9bc).
+
+- **2026-09-14** (Фаза 3) — Шаг «WP-7: Frontend — кабинет кандидата» (базовая часть):
+  - `src/api.ts`: типизированный API-клиент grade-api: JWT в localStorage
+    (grade.token, Bearer), `ApiError{status,code,msg}` по кодам тела,
+    register/login/me, create/list/get session, listEvents, apiHealth (/healthz).
+  - `src/auth.tsx`: AuthProvider (при старте /auth/me; 401/403 — разлогин;
+    сетевой сбой — гость, но токен не удаляется), useAuth (user, minutes).
+  - Views: LoginView (вход/регистрация, валидация email+пароль, маппинг
+    кодов ошибок), CabinetView (email, минуты, «новое интервью» grade+stack
+    с лимитом минут 45/50/60/75, история со статусами: завершённые →
+    «Транскрипт», активные → «Продолжить»), TranscriptView (шапка сессии +
+    события из /events с подписями labels.ts).
+  - App.tsx: hash-роутинг без зависимостей (#/ — кабинет/вход, #/sessions/:id).
+  - nginx.conf + vite.config: location/proxy `/healthz` (healthz живёт БЕЗ
+    префикса /api — баг WP-1 исправлен).
+  - Тесты vitest: 20 (api-клиент 6, labels 2, App 4, LoginView 4, CabinetView 4);
+    tsc --noEmit + vite build — зелёные; smoke собранного бандла (статика + api).
+  - Зависимости: +@testing-library/user-event (dev); pnpm-workspace.yaml
+    allowBuilds.esbuild=true (build-скрипты pnpm 12 по умолчанию запрещены).
+  - ARCHITECTURE.md v0.4.6 (SPA-каркас кабинета).
+  - Осталось по WP-7: голосовая сессия UI (WP-8) — WebSocket-клиент,
+    AudioWorklet-микрофон, PCM-воспроизведение, таймер, транскрипт вживую.
 
 ## Next steps
-1. Коммит шага «голосовой конвейер» — ждёт разрешения (WP-4/WP-5 уже закоммичены: 253bca9, 68be782; roadmap: ebf5537).
-2. Frontend WP-7…WP-10 (кабинет, голосовая сессия с AudioWorklet-микрофоном, Live-Code, System Design).
+1. Коммит WP-7 (кабинет) — ждёт разрешения.
+2. WP-8: голосовая сессия (AudioWorklet-микрофон → WS, PCM-воспроизведение, транскрипт, таймер).
 3. Бэклоги: стриминг TTS по предложениям, точная Silero-VAD в Go (onnx), GPU-конфиг, long-lived контейнеры sandbox.

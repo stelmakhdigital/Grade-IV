@@ -1,34 +1,57 @@
-import { useEffect, useState } from 'react';
-import { apiHealth } from './api';
-
-type ApiStatus = 'checking' | 'ok' | 'unavailable';
-
 /**
- * Каркас приложения (WP-1). Кабинет кандидата — WP-7,
- * голосовая сессия — WP-8, Live-Code — WP-9, System Design — WP-10.
+ * Корень приложения (WP-7): hash-роутинг без зависимостей.
+ *   #/            — кабинет (если нет авторизации — вход/регистрация)
+ *   #/sessions/:id — страница сессии (метаданные + транскрипт;
+ *                    голосовой интерфейс — WP-8)
  */
-export function App() {
-  const [status, setStatus] = useState<ApiStatus>('checking');
+import { useEffect, useState } from 'react';
+import { AuthProvider, useAuth } from './auth';
+import { CabinetView } from './views/CabinetView';
+import { LoginView } from './views/LoginView';
+import { TranscriptView } from './views/TranscriptView';
 
+function useHashRoute(): string {
+  const [hash, setHash] = useState(() => window.location.hash || '#/');
   useEffect(() => {
-    let alive = true;
-    apiHealth().then((ok) => {
-      if (alive) setStatus(ok ? 'ok' : 'unavailable');
-    });
-    return () => {
-      alive = false;
-    };
+    const onChange = () => setHash(window.location.hash || '#/');
+    window.addEventListener('hashchange', onChange);
+    return () => window.removeEventListener('hashchange', onChange);
   }, []);
+  return hash;
+}
 
-  const badgeClass = status === 'ok' ? 'badge ok' : status === 'unavailable' ? 'badge err' : 'badge';
-  const badgeLabel =
-    status === 'ok' ? 'api: доступен' : status === 'unavailable' ? 'api: недоступен' : 'api: проверка…';
+/** #/sessions/42 -> 42; null — если id не число. */
+function parseSessionId(hash: string): number | null {
+  const m = /^#\/sessions\/(\d+)$/.exec(hash);
+  return m !== null ? Number(m[1]) : null;
+}
 
+function Routes() {
+  const { status } = useAuth();
+  const hash = useHashRoute();
+  const sessionId = parseSessionId(hash);
+
+  if (status === 'loading') {
+    return (
+      <main className="app">
+        <h1>Грейд</h1>
+        <p className="muted">Загрузка…</p>
+      </main>
+    );
+  }
+  if (status === 'guest') {
+    return <LoginView />;
+  }
+  if (sessionId !== null) {
+    return <TranscriptView id={sessionId} />;
+  }
+  return <CabinetView />;
+}
+
+export function App() {
   return (
-    <main className="app">
-      <h1>Грейд</h1>
-      <p>ИИ мок-интервью для разработчиков. Каркас (WP-1); кабинет — WP-7.</p>
-      <span className={badgeClass}>{badgeLabel}</span>
-    </main>
+    <AuthProvider>
+      <Routes />
+    </AuthProvider>
   );
 }

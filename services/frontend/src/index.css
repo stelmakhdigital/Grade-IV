@@ -14,9 +14,9 @@ body {
 }
 
 .app {
-  max-width: 720px;
+  max-width: 860px;
   margin: 0 auto;
-  padding: 48px 24px;
+  padding: 40px 24px;
 }
 
 h1 {
@@ -24,9 +24,296 @@ h1 {
   margin-bottom: 8px;
 }
 
+h2 {
+  color: #9aa4b8;
+  font-size: 15px;
+  margin: 0 0 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 p {
   color: #9aa4b8;
 }
+
+.muted {
+  color: #6b7688;
+}
+
+.small {
+  font-size: 13px;
+}
+
+/* ---------------------------------------------------------------- карточки */
+
+.card {
+  background: #10141d;
+  border: 1px solid #232a3a;
+  border-radius: 10px;
+  padding: 20px;
+  margin-top: 20px;
+}
+
+.notice {
+  border-color: #3a3320;
+}
+
+/* ----------------------------------------------------------------- кнопки */
+
+.btn {
+  display: inline-block;
+  border: 1px solid #2a3140;
+  border-radius: 8px;
+  background: #161c28;
+  color: #d6dbe5;
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 16px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:hover {
+  border-color: #3a465c;
+}
+
+.btn.primary {
+  background: #7aa2f7;
+  border-color: #7aa2f7;
+  color: #0b0e14;
+  font-weight: 600;
+}
+
+.btn.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn.ghost {
+  background: transparent;
+}
+
+.btn.small {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------------------ форма */
+
+.field {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.field span {
+  display: block;
+  font-size: 12px;
+  color: #6b7688;
+  margin-bottom: 4px;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  font: inherit;
+  color: #d6dbe5;
+  background: #0b0e14;
+  border: 1px solid #2a3140;
+  border-radius: 8px;
+  padding: 9px 12px;
+}
+
+.field input:focus,
+.field select:focus {
+  outline: none;
+  border-color: #7aa2f7;
+}
+
+.form-error {
+  color: #e06c75;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.form-warn {
+  color: #e5c07b;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+/* ------------------------------------------------------------------ auth */
+
+.auth-page {
+  text-align: center;
+}
+
+.auth-card {
+  text-align: left;
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.tab {
+  flex: 1;
+  font: inherit;
+  font-size: 14px;
+  padding: 8px;
+  border: 1px solid #2a3140;
+  border-radius: 8px;
+  background: transparent;
+  color: #9aa4b8;
+  cursor: pointer;
+}
+
+.tab.active {
+  background: #161c28;
+  color: #d6dbe5;
+  border-color: #7aa2f7;
+}
+
+/* ------------------------------------------------------------- кабинет */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.header h1 {
+  margin-bottom: 2px;
+}
+
+.history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.history-head h2 {
+  margin-bottom: 0;
+}
+
+.start-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.start-form .field {
+  margin-bottom: 0;
+  min-width: 190px;
+}
+
+.start-form .btn {
+  margin-bottom: 1px;
+}
+
+.sessions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.sessions-table th {
+  text-align: left;
+  color: #6b7688;
+  font-weight: normal;
+  padding: 6px 8px;
+  border-bottom: 1px solid #232a3a;
+}
+
+.sessions-table td {
+  padding: 8px;
+  border-bottom: 1px solid #1a202d;
+}
+
+.sessions-table tr:last-child td {
+  border-bottom: none;
+}
+
+.status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  border: 1px solid #2a3140;
+}
+
+.status.active {
+  color: #73daca;
+  border-color: #2b4a43;
+}
+
+.status.paused {
+  color: #e5c07b;
+  border-color: #4a3f2b;
+}
+
+.status.finished {
+  color: #9aa4b8;
+  border-color: #2a3140;
+}
+
+.status.aborted {
+  color: #e06c75;
+  border-color: #4a2b2e;
+}
+
+/* ------------------------------------------------------------- транскрипт */
+
+.transcript-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.event {
+  padding: 10px 0;
+  border-bottom: 1px solid #1a202d;
+}
+
+.event:last-child {
+  border-bottom: none;
+}
+
+.event-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #6b7688;
+}
+
+.event-kind {
+  color: #9aa4b8;
+}
+
+.event.user_utterance .event-kind {
+  color: #7aa2f7;
+}
+
+.event.ai_utterance .event-kind,
+.event.ai_nudge .event-kind {
+  color: #73daca;
+}
+
+.event-text {
+  margin-top: 6px;
+  color: #d6dbe5;
+  white-space: pre-wrap;
+}
+
+/* старые бейджи (WP-1) */
 
 .badge {
   display: inline-block;
