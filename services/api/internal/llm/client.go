@@ -26,6 +26,9 @@ const (
 type Message struct {
 	Role    Role   `json:"role"`
 	Content string `json:"content"`
+	// Images — data-URL (base64) вложенных изображений (vision, ADR-004:
+	// PNG схемы whiteboard → Qwen vision). Формат OpenAI-мультимодалки.
+	Images []string `json:"images,omitempty"`
 }
 
 // Request — запрос к LLM.

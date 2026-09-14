@@ -256,10 +256,11 @@ export function saveWhiteboard(
   id: number,
   state: unknown,
   structure: DesignStructure,
+  pngB64?: string,
 ): Promise<{ saved: boolean; structure: DesignStructure }> {
   return request(`/sessions/${id}/whiteboard`, {
     method: 'PUT',
-    body: { state, structure },
+    body: { state, structure, ...(pngB64 ? { png: pngB64 } : {}) },
   });
 }
 

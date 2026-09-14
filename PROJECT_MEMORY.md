@@ -565,6 +565,21 @@
   - Инструменты: latency/probe.py (можно --api/--tts/--runs/--out); бенч STT
     (faster_whisper transcribe на /tmp/vadpcm.bin).
 
+- **2026-09-14** (бэклог) — Шаг «PNG-экспорт холста + vision-оценка» (ADR-004):
+  - Фронтенд: DesignCanvasApi.snapshot → async (+pngB64: Excalidraw exportToBlob,
+    lazy-import, 32 px padding, null если холст пуст); DesignPanel ждёт PNG и
+    шлёт в saveWhiteboard; api.ts saveWhiteboard(+pngB64?) — поле png в теле PUT.
+  - API: PUT /whiteboard принимает png (base64, ≤10 МБ, 413 при превышении,
+    400 при не-base64) → whiteboards.Save (png_path); оценка ИИ OnDesignSubmit(
+    ..., png) → data-URL в Message.Images (llm.Message +Images []string) →
+    Qwen vision в проде (OpenAI-мультимодалка), mock — детерминированно.
+  - Тесты: TestWhiteboardPutPNG (PNG сохраняется + mock LLM получил
+    data:image/png;base64,... в user-сообщении), TestWhiteboardPutPNGInvalidBase64
+    (400); фронтенд-тесты (mock canvas async snapshot) 57/57.
+  - Регресс: api 7 пакетов, tsc, vitest, vite build — зелёные.
+  - Ограничение: в проде PNG идёт в LLM как data-URL (вместо native images-
+    массива OpenAI) — Qwen vision принимает; при переходе на нативный формат —
+    поправить llm/client.go (одна точка).
 - **2026-09-14** (бэклог) — Шаг «Доверенность тестов задач» (TEST_PLAN §4.4,
   security-баг): кандидат сдавал /runs со своим набором файлов ВКЛЮЧАЯ тесты —
   тест-«троян» (всегда pass) проходил вместо тестов банка. Фикс в sandbox

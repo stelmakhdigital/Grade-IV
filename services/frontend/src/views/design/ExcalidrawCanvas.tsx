@@ -10,6 +10,38 @@ const Excalidraw = lazy(() =>
   import('@excalidraw/excalidraw').then((m) => ({ default: m.Excalidraw })),
 );
 
+// PNG-экспорт холста (ADR-004: оценка vision по PNG ≥ 1920 px по широкой стороне).
+// Лениво: тянет exportToBlob из того же модуля.
+async function exportCanvasPng(
+  elements: unknown[],
+  appState: unknown,
+): Promise<string | null> {
+  if (!elements.length) return null;
+  try {
+    const { exportToBlob } = await import('@excalidraw/excalidraw');
+    const blob: Blob | undefined = await exportToBlob(
+      {
+        elements: elements as never,
+        appState: appState as never,
+        files: {} as never,
+        exportPadding: 32,
+      },
+      { mimeType: 'image/png', quality: 0.9 },
+    );
+    if (!blob) return null;
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result));
+      fr.onerror = () => reject(fr.error);
+      fr.readAsDataURL(blob);
+    });
+    return dataUrl.split(',', 2)[1] ?? null;
+  } catch (err) {
+    console.warn('Дизайн-холст: PNG-экспорт не удался', err);
+    return null;
+  }
+}
+
 export interface ExcalidrawCanvasProps {
   apiRef: { current: DesignCanvasApi | null };
 }
@@ -99,12 +131,15 @@ export function ExcalidrawCanvas({ apiRef }: ExcalidrawCanvasProps) {
         const elements: SceneElement[] = api.getSceneElements() ?? [];
         api.updateScene({ elements: [...elements, ...blockElements(name, x, y)] });
       },
-      snapshot: () => {
+      snapshot: async () => {
         const api = excalidraw.current;
         const elements: SceneElement[] = api?.getSceneElements() ?? [];
+        const appState = api?.getAppState() ?? {};
+        const pngB64 = await exportCanvasPng(elements, appState);
         return {
-          state: { elements, appState: api?.getAppState() ?? {} },
+          state: { elements, appState },
           arrows: elements.filter((e) => e?.type === 'arrow').length,
+          pngB64,
         };
       },
     };

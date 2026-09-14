@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -16,6 +17,9 @@ import (
 
 // whiteboardMaxBodyBytes — лимит тела PUT /whiteboard (state + base64-картинка).
 const whiteboardMaxBodyBytes = 8 << 20
+
+// whiteboardMaxPngBytes — лимит PNG схемы (10 МБ; ADR-004: 1920 px+).
+const whiteboardMaxPngBytes = 10 << 20
 
 // DTO сессии для REST (ARCHITECTURE.md §4.1).
 type sessionDTO struct {
@@ -279,7 +283,22 @@ func (s *Server) handleWhiteboardPut(w http.ResponseWriter, r *http.Request) {
 	}
 	blocksJSON, _ = json.Marshal(structure)
 
-	if err := s.whiteboards.Save(r.Context(), id, body.State, blocksJSON, nil); err != nil {
+	// PNG схемы (base64 → файл на узле; ADR-004: оценка vision по PNG + структуре).
+	var pngBytes []byte
+	if body.Png != "" {
+		decoded, err := base64.StdEncoding.DecodeString(body.Png)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "png: некорректное base64")
+			return
+		}
+		if len(decoded) > whiteboardMaxPngBytes {
+			writeError(w, 413, "too_large", "png слишком большой")
+			return
+		}
+		pngBytes = decoded
+	}
+
+	if err := s.whiteboards.Save(r.Context(), id, body.State, blocksJSON, pngBytes); err != nil {
 		s.log.Error("whiteboard save", "session", id, "err", err)
 		writeError(w, http.StatusInternalServerError, "internal", "ошибка сохранения холста")
 		return
@@ -292,7 +311,7 @@ func (s *Server) handleWhiteboardPut(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		rctx, cancel := context.WithTimeout(context.Background(), llm.DefaultTimeout)
 		defer cancel()
-		text, err := s.interviewer.OnDesignSubmit(rctx, id, structure)
+		text, err := s.interviewer.OnDesignSubmit(rctx, id, structure, pngBytes)
 		if err != nil {
 			s.log.Warn("design: ИИ-оценка не удалась", "session", id, "err", err)
 			return

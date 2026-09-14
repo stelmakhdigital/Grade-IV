@@ -11,7 +11,11 @@ function json(status: number, body: unknown): Response {
 
 interface MockApi {
   placeBlock: ReturnType<typeof vi.fn>;
-  snapshot: () => { state: { elements: unknown[]; appState: unknown }; arrows: number };
+  snapshot: () => Promise<{
+    state: { elements: unknown[]; appState: unknown };
+    arrows: number;
+    pngB64?: string | null;
+  }>;
 }
 
 /** Холст-заглушка вместо Excalidraw (jsdom). */
@@ -19,13 +23,15 @@ function makeMockCanvas() {
   const calls: string[] = [];
   const api: MockApi = {
     placeBlock: vi.fn((name: string) => calls.push(name)),
-    snapshot: () => ({
-      state: {
-        elements: calls.map((n, i) => ({ id: `e${i}`, type: 'rectangle', text: n })),
-        appState: { viewBackgroundColor: '#111' },
-      },
-      arrows: 2,
-    }),
+    snapshot: () =>
+      Promise.resolve({
+        state: {
+          elements: calls.map((n, i) => ({ id: `e${i}`, type: 'rectangle', text: n })),
+          appState: { viewBackgroundColor: '#111' },
+        },
+        arrows: 2,
+        pngB64: 'aW1hZ2U=',
+      }),
   };
   const Canvas: ComponentType<CanvasProps> = ({ apiRef }) => {
     useEffect(() => {

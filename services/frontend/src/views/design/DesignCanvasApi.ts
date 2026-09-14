@@ -8,11 +8,16 @@ export interface DesignSnapshot {
   state: { elements: unknown[]; appState: unknown };
   /** Число стрелок (связей) на холсте. */
   arrows: number;
+  /**
+   * PNG схемы (base64, без префикса) для vision-оценки ИИ (ADR-004).
+   * Опционально: холст без элементов — null (оценка по структуре).
+   */
+  pngB64?: string | null;
 }
 
 export interface DesignCanvasApi {
   /** Вставить блок палитры (группа: прямоугольник + подпись). */
   placeBlock: (name: string) => void;
-  /** Текущее состояние холста для сохранения. */
-  snapshot: () => DesignSnapshot;
+  /** Текущее состояние холста для сохранения (PNG-экспорт — асинхронный). */
+  snapshot: () => Promise<DesignSnapshot>;
 }

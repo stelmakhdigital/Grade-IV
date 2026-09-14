@@ -51,8 +51,8 @@ export function DesignPanel({
     setSubmitting(true);
     setError(null);
     try {
-      const snap = apiRef.current.snapshot();
-      await saveWhiteboard(sessionId, snap.state, { blocks: placed, links: snap.arrows });
+      const snap = await apiRef.current.snapshot();
+      await saveWhiteboard(sessionId, snap.state, { blocks: placed, links: snap.arrows }, snap.pngB64 ?? undefined);
       setSaved(true);
     } catch (e) {
       if (e instanceof ApiError) {

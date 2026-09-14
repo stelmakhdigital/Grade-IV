@@ -7,6 +7,7 @@ package interviewer
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -151,7 +152,11 @@ func (i *Interviewer) OnCodeRun(ctx context.Context, sessionID int64, summary ma
 // OnDesignSubmit — оценка схемы System Design (ADR-004, WP-10): структура
 // блоков/связей (из холста) + устный ответ стадии → ревью по рубрике
 // (покрытие, масштабируемость, отказоустойчивость, trade-offs) + follow-up.
-func (i *Interviewer) OnDesignSubmit(ctx context.Context, sessionID int64, structure map[string]any) (string, error) {
+// OnDesignSubmit — оценка схемы System Design (ADR-004, WP-10): структура
+// блоков/связей (из холста) + PNG схемы (vision, если есть) + устный ответ
+// стадии → ревью по рубрике (покрытие, масштабируемость, отказоустойчивость,
+// trade-offs) + follow-up.
+func (i *Interviewer) OnDesignSubmit(ctx context.Context, sessionID int64, structure map[string]any, png []byte) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, llm.DefaultTimeout)
 	defer cancel()
 
@@ -169,7 +174,11 @@ func (i *Interviewer) OnDesignSubmit(ctx context.Context, sessionID int64, struc
 		"\nОцени по рубрике: (1) покрытие (клиент, балансировка, сервисы, БД/кэш, очереди, мониторинг), " +
 		"(2) масштабируемость, (3) отказоустойчивость, (4) обоснование trade-offs. " +
 		"В конце задай один follow-up вопрос. Устно: "
-	msgs := i.buildMessages(sess, userMsg)
+	var imgs []string
+	if len(png) > 0 {
+		imgs = []string{"data:image/png;base64," + base64.StdEncoding.EncodeToString(png)}
+	}
+	msgs := i.buildMessages(sess, userMsg, imgs...)
 	resp, err := i.llm.Chat(ctx, llm.Request{
 		Messages:    msgs,
 		Temperature: 0.5,
@@ -226,10 +235,14 @@ func (i *Interviewer) context(ctx context.Context, sessionID int64, userMsg stri
 }
 
 // buildMessages — system-промпт + последние реплики + текущий ход.
-func (i *Interviewer) buildMessages(sess models.Session, userMsg string) []llm.Message {
+func (i *Interviewer) buildMessages(sess models.Session, userMsg string, images ...string) []llm.Message {
 	msgs := []llm.Message{{Role: llm.RoleSystem, Content: SystemPrompt(sess.Grade, string(sess.Stack), sess.Stage)}}
 	msgs = append(msgs, i.transcript(sess.ID, i.maxHistory)...)
-	msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: userMsg})
+	msg := llm.Message{Role: llm.RoleUser, Content: userMsg}
+	if len(images) > 0 {
+		msg.Images = images
+	}
+	msgs = append(msgs, msg)
 	return msgs
 }
 

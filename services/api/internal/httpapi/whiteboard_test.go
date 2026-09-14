@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 )
 
 func authHeader(token string) map[string]string {
@@ -95,5 +97,70 @@ func TestWhiteboardPutErrors(t *testing.T) {
 		map[string]any{"state": json.RawMessage(`{"elements":[]}`)}, authHeader(otherToken))
 	if code != http.StatusNotFound {
 		t.Fatalf("чужая сессия: %d", code)
+	}
+}
+
+// TestWhiteboardPutPNG (ADR-004, vision-оценка): PNG (base64) в PUT сохраняется
+// в whiteboards, и оценка ИИ получает data-URL картинки (mock LLM — Images в
+// user-сообщении).
+func TestWhiteboardPutPNG(t *testing.T) {
+	e := newInterviewEnv(t)
+
+	// Минимальный валидный PNG 1×1 (67 байт, base64).
+	pngB64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+	code, m := doJSON(t, "PUT",
+		fmt.Sprintf("%s/api/v1/sessions/%d/whiteboard", e.ts.URL, e.session),
+		map[string]any{
+			"state":     json.RawMessage(`{"elements":[],"appState":{}}`),
+			"png":       pngB64,
+			"structure": map[string]any{"blocks": []string{"Client"}, "links": 0},
+		}, authHeader(e.token))
+	if code != http.StatusOK {
+		t.Fatalf("PUT png: %d %v", code, m)
+	}
+
+	// PNG сохранён в whiteboards.
+	_, _, pngPath, err := e.srv.whiteboards.Get(context.Background(), e.session)
+	if err != nil {
+		t.Fatalf("whiteboards.Get: %v", err)
+	}
+	if len(pngPath) == 0 {
+		t.Fatalf("png не сохранён")
+	}
+
+	// ИИ-оценка (fire-and-forget): ждём, пока mock LLM получит запрос с data-URL
+	// картинки (poll по Calls).
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		found := false
+		for _, call := range e.mock.Calls() {
+			for _, msg := range call.Messages {
+				if len(msg.Images) > 0 && len(msg.Images[0]) > len("data:image/png;base64,") &&
+					strings.HasPrefix(msg.Images[0], "data:image/png;base64,") {
+					found = true
+				}
+			}
+		}
+		if found {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("mock LLM не получил PNG-картинку в user-сообщении (vision-поток не сработал)")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// TestWhiteboardPutPNGInvalidBase64 — 400 на некорректном base64.
+func TestWhiteboardPutPNGInvalidBase64(t *testing.T) {
+	e := newInterviewEnv(t)
+	code, _ := doJSON(t, "PUT",
+		fmt.Sprintf("%s/api/v1/sessions/%d/whiteboard", e.ts.URL, e.session),
+		map[string]any{
+			"state": json.RawMessage(`{"elements":[]}`),
+			"png":   "не-base64-!!!",
+		}, authHeader(e.token))
+	if code != http.StatusBadRequest {
+		t.Fatalf("invalid base64: %d", code)
 	}
 }
