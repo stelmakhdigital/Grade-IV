@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stelmakhdigital/grade-iv/services/sandbox/internal/runner"
@@ -161,4 +162,56 @@ func TestRunSubprocess(t *testing.T) {
 	if m["tests"].([]any)[0].(map[string]any)["passed"] != false {
 		t.Fatalf("tests: %v", m["tests"])
 	}
+}
+
+// TestRunTestFileTrust (TEST_PLAN §4.4): кандидат сдаёт задачу с «трояном» в
+// тесте (solution_test.go переписан на pass) — исполняются ТОЛЬКО тесты банка:
+// решение без функции проваливается тестами банка, несмотря на поддельный тест.
+func TestRunTestFileTrust(t *testing.T) {
+	if testing.Short() {
+		t.Skip("нужен go-интерпретатор (не -short)")
+	}
+	ts := newTestServer(t, "subprocess")
+	// go-fizzbuzz: кандидат присылает решение БЕЗ func FizzBuzz + поддельный
+	// тест-«троян» (всегда проходит).
+	body := []byte(`{
+		"stack":"go","action":"test","task_id":"go-fizzbuzz",
+		"files":{
+			"go.mod":"module task\n\ngo 1.21\n",
+			"solution.go":"package task\n",
+			"solution_test.go":"package task\n\nfunc TestTrojan(t *testing.T) {}\n"
+		}
+	}`)
+	req, _ := http.NewRequest("POST", ts.URL+"/api/v1/sessions/t1/runs", bytes.NewReader(body))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+	var res struct {
+		Passed bool             `json:"passed"`
+		Stdout string           `json:"stdout"`
+		Stderr string           `json:"stderr"`
+		Tests  []map[string]any `json:"tests"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("decode: %v (body: %s)", err, raw)
+	}
+	if res.Passed {
+		t.Fatalf("троян пройден — тесты банка не подставлены: %+v", res)
+	}
+	// Trojan не должен попасть в список тестов (исполнены тесты банка).
+	for _, tr := range res.Tests {
+		if name, _ := tr["name"].(string); name == "TestTrojan" {
+			t.Fatalf("в исполненных тестах есть Trojan — подставлены тесты кандидата: %+v", res.Tests)
+		}
+	}
+	// Сигнатура подстановки: ошибка сборки ссылается на FizzBuzz из ТЕСТОВ БАНКА
+	// (у кандидата func FizzBuzz не реализован, поддельный троян его не использует).
+	joined := res.Stdout + res.Stderr
+	if !strings.Contains(joined, "FizzBuzz") && len(res.Tests) == 0 {
+		t.Fatalf("нет признаков исполнения тестов банка (ни ошибок о FizzBuzz, ни тестов): %+v", res)
+	}
+	t.Logf("доверенность тестов: passed=false, подстановка банка подтверждена")
 }

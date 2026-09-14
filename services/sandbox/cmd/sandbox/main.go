@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
+	"strings"
 	"syscall"
 	"time"
 
@@ -73,14 +75,31 @@ func handleRun(mode string, bank *tasks.Bank, rn *runner.Runner, log *slog.Logge
 			writeJSON(w, http.StatusBadRequest, errBody("unsupported_action", "MVP: только action=test"))
 			return
 		}
+		files := req.Files
 		if req.TaskID != "" {
-			if _, ok := bank.Get(req.TaskID); !ok {
+			task, ok := bank.Get(req.TaskID)
+			if !ok {
 				writeJSON(w, http.StatusBadRequest, errBody("unknown_task", "задача не найдена в банке: "+req.TaskID))
 				return
 			}
+			// Доверенность тестов (TEST_PLAN §4.4): кандидату видны тесты задачи
+			// (MVP-ограничение), но исполняются ТОЛЬКО тесты банка — «трояны»
+			// в поданных *_test.go / test_*.py игнорируются (замена на банк).
+			merged := make(map[string]string, len(files)+len(task.Files))
+			for k, v := range files {
+				merged[k] = v
+			}
+			for name, content := range task.Files {
+				if isTaskTestFile(name, task.Stack) {
+					merged[name] = content
+				}
+			}
+			files = merged
+			log.Info("run: тесты подставлены из банка (доверенность тестов)",
+				"session", sessionID, "task", task.ID)
 		}
 		log.Info("run", "session", sessionID, "stack", req.Stack, "task", req.TaskID, "mode", mode)
-		res, err := rn.Run(r.Context(), req.Stack, req.Files)
+		res, err := rn.Run(r.Context(), req.Stack, files)
 		if err != nil {
 			switch {
 			case errors.Is(err, runner.ErrUnsupportedStack),
@@ -96,6 +115,19 @@ func handleRun(mode string, bank *tasks.Bank, rn *runner.Runner, log *slog.Logge
 			return
 		}
 		writeJSON(w, http.StatusOK, res)
+	}
+}
+
+// isTaskTestFile — имя файла с тестами задачи (go: *_test.go, python: test_*.py / *_test.py).
+func isTaskTestFile(name, stack string) bool {
+	switch stack {
+	case "go":
+		return strings.HasSuffix(name, "_test.go")
+	case "python":
+		base := path.Base(name)
+		return strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py")
+	default:
+		return false
 	}
 }
 

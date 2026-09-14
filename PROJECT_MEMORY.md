@@ -565,8 +565,16 @@
   - Инструменты: latency/probe.py (можно --api/--tts/--runs/--out); бенч STT
     (faster_whisper transcribe на /tmp/vadpcm.bin).
 
-## Next steps
-1. Коммит уточнения отчёта.
+- **2026-09-14** (бэклог) — Шаг «Доверенность тестов задач» (TEST_PLAN §4.4,
+  security-баг): кандидат сдавал /runs со своим набором файлов ВКЛЮЧАЯ тесты —
+  тест-«троян» (всегда pass) проходил вместо тестов банка. Фикс в sandbox
+  (cmd/sandbox/main.go): при task_id тестовые файлы (go: *_test.go, python:
+  test_*.py/*_test.py) подставляются из банка поверх файлов кандидата;
+  кандидатские файлы-решения не тронуты. Тест: TestRunTestFileTrust
+  (голый solution.go + троян-тест → passed=false, сборка падает на
+  «undefined: FizzBuzz» из тестов БАНКА — подстановка подтверждена).
+  Регресс: sandbox зелёные (2 пакета).
+
 2. Бэклог-улучшения (после phase gate по prod-узлу): стриминговый STT
    (chunked faster-whisper), TTS-стриминг + pacing, AEC/эхо-подавление,
    Silero-VAD onnx в Go, read-only task tests, GPU-конфиг (large-v3).
