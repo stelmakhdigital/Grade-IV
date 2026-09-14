@@ -27,7 +27,7 @@ type Config struct {
 	SilenceNudgeS   int    // тишина > порога → nudge от ИИ, с (SILENCE_NUDGE_S)
 	LLMMock         bool   // LLM-мок вместо реального эндпоинта (LLM_MOCK=1; dev/CI, ADR-005)
 	VADEndSilenceMS int    // конец реплики по тишине, мс (VAD_END_SILENCE_MS, ADR-002)
-	VADRMSThreshold int    // порог RMS int16: выше — «речь есть» (VAD_RMS_THRESHOLD)
+	VADRMSThreshold int     // абсолютный мин. порог RMS int16 (VAD_RMS_THRESHOLD); фактический — адаптивный (3×шумовой пол)
 	// VADPreSilenceMS — предварительная тишина для pre-STT (VAD_PRESTT_SILENCE_MS,
 	// default 400; 0 — отключает pre-STT).
 	VADPreSilenceMS int
@@ -67,7 +67,7 @@ func Load() (*Config, error) {
 		SilenceNudgeS:   getEnvInt("SILENCE_NUDGE_S", 8),
 		LLMMock:         getEnv("LLM_MOCK", "") == "1",
 		VADEndSilenceMS: getEnvInt("VAD_END_SILENCE_MS", 900),
-		VADRMSThreshold: getEnvInt("VAD_RMS_THRESHOLD", 500),
+		VADRMSThreshold: getEnvInt("VAD_RMS_THRESHOLD", 100),
 		VADPreSilenceMS: getEnvInt("VAD_PRESTT_SILENCE_MS", 400),
 	}
 	if c.JWTExpiryHours <= 0 {

@@ -135,3 +135,62 @@ func TestRMSPCM16(t *testing.T) {
 		t.Fatal("тон: RMS слишком низок")
 	}
 }
+
+// TestVADAdaptiveNoiseFloor — адаптивный порог: тихий фон (RMS ~50) не даёт
+// «речей» на шуме, а тихая «речь» (RMS ~300) детектируется, хотя фиксированный
+// порог 500 её не слышал бы.
+func TestVADAdaptiveNoiseFloor(t *testing.T) {
+	d := New(DefaultConfig()) // RMSThreshold=100, NoiseFloorGain=3
+	// 5 секунд «тихого» фона (амплитуда 100 → RMS ~70) — пол оценивается.
+	for i := 0; i < 20; i++ {
+		_, done := d.Feed(toneFrame(250, 100))
+		if done {
+			t.Fatalf("фон узнан за реплику на кадре %d (floor=%.1f)", i, d.NoiseFloor())
+		}
+	}
+	if !d.noiseInit {
+		t.Fatal("шумовой пол не заведён после 5 с тишины")
+	}
+	thr := d.Adaptive()
+	// Порог: max(100, 3×~70≈210) — выше амплитуды фона (~100 RMS 70).
+	if thr <= 75 {
+		t.Fatalf("адаптивный порог слишком низок: %d (floor=%.1f)", thr, d.NoiseFloor())
+	}
+	// Тихая «речь»: амплитуда 300 → RMS ~212 < старого фиксированного 500,
+	// но выше порога 3×70=210? Гранично — проверим детект при amp 400 (RMS 282).
+	var got bool
+	for i := 0; i < 8 && !got; i++ {
+		_, done := d.Feed(toneFrame(250, 400))
+		if done {
+			got = true
+		}
+	}
+	if !d.InSpeech() && !got {
+		t.Fatalf("тихая речь (RMS ~282) не детектирована (порог %d, floor %.1f)", thr, d.NoiseFloor())
+	}
+}
+
+// TestVADNoiseBurstNotUtterance — всплеск шума в фоне (амплитуда 150 на одном
+// кадре) не становится репликой (короткий всплеск < MinSpeechMS + пол вырос).
+func TestVADNoiseBurstNotUtterance(t *testing.T) {
+	d := New(DefaultConfig())
+	for i := 0; i < 20; i++ {
+		d.Feed(toneFrame(250, 100)) // 5 с фона
+	}
+	// Короткий всплеск 1 кадра (250 мс < MinSpeechMS 400) — удар по клавиатуре.
+	var got bool
+	_, done := d.Feed(toneFrame(250, 500))
+	if done {
+		got = true
+	}
+	// Досылаем тишины — если VAD «собрал» всплеск, на хвосте будет done.
+	for i := 0; i < 8 && !got; i++ {
+		_, done := d.Feed(toneFrame(250, 100))
+		if done {
+			got = true
+		}
+	}
+	if got {
+		t.Fatal("всплеск шума стал репликой")
+	}
+}

@@ -199,6 +199,12 @@ func (s *Server) handleVoiceUtterance(ws *wsSession, pcm []byte) {
 	if text == "" {
 		return // молчание/шум — без хода
 	}
+	// Фильтр доверия: STT на шуме/дыхании галлюцинирует с низкой уверенностью.
+	// Реальные реплики — conf ≥ 0.7 (замеры). Порог 0.5: ниже — шум, без хода.
+	if res.Confidence < 0.5 {
+		s.log.Debug("stt: низкое доверие — шум, без хода", "session", ws.id, "conf", res.Confidence, "text", text[:32])
+		return
+	}
 	s.log.Info("stt: реплика кандидата", "session", ws.id, "chars", len(text), "conf", res.Confidence, "pre", ok)
 	s.runCandidateTurn(ws, text)
 }
