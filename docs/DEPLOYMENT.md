@@ -22,6 +22,35 @@
 GPU-узле). Автодеплой по тегу (docker registry + ansible/ssh) — добавляется
 после появления prod-узла (зависимость задачи 2).
 
+## 1.1 Скачивание моделей (scripts/download-models.sh)
+
+Модели скачиваются в `MODELS_DIR` (default `/mnt/models`):
+
+| Модель | Директория | Размер | Ссылка |
+|--------|------------|--------|--------|
+| **faster-whisper small** (STT) | `$MODELS_DIR/stt/Systran/faster-whisper-small/` | ~460 МБ | https://huggingface.co/Systran/faster-whisper-small |
+| **Silero TTS v5 RU** (TTS) | `$MODELS_DIR/tts/silero-tts-v5_ru.pt` | ~150 МБ | https://models.silero.ai/models/tts/ru/v5_ru.pt |
+| **Qwen3.8-27B-Instruct** (LLM) | `$MODELS_DIR/llm/` | ~60 ГБ (fp16) | https://huggingface.co/Qwen/Qwen3.8-27B-Instruct |
+| **Silero VAD onnx** | В комплекте с faster-whisper | ~2 МБ | — (не скачивается) |
+
+**Запуск:**
+```bash
+# Создать директорию (нужны права):
+sudo mkdir -p /mnt/models && sudo chown $USER /mnt/models
+
+# Скачать (STT_MODEL=small по умолчанию; LLM можно пропустить):
+make models
+# или:
+MODELS_DIR=/mnt/models STT_MODEL=small bash scripts/download-models.sh
+```
+
+**Переменные окружения для запуска:**
+```bash
+export STT_DOWNLOAD_ROOT=/mnt/models/stt   # faster-whisper: кэш моделей
+export TTS_MODEL_DIR=/mnt/models/tts       # Silero TTS: директория модели
+# LLM: vLLM скачивает из HF-кэша (HF_HOME или --local-dir); см. ADR-005.
+```
+
 ## 2. Продакшен-среда (план; нужен узел)
 
 Требования (NFR/SRS):

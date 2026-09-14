@@ -94,7 +94,12 @@ class FasterWhisperSTT:
                         self._compute_type,
                     )
                     self._model = WhisperModel(
-                        self._size, device=self._device, compute_type=self._compute_type
+                        self._size,
+                        device=self._device,
+                        compute_type=self._compute_type,
+                        # Кэш моделей можно направить в общую директорию
+                        # (STT_DOWNLOAD_ROOT, default ~/.cache/huggingface).
+                        download_root=os.getenv("STT_DOWNLOAD_ROOT") or None,
                     )
         return self._model
 
