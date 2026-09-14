@@ -271,14 +271,17 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage, ws *wsSession) {
 			s.engine.SendTo(id, wsErr("invalid_state", err.Error()))
 			return
 		}
-		// Вход на стадии — первая реплика ИИ (WP-5).
+		// Вход на стадии — первая реплика ИИ (WP-5): текст + озвучка (TTS).
 		switch p.Stage {
 		case models.StageLiveCode:
-			s.enterLiveCode(ctx, id)
+			s.enterLiveCode(ctx, id, ws)
 		case models.StageDesign:
 			text, err := s.interviewer.OnStageChanged(ctx, id,
 				"Кандидат переходит к System Design. Представь формат стадии и задай первую задачу на проектирование.")
 			s.sendInterviewerText(ctx, id, text, err)
+			if err == nil {
+				s.streamAIAudio(ws, text) // озвучка формата стадии (TTS)
+			}
 		}
 
 	case "finish":
@@ -339,7 +342,7 @@ type liveCodeTask struct {
 
 // enterLiveCode — вход на стадию Live-Code (WP-5/6): выбрать задачу из банка,
 // отправить её в сообщении stage, прокомментировать ИИ-интервьюер.
-func (s *Server) enterLiveCode(ctx context.Context, id int64) {
+func (s *Server) enterLiveCode(ctx context.Context, id int64, ws *wsSession) {
 	sess, err := s.sessions.Get(ctx, id)
 	if err != nil {
 		return
@@ -363,6 +366,9 @@ func (s *Server) enterLiveCode(ctx context.Context, id int64) {
 	}
 	text, err := s.interviewer.OnStageChanged(ctx, id, stageNote(task))
 	s.sendInterviewerText(ctx, id, text, err)
+	if err == nil {
+		s.streamAIAudio(ws, text) // озвучка задачи (TTS)
+	}
 }
 
 // stageNote — контекст входа на Live-Code для LLM (задача, если выбрана).

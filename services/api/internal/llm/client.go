@@ -111,8 +111,10 @@ func (c *Client) Chat(ctx context.Context, req Request) (Response, error) {
 	var parsed struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content   string `json:"content"`
+				Reasoning string `json:"reasoning"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
@@ -121,8 +123,65 @@ func (c *Client) Chat(ctx context.Context, req Request) (Response, error) {
 	if len(parsed.Choices) == 0 {
 		return Response{}, fmt.Errorf("пустой ответ LLM")
 	}
-	return Response{Content: strings.TrimSpace(parsed.Choices[0].Message.Content)}, nil
+	msg := parsed.Choices[0]
+	content := strings.TrimSpace(msg.Message.Content)
+	if content == "" {
+		// Reasoning-модели (qwen3.x-hybrid и др.): при finish_reason=length весь
+		// бюджет токенов уходит на рассуждение — контент пустой. Повторяем с
+		// увеличенным бюджетом (рассуждение короче, контент есть).
+		if msg.FinishReason == "length" {
+			origMax := req.MaxTokens
+			req.MaxTokens = origMax * 2
+			if req.MaxTokens < 1500 {
+				req.MaxTokens = 1500
+			}
+			body2, err := json.Marshal(req)
+			if err != nil {
+				return Response{}, ErrLLMUnavailable{Err: err}
+			}
+			httpReq2, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body2))
+			if err != nil {
+				return Response{}, ErrLLMUnavailable{Err: err}
+			}
+			httpReq2.Header.Set("Content-Type", "application/json")
+			if c.apiKey != "" {
+				httpReq2.Header.Set("Authorization", "Bearer "+c.apiKey)
+			}
+			resp2, err := c.http.Do(httpReq2)
+			if err != nil {
+				return Response{}, ErrLLMUnavailable{Err: err}
+			}
+			defer resp2.Body.Close()
+			raw2, err := io.ReadAll(io.LimitReader(resp2.Body, 1<<20))
+			if err != nil {
+				return Response{}, ErrLLMUnavailable{Err: fmt.Errorf("чтение ответа (повтор): %w", err)}
+			}
+			if resp2.StatusCode < 200 || resp2.StatusCode >= 300 {
+				return Response{}, ErrLLMUnavailable{Err: fmt.Errorf("HTTP %d (повтор): %s", resp2.StatusCode, strings.TrimSpace(string(raw2)))}
+			}
+			var parsed2 struct {
+				Choices []struct {
+					Message struct {
+						Content   string `json:"content"`
+						Reasoning string `json:"reasoning"`
+					} `json:"message"`
+					FinishReason string `json:"finish_reason"`
+				} `json:"choices"`
+			}
+			if err := json.Unmarshal(raw2, &parsed2); err != nil {
+				return Response{}, fmt.Errorf("разбор ответа (повтор): %w", err)
+			}
+			if len(parsed2.Choices) > 0 {
+				content = strings.TrimSpace(parsed2.Choices[0].Message.Content)
+			}
+		}
+		if content == "" {
+			return Response{}, ErrLLMUnavailable{Err: fmt.Errorf("LLM вернул пустой контент (reasoning_len=%d)", len(msg.Message.Reasoning))}
+		}
+	}
+	return Response{Content: content}, nil
 }
 
+
 // DefaultTimeout — верхний предел хода интервьюера (SRS: p95 хода < 4 с; запас на 4B-модель CPU).
-const DefaultTimeout = 30 * time.Second
+const DefaultTimeout = 60 * time.Second

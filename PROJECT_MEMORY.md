@@ -619,6 +619,24 @@
     2 вызова TTS). Regress: go vet+test (7 пакетов) — зелёные.
   - Эффект: perceived latency «LLM → первый звук» −(дл. синтеза всего ответа −
     дл. синтеза первого предложения) ≈ −0.5–2 с (зависит от длины ответа).
+- **2026-09-15** (багфикс) — Два бага из пользовательского теста:
+  1. **Голос в Live-Code/Design**: вход на стадии не озвучивался (streamAIAudio
+     вызывался только для voice-приветствия). Фикс: enterLiveCode (+ws) и
+     design-вход (stage_action) — после sendInterviewerText — streamAIAudio(ws, text)
+     (озвучка задачи/формата стадии). Проверено: 146 TTS-кадров (~11 с аудио)
+     при переходе в livecode.
+  2. **Пустой контент LLM (reasoning-модели)**: qwen3.8-27b-dflash2 —
+     reasoning-модель; при finish_reason=length весь бюджет max_tokens (300)
+     уходил на рассуждение (reasoning ~1000 токенов), content=None → пустой
+     ai_text + нет TTS. Фикс: llm.Client.Chat — при finish_reason=length и
+     пустом content — повтор с увеличенным max_tokens (×2, min 1500). DefaultTimeout
+     30→60 с (reasoning-модели медленнее).
+  3. **Программа по грейдам в voice-стадии**: добавлено gradeProgram (блоки
+     программы из прототипа лендинга, SRS §4.2) в system-промпт voice-стадии:
+     Junior 4–6 вопросов (3 блока), Middle 6–8 (4 блока), Senior/Staff 8–10
+     (4 блока). ИИ ведёт диалог по блокам (1–2 вопроса на блок).
+  - Regress: go vet+test (7 пакетов), tsc, vitest 57/57 — зелёные.
+  - API перезапущен с новым бинарником (grade-api-run4, LOG_LEVEL=debug).
 - **2026-09-14** (доки) — README: «Быстрый старт (dev)» — 5 шагов (установка,
   модели в FOR_RUN/, запуск 4 сервисов, подключение LLM-узла, браузер),
   таблица dev-переменных, остановка. Коммит (см. ниже).
