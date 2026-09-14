@@ -71,17 +71,29 @@ const S_ACTIVE = {
 };
 const S_FINISHED = { ...S_ACTIVE, status: 'finished', finished_at: '2026-09-14T10:50:00Z' };
 
+const REPORT_MIN = {
+  overall: 3.7,
+  grade_recommendation: 'грейд подтверждён, есть точки роста',
+  criteria: [
+    { name: 'Коммуникация (ясность, структура, русский язык)', weight: 0.15, score: 4 },
+  ],
+  strengths: ['ясно излагал'],
+  weaknesses: ['мало примеров'],
+  recommendations: ['готовить примеры'],
+};
+
 const EVENTS = [
   { seq: 1, ts: '2026-09-14T10:00:05Z', kind: 'session_created', data: { grade: 'middle', stack: 'go' } },
   { seq: 2, ts: '2026-09-14T10:01:00Z', kind: 'user_utterance', data: { text: 'Привет' } },
   { seq: 3, ts: '2026-09-14T10:01:10Z', kind: 'ai_utterance', data: { text: 'Расскажите о себе' } },
 ];
 
-function mockApi(opts: { session?: unknown; events?: unknown } = {}) {
+function mockApi(opts: { session?: unknown; events?: unknown; report?: unknown } = {}) {
   return vi.fn(async (url: string) => {
     if (url.includes('/auth/me')) return json(200, ME);
     if (url.endsWith('/sessions/9')) return json(200, opts.session ?? S_ACTIVE);
     if (url.includes('/events')) return json(200, opts.events ?? EVENTS);
+    if (url.includes('/report')) return json(200, opts.report ?? REPORT_MIN);
     if (url.includes('/sessions')) return json(200, []);
     return json(404, {});
   }) as unknown as typeof fetch;
@@ -115,6 +127,16 @@ describe('SessionView (WP-8)', () => {
     expect(screen.getByText('ИИ-интервьюер')).toBeInTheDocument();
     expect(screen.getByText('Расскажите о себе')).toBeInTheDocument();
     expect(screen.queryByTestId('mic-toggle')).toBeNull();
+  });
+
+  it('завершённая сессия: отчёт (WP-11) под записью', async () => {
+    renderSession(mockApi({ session: S_FINISHED }));
+    const report = await screen.findByTestId('report');
+    expect(report).toHaveTextContent('Итог: 3.70 / 5');
+    expect(screen.getByTestId('report-grade')).toHaveTextContent(
+      'грейд подтверждён, есть точки роста',
+    );
+    expect(screen.getByText('ясно излагал')).toBeInTheDocument();
   });
 
   it('активная сессия: таймер, живой транскрипт, «ИИ говорит», finish', async () => {

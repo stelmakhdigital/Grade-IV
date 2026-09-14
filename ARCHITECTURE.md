@@ -84,6 +84,17 @@ flowchart TB
 Ограничения MVP: один активный файл (вкладки), тесты задачи видны (редактируемы
 — запрет — бэклог), без live-форматирования/автодополнения за пределами Monaco.
 
+**Отчёт UI (WP-11)**: для завершённых сессий (`finished`/`aborted`) в
+`SessionView` под записью диалога — `ReportView`: итог (взвешенное среднее
+1–5), grade-рекомендация (пороги §12), критерии с весами и шкалами, сильные
+стороны/зоны роста, рекомендации. `GET /sessions/{id}/report`: 200 — отчёт,
+202 `{status:generating}` — опрос каждые 2 с (до 30), 409 — сессия не
+завершена. Генерация — fire-and-forget после `finish` (WS и REST):
+LLM-оценщик (строго JSON по критериям §12; веса подтягиваются из таблицы,
+защита от «слитых» весов), fallback — детерминированная эвристика (кодовые
+запуски/схема/речь) — mock-режим; сохранение в `reports` (upsert), WS
+`report_ready {overall}`.
+
 **System Design UI (WP-10)**: на стадии `design` (вместо голосовой панели) —
 `DesignPanel`: палитра 12 блоков (ADR-004: Client, Load Balancer, API-сервис,
 Worker, SQL-БД, NoSQL, Кэш, Очередь, Message Broker, CDN, Внешний API,
@@ -169,7 +180,7 @@ erDiagram
 | POST | /api/v1/sessions/{id}/pause · /resume · /finish | управление (FR-S6, FR-B4, US-8) |
 | POST | /api/v1/sessions/{id}/runs | `{files, action:"test", task_id?}` → результат (4.4); только стадия `livecode`, иначе 409. `files` — полный набор файлов задачи (кандидат получает их в `stage.task.files`, WP-9) |
 | PUT | /api/v1/sessions/{id}/whiteboard | `{state, png?, structure? {blocks, links}}` — сохранение холста (`whiteboards`, upsert) + событие `whiteboard_save` + ИИ-оценка `OnDesignSubmit` → `ai_text` (WP-10); 400 без state, 404 чужая, 409 завершена |
-| GET | /api/v1/sessions/{id}/report | отчёт (202, пока генерируется) |
+| GET | /api/v1/sessions/{id}/report | 200 отчёт `{overall, grade_recommendation, criteria[{name,weight,score,comment}], strengths, weaknesses, recommendations}` · 202 `{status:generating}` · 409 не завершена (WP-11) |
 | GET | /api/v1/sessions/{id}/events | транскрипт/события (история, FR-A4) |
 
 ### 4.2. WS `/ws/session/{id}` (протокол, ADR-001)
@@ -341,6 +352,11 @@ sequenceDiagram
 Алерты: p95 `turn_e2e_ms` > 6000 мс; `stt_errors` > 2%/5 мин; sandbox OOM/таймауты > 5/час.
 
 ## 7. История
+- v0.4.10 (2026-09-14) — Implementation WP-11 (отчёт): §1 — ReportView
+  (критерии §12, grade-рекомендация, polling 202); §4.1 — контракт GET /report;
+  interviewer: GenerateReport (LLM-JSON + эвристический fallback), критерии/веса
+  §12 по грейдам, пороги рекомендации; db: ReportStore (reports); генерация
+  fire-and-forget после finish + WS report_ready.
 - v0.4.9 (2026-09-14) — Implementation WP-10 (System Design UI): §1 —
   DesignPanel (палитра 12 блоков ADR-004, Excalidraw 0.18 canvas,
   «Оценить схему» → PUT /whiteboard, «Оценка ИИ»); §4.1 — контракт

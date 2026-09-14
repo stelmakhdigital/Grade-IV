@@ -260,6 +260,8 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage, ws *wsSession) {
 	case "finish":
 		if _, err := s.engine.Finish(id); err != nil {
 			s.engine.SendTo(id, wsErr("invalid_state", err.Error()))
+		} else {
+			s.startReportGeneration(id) // WP-11: отчёт после завершения
 		}
 
 	case "code_run_requested", "submit_solution":

@@ -557,3 +557,30 @@ p {
   overflow: hidden;
   height: 420px;
 }
+
+/* Отчёт (WP-11) */
+.report h2 { margin: 0 0 4px; }
+.report-grade { margin: 0 0 16px; font-size: 15px; }
+.report h3 { margin: 18px 0 8px; font-size: 15px; }
+.criteria { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+.criterion-top { display: flex; justify-content: space-between; gap: 12px; }
+.criterion-score.good { color: #3fb950; }
+.criterion-score.mid { color: #d29922; }
+.criterion-score.bad { color: #f85149; }
+.criterion-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin: 6px 0;
+}
+.criterion-fill { height: 100%; border-radius: 3px; }
+.criterion-fill.good { background: #3fb950; }
+.criterion-fill.mid { background: #d29922; }
+.criterion-fill.bad { background: #f85149; }
+.report-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+.report-columns ul, .report ol { margin: 0; padding-left: 18px; }

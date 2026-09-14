@@ -19,6 +19,7 @@ import { apiErrorMessage } from './LoginView';
 import { eventKindLabel, eventText, statusLabel, stageLabel } from '../labels';
 import { LiveCodePanel } from './livecode/LiveCodePanel';
 import { DesignPanel } from './design/DesignPanel';
+import { ReportView } from './report/ReportView';
 
 interface Line {
   who: 'user' | 'ai' | 'system';
@@ -327,11 +328,14 @@ export function SessionView({ id }: { id: number }) {
       )}
 
       {!live && (
+        <>
         <section className="card notice">
           <p>
-            Интервью {statusLabel(session.status)}. Ниже — запись диалога.
+            Интервью {statusLabel(session.status)}. Ниже — запись диалога и отчёт.
           </p>
         </section>
+        <ReportView sessionId={id} />
+        </>
       )}
 
       <section className="card transcript" aria-label="Транскрипт">

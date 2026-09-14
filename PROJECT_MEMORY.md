@@ -391,10 +391,49 @@
   - ARCHITECTURE.md v0.4.9.
   - WP-9 закоммичен (d51bc05) и запушен; roadmap: b8f824e.
 
+- **2026-09-14** (Фаза 3) — Шаг «WP-11: Отчёт (генерация §12 + UI)»:
+  - Backend:
+    - db: ReportStore (Save upsert / Get, таблица reports — со WP-3).
+    - interviewer/report.go: GenerateReport — LLM-оценщик (system: роль,
+      шкала 1–5; user: критерии+веса §12 по грейду, транскрипт, кодовые
+      запуски, схема; строго JSON) → parseReportJSON (веса из таблицы §12 —
+      защита от «слитых» весов LLM, clamp 1..5, взвешенное среднее) →
+      gradeRecommendation по порогам §12; fallback — heuristicReport
+      (детерминированно: Live-Code 4/3/2 по запускам, Design 3/2 по схеме,
+      Коммуникация 3/2 по речи, остальные 3) — mock-режим и ошибки парсинга.
+    - httpapi: GET /sessions/{id}/report (200/202 generating/409 не завершена;
+      JSON-массивы через json.RawMessage — []byte в map marshalится в base64!);
+      startReportGeneration (go: GenerateReport → Save → WS report_ready{overall})
+      — вызывается после finish в WS ('finish') и REST (handleSessionAction).
+    - llm.MockProvider.SetResponder (управляемый LLM в тестах).
+  - Frontend:
+    - api.ts: Report/ReportCriterion, getReport() (202 → 'generating'),
+      helpers authHeaders/readApiError.
+    - ReportView: итог N/5, grade-рекомендация, критерии (имя, балл+вес%,
+      цветная шкала 1–5: ≥4 good / ≥2.5 mid / bad), сильные стороны/зоны роста
+      (колонки), рекомендации; 202 — polling (pollMs/maxPolls — props, дефолт
+      2 с × 30), после лимита — «ещё генерируется» + «Повторить»; 409/сеть —
+      ошибка + «Повторить».
+    - SessionView: завершённая сессия → ReportView под записью; report_ready →
+      refreshStatus (уже есть).
+  - Тесты: backend +TestReportLifecycle (202→200, heuristic-баллы: livecode 4,
+    comm 3), TestReportLLMJSON (веса §12: 4.25 → «с запасом»), TestReportErrors
+    (409/404); frontend +ReportView 4 (200, 202→200 polling, 409, лимит
+    опросов) + SessionView «отчёт под записью» — frontend 57, api зелёные,
+    tsc/vite build зелёные.
+  - e2e live-smoke (api LLM_MOCK): create → finish (REST) → GET /report
+    (202 → 200: overall 2.45, 5 критериев, «ниже грейда» — пустая сессия,
+    эвристика). LIVE11 REPORT SMOKE OK.
+  - Подводные камни: fake timers vitest + findBy несовместимы (дедлок) —
+    интервал опроса инжектится через props; user_utterance-событие пишется
+    обработчиком WS, а не OnUserUtterance (она пишет ai_utterance).
+  - ARCHITECTURE.md v0.4.10.
+  - WP-10 закоммичен (79b58ce) и запушен; roadmap: 81cc6fc.
+
 ## Next steps
-1. Коммит WP-10.
-2. WP-11: UI отчёта (критерии, сильные/слабые стороны, рекомендации,
-   grade-рекомендация; backend /report уже считает по завершении).
+1. Коммит WP-11.
+2. WP-12: инфраструктура/доки (compose, nginx prod, README, ADR-обновления,
+   .env.example) — закрыть Фазу 3.
 3. Бэклоги: AEC/эхо-подавление, PNG-экспорт холста + vision-оценка (ADR-004),
    запрет редактирования тестов задачи, стриминг TTS по предложениям,
    точная Silero-VAD в Go (onnx), GPU-конфиг, long-lived контейнеры sandbox.

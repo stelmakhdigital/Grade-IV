@@ -143,6 +143,9 @@ func (s *Server) handleSessionAction(w http.ResponseWriter, r *http.Request) {
 		s.writeSessionEngineError(w, err)
 		return
 	}
+	if r.PathValue("action") == "finish" {
+		s.startReportGeneration(id) // WP-11: отчёт после завершения
+	}
 	m, err := s.sessions.GetOwned(r.Context(), id, userIDFromContext(r.Context()))
 	if err != nil {
 		// Снимок уже выдан; при ошибке БД отдаём из снимка.
@@ -298,4 +301,73 @@ func (s *Server) handleWhiteboardPut(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "structure": structure})
+}
+
+// handleReportGet — GET /api/v1/sessions/{id}/report (WP-11).
+// 200 — отчёт; 202 — сессия завершена, отчёт генерируется; 409 — сессия не завершена.
+func (s *Server) handleReportGet(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseSessionID(w, r)
+	if !ok {
+		return
+	}
+	userID := userIDFromContext(r.Context())
+	m, err := s.sessions.GetOwned(r.Context(), id, userID)
+	if errors.Is(err, db.ErrSessionNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "сессия не найдена")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "не удалось получить сессию")
+		return
+	}
+	if m.Status != models.StatusFinished && m.Status != models.StatusAborted {
+		writeError(w, http.StatusConflict, "invalid_state", "отчёт доступен после завершения сессии")
+		return
+	}
+	overall, gradeRec, criteria, strengths, weaknesses, recommendations, err :=
+		s.reports.Get(r.Context(), id)
+	if errors.Is(err, db.ErrReportNotFound) {
+		w.WriteHeader(http.StatusAccepted)
+		writeJSON(w, http.StatusAccepted, map[string]any{"status": "generating"})
+		return
+	}
+	if err != nil {
+		s.log.Error("report get", "session", id, "err", err)
+		writeError(w, http.StatusInternalServerError, "internal", "ошибка получения отчёта")
+		return
+	}
+	// json.RawMessage — встроить JSON-массивы как есть (а не base64-строку).
+	writeJSON(w, http.StatusOK, map[string]any{
+		"overall":              overall,
+		"grade_recommendation": gradeRec,
+		"criteria":             json.RawMessage(criteria),
+		"strengths":            json.RawMessage(strengths),
+		"weaknesses":           json.RawMessage(weaknesses),
+		"recommendations":      json.RawMessage(recommendations),
+	})
+}
+
+// startReportGeneration — fire-and-forget генерация отчёта (WP-11):
+// LLM-оценщик (fallback — детерминированный), сохранение, report_ready по WS.
+func (s *Server) startReportGeneration(id int64) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*llm.DefaultTimeout)
+		defer cancel()
+		data, err := s.interviewer.GenerateReport(ctx, id)
+		if err != nil {
+			s.log.Warn("report: генерация не удалась", "session", id, "err", err)
+			return
+		}
+		critJSON, _ := json.Marshal(data.Criteria)
+		strJSON, _ := json.Marshal(data.Strengths)
+		weakJSON, _ := json.Marshal(data.Weaknesses)
+		recJSON, _ := json.Marshal(data.Recommendations)
+		if err := s.reports.Save(ctx, id, data.Overall, data.GradeRecommendation,
+			critJSON, strJSON, weakJSON, recJSON); err != nil {
+			s.log.Error("report save", "session", id, "err", err)
+			return
+		}
+		s.log.Info("отчёт готов", "session", id, "overall", data.Overall)
+		s.engine.SendTo(id, map[string]any{"type": "report_ready", "overall": data.Overall})
+	}()
 }

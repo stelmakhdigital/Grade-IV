@@ -188,6 +188,69 @@ export interface DesignStructure {
   links: number;
 }
 
+/** Заголовки авторизации (Bearer, если токен есть). */
+function authHeaders(): Record<string, string> {
+  const h: Record<string, string> = {};
+  const token = getToken();
+  if (token) {
+    h['Authorization'] = `Bearer ${token}`;
+  }
+  return h;
+}
+
+/** ApiError из тела ответа ({code, message|msg}). */
+async function readApiError(res: Response): Promise<ApiError> {
+  let code = 'internal';
+  let msg = `ошибка ${res.status}`;
+  try {
+    const j = (await res.json()) as { code?: string; msg?: string; message?: string };
+    if (j.code) code = j.code;
+    if (j.message) msg = j.message;
+    else if (j.msg) msg = j.msg;
+  } catch {
+    // тело не JSON — общие коды
+  }
+  return new ApiError(res.status, code, msg);
+}
+
+/** Критерий отчёта (шкала 1–5, вес — доля §12). */
+export interface ReportCriterion {
+  name: string;
+  weight: number;
+  score: number;
+  comment?: string;
+}
+
+/** Итоговый отчёт (WP-11, §12). */
+export interface Report {
+  overall: number;
+  grade_recommendation: string;
+  criteria: ReportCriterion[];
+  strengths: string[];
+  weaknesses: string[];
+  recommendations: string[];
+}
+
+/**
+ * Отчёт сессии (GET /sessions/{id}/report).
+ * «generating» — 202 (сессия завершена, отчёт генерируется).
+ */
+export async function getReport(id: number): Promise<Report | 'generating'> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/sessions/${id}/report`, { headers: authHeaders() });
+  } catch {
+    throw new ApiError(0, 'network', 'нет соединения с сервером');
+  }
+  if (res.status === 202) {
+    return 'generating';
+  }
+  if (!res.ok) {
+    throw await readApiError(res);
+  }
+  return (await res.json()) as Report;
+}
+
 /** Сохранение холста System Design (PUT /sessions/{id}/whiteboard, ADR-004). */
 export function saveWhiteboard(
   id: number,

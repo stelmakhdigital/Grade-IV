@@ -52,6 +52,13 @@ func (m *MockProvider) Chat(_ context.Context, req Request) (Response, error) {
 	return Response{Content: fmt.Sprintf("[mock-интервьюер] принял реплику: %s", last)}, nil
 }
 
+// SetResponder — подмена ответа (тесты: управляемый LLM).
+func (m *MockProvider) SetResponder(f func(req Request) (string, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.respond = f
+}
+
 // LastSystem — system-промпт последнего запроса (тесты).
 func (m *MockProvider) LastSystem() string {
 	m.mu.Lock()
