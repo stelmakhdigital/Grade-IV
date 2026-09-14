@@ -352,6 +352,11 @@ sequenceDiagram
 Алерты: p95 `turn_e2e_ms` > 6000 мс; `stt_errors` > 2%/5 мин; sandbox OOM/таймауты > 5/час.
 
 ## 7. История
+- v0.4.11 (2026-09-14) — Implementation WP-12 (инфра и доки): §2 —
+  docker-compose profiles (prod + gpu: voice на GPU-узле, device-requests
+  nvidia), Makefile (up-gpu, smoke), scripts/smoke.sh (REST e2e: healthz →
+  регистрация → сессия → whiteboard → report 409 → finish → report 202→200 →
+  кабинет), README (полный: старт dev/test/deploy), .env.example — актуален.
 - v0.4.10 (2026-09-14) — Implementation WP-11 (отчёт): §1 — ReportView
   (критерии §12, grade-рекомендация, polling 202); §4.1 — контракт GET /report;
   interviewer: GenerateReport (LLM-JSON + эвристический fallback), критерии/веса

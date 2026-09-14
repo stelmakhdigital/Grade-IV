@@ -1,7 +1,9 @@
-# Сервис «Грейд» — основные команды (WP-1).
+
+
+# Сервис «Грейд» — основные команды (WP-1; WP-12: up-gpu, smoke).
 GO_MODULES := services/api services/sandbox
 
-.PHONY: help install test build run-api run-sandbox run-voice run-frontend up down clean
+.PHONY: help install test build run-api run-sandbox run-voice run-frontend up up-gpu down smoke clean
 
 help:
 	@echo "Команды:"
@@ -13,7 +15,9 @@ help:
 	@echo "  make run-voice   — запустить voice (dev, :8100)"
 	@echo "  make run-frontend — запустить frontend (dev, :5173)"
 	@echo "  make up          — docker compose (profile prod)"
+	@echo "  make up-gpu      — compose prod + gpu (voice на GPU-узле)"
 	@echo "  make down        — остановить compose"
+	@echo "  make smoke       — REST e2e-смоук на живом api (API=… , def :8877)"
 	@echo "  make clean       — убрать артефакты сборки"
 
 install:
@@ -56,6 +60,12 @@ up:
 
 down:
 	@docker compose -f infra/docker-compose.yml --profile prod down
+
+up-gpu:
+	@docker compose -f infra/docker-compose.yml --profile prod --profile gpu up --build
+
+smoke:
+	@bash scripts/smoke.sh
 
 clean:
 	@rm -rf services/api/bin services/sandbox/bin services/frontend/dist

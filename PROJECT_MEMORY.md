@@ -430,10 +430,32 @@
   - ARCHITECTURE.md v0.4.10.
   - WP-10 закоммичен (79b58ce) и запушен; roadmap: 81cc6fc.
 
+- **2026-09-14** (Фаза 3) — Шаг «WP-12: Инфра и доки»:
+  - README.md — полный (был однострочный): документация, композиция,
+    быстрый старт dev (make run-*), тесты/сборка/смоук, деплой compose,
+    dev-переменные (LLM_MOCK, fake-провайдеры, SANDBOX_MODE), лицензия.
+  - infra/docker-compose.yml: profile **gpu** (voice на GPU-узле:
+    device-requests nvidia, STT_DEVICE/STT_MODEL из окружения); заголовки
+    обновлены (черновик → WP-12).
+  - Makefile: `up-gpu`, `smoke` (+ help); smoke.sh — REST e2e-контур
+    (healthz → регистрация → сессия → whiteboard → report 409 до finish →
+    finish → report 202 → 200 (overall/критерии) → кабинет (история,
+    status finished)); без jq (python3) — `make smoke` [API=http://…].
+  - .env.example — проверен, актуален (все переменные WP-1..WP-11).
+  - Проверки: bash -n smoke.sh, YAML compose валиден (profiles prod/gpu,
+    gpu: nvidia reservation), make help; **SMOKE OK** на живом api
+    (LLM_MOCK, :8884). Docker в dev-окружении отсутствует — compose
+    не запускался (валидация структуры; запуск — на nod с docker).
+  - Подводной камень дня: stale-процесс api на занятом порту маскировал
+    новый бинарник (405 на новых роутах) — чистить pkill перед smoke.
+  - ARCHITECTURE.md v0.4.11.
+  - WP-11 закоммичен (1f69796) и запушен; roadmap: 45860c6.
+
 ## Next steps
-1. Коммит WP-11.
-2. WP-12: инфраструктура/доки (compose, nginx prod, README, ADR-обновления,
-   .env.example) — закрыть Фазу 3.
+1. Коммит WP-12 + закрыть Фазу 3 (Implementation) в roadmap.
+2. Фаза 4 (Testing, по roadmap): сквозные сценарии, нагрузки, нагрузочный
+   smoke; выход фазы — явное одобрение пользователя.
 3. Бэклоги: AEC/эхо-подавление, PNG-экспорт холста + vision-оценка (ADR-004),
    запрет редактирования тестов задачи, стриминг TTS по предложениям,
-   точная Silero-VAD в Go (onnx), GPU-конфиг, long-lived контейнеры sandbox.
+   точная Silero-VAD в Go (onnx), GPU-конфиг (запуск compose gpu),
+   long-lived контейнеры sandbox.

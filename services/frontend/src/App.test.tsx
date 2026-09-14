@@ -56,7 +56,9 @@ describe('App: маршрутизация (WP-7)', () => {
     expect(await screen.findByTestId('user-email')).toBeInTheDocument();
     expect(screen.getByTestId('minutes')).toHaveTextContent('60');
     expect(screen.getByText('История')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Транскрипт' })).toHaveAttribute('href', '#/sessions/1');
+    // findBy: /sessions может резолвиться позже /auth/me (гонка запросов)
+    const link = await screen.findByRole('link', { name: 'Транскрипт' });
+    expect(link).toHaveAttribute('href', '#/sessions/1');
   });
 
   it('#/sessions/1 — страница сессии (транскрипт)', async () => {

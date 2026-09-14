@@ -1,6 +1,9 @@
-# Сервис «Грейд» — деплой (черновик; финализация: WP-12 — GPU-профиль, тюнинг).
-# Запуск: docker compose -f infra/docker-compose.yml --profile prod up --build
-# Локальный dev без compose: make install && make run-api (см. Makefile).
+# Сервис «Грейд» — деплой (WP-12).
+#   prod (по умолчанию в make up) — полный стек: api+frontend+voice+sandbox+postgres
+#   gpu  — voice на GPU-узле (nvidia; STT large-v3 + TTS быстрее)
+# Запуск:  docker compose -f infra/docker-compose.yml --profile prod up --build
+# GPU:     docker compose -f infra/docker-compose.yml --profile prod --profile gpu up
+# Локальный dev без compose: make install && make run-api (см. Makefile/README).
 name: grade
 
 services:
@@ -46,7 +49,19 @@ services:
     image: grade/voice:dev
     ports:
       - "8100:8100"
-    profiles: [prod]
+    environment:
+      # GPU-профиль: CUDA-torch + large-v3 (переопределяется host-переменными)
+      STT_DEVICE: "${STT_DEVICE:-cpu}"
+      STT_MODEL: "${STT_MODEL:-small}"
+    profiles: [prod, gpu]
+    # gpu-профиль: device-requests (nvidia-container-toolkit на хосте)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   frontend:
     build:
