@@ -44,7 +44,7 @@
 - [x] WP-8: Frontend: голосовая сессия (AudioWorklet-микрофон → WS, PCM-воспроизведение, транскрипт, таймер) — коммит 2026-09-14 (09a4af8)
 - [x] WP-9: Frontend: Live-Code (Monaco, «Запустить тесты», ИИ-ревью, follow-up) — коммит 2026-09-14 (см. git log)
 - [x] WP-10: Frontend: System Design (Excalidraw + палитра 12 блоков, сохранение, ИИ-оценка) — коммит 2026-09-14 (см. git log)
-- [ ] WP-11: Отчёт (генерация по критериям §12, UI, история)
+- [x] WP-11: Отчёт (генерация по критериям §12, UI, история) — коммит 2026-09-14 (см. git log)
 - [ ] WP-12: Инфра и доки: docker-compose (profiles default/gpu), .env.example, Makefile, README, e2e-smoke скрипт
 
 ## Фаза 4: Testing
