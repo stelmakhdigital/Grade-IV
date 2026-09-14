@@ -488,12 +488,28 @@
   - Отчёт: docs/test-results/voice-latency-2026-09-14.md (+json tiny/small).
   - Регресс: go vet+test (api 7 ок), tsc, vitest 57/57.
 
+- **2026-09-14** (Фаза 4) — Шаг «Тесты сандбокса» (TEST_PLAN §4):
+  - sandbox_probe_test.go (subprocess, живой раннер): вечный цикл → timeout
+    (1.50 с, exit=124, [timeout]-маркер) — PASS; 2 ГБ аллокация — не зависает
+    (OOM-kill — docker-сценарий); поток вывода 100 кБ → обрезка по MaxBytes
+    (ровно 1024); workdir под базой, не /tmp (Go-особенность), удаление после
+    запуска — PASS.
+  - **Критичный баг найден и исправлен**: мёртвый цикл таймаута subprocess —
+    exec.CommandContext убивает только sh, дочерние держат пайпы, Wait ждёт EOF
+    вечно, Kill группы был после Wait (недостижим). Фикс: exec.Command +
+    select{waitDone | ctx.Done: Kill(-pid,SIGKILL); <-waitDone} — runner.go.
+  - Docker-сценарии (network=none, OOM-лимиты) — на prod-узле/CI (Фазы 5),
+    бэклог: rlimit для subprocess.
+  - Отчёт: docs/test-results/sandbox-2026-09-14.md.
+  - Регресс: sandbox go vet+test зелёные, api 7 ок, tsc, vitest 57/57.
+
 ## Next steps
-1. Коммит шага «Тесты голосового контура» (+roadmap [x]).
-2. Фаза 4: «Тесты сандбокса» — задачи-пробои (infinite loop, OOM, сеть, FS),
-   отчёт docs/test-results/sandbox-*.md.
-3. Фаза 4: load-тест (Go WS-клиент, 50 сессий) + regression-прогон.
+1. Коммит шага «Тесты сандбокса» (+roadmap [x]).
+2. Фаза 4: load-тест (Go WS-клиент, 50 сессий, LLM-мок + voice fake) —
+   p95 tick ≤1 с, без потерь кадров, отчёт docs/test-results/load-*.md.
+3. Фаза 4: regression-прогон (make test ×3, build, smoke) + закрыть фазу
+   (критерии TEST_PLAN §6) → phase gate пользователю.
 4. Бэклоги: AEC/эхо-подавление, PNG-экспорт холста + vision-оценка (ADR-004),
    запрет редактирования тестов задачи, стриминг TTS (+pacing), Silero-VAD onnx
-   в Go, стриминговый STT, GPU-конфиг (large-v3), long-lived контейнеры sandbox,
-   баг LOG_LEVEL.
+   в Go, стриминговый STT, GPU-конфиг (large-v3), long-lived контейнеры
+   sandbox, баг LOG_LEVEL, rlimit subprocess, docker-пробы в CI.

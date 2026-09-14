@@ -222,13 +222,12 @@ func safePath(p string) bool {
 // runSubprocess — dev-режим: честный интерпретатор хоста в изолированном cwd.
 func (r *Runner) runSubprocess(ctx context.Context, stack, workdir string) ([]byte, int, error) {
 	cmdLine := r.cfg.Commands[stack]
-	var cmd *exec.Cmd
-	switch stack {
-	case "go":
-		cmd = exec.CommandContext(ctx, "sh", "-c", cmdLine)
-	case "python":
-		cmd = exec.CommandContext(ctx, "sh", "-c", cmdLine)
-	}
+	// ВАЖНО: exec.Command (не CommandContext): CommandContext убивает только
+	// родительский sh, а пайп stdout/stderr продолжат удерживать дочерние
+	// процессы (python/go-компилятор) — cmd.Wait() будет ждать EOF по пайпу
+	// вечно (мёртвый цикл, найден пробами Фазы 4). Поэтому по истечении ctx
+	// убиваем всю группу процессов (Setpgid) ДО завершения Wait.
+	cmd := exec.Command("sh", "-c", cmdLine)
 	cmd.Dir = workdir
 	cmd.Env = cleanEnv(workdir, stack)
 	var out bytes.Buffer
@@ -241,21 +240,26 @@ func (r *Runner) runSubprocess(ctx context.Context, stack, workdir string) ([]by
 	if err := cmd.Start(); err != nil {
 		return nil, -1, fmt.Errorf("start: %w", err)
 	}
-	err := cmd.Wait()
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
+	select {
+	case err := <-waitDone:
+		exitCode := 0
+		if err != nil {
+			var ee *exec.ExitError
+			if errors.As(err, &ee) {
+				exitCode = ee.ExitCode()
+			} else {
+				return out.Bytes(), -1, err
+			}
+		}
+		return out.Bytes(), exitCode, nil
+	case <-ctx.Done():
+		// Убиваем группу (SIGKILL) — пайпы закроются, Wait завершится.
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		<-waitDone
 		return out.Bytes(), 124, context.DeadlineExceeded
 	}
-	exitCode := 0
-	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			exitCode = ee.ExitCode()
-		} else {
-			return out.Bytes(), -1, err
-		}
-	}
-	return out.Bytes(), exitCode, nil
 }
 
 // runDocker — prod-режим: контейнер на run с лимитами ADR-003.
