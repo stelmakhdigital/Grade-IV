@@ -271,6 +271,11 @@ export function SessionView({ id }: { id: number }) {
             </span>
             {speaking && <span className="saying">ИИ говорит…</span>}
             {mic === 'running' && <span className="listening">микрофон: включён</span>}
+            {mic !== 'running' && mic !== 'denied' && stage === 'voice' && wsState === 'open' && (
+              <span className="form-error" role="alert">
+                Микрофон выключен — ИИ вас не слышит. Нажмите «Включить микрофон».
+              </span>
+            )}
           </div>
 
           {stage === 'livecode' && session !== null ? (

@@ -69,3 +69,27 @@ export function pcmToBuffer(pcm: Int16Array): ArrayBuffer {
 export function pcmDurationS(pcm: Int16Array): number {
   return pcm.length / TARGET_RATE;
 }
+
+/**
+ * Линейное ресэмплирование float32 → float32 между произвольными частотами
+ * (для плеера: 16 кГц TTS → частота AudioContext устройства).
+ */
+export function resampleFloat(
+  input: Float32Array,
+  fromRate: number,
+  toRate: number,
+): Float32Array {
+  if (input.length === 0) return new Float32Array(0);
+  if (fromRate === toRate) return input;
+  const ratio = fromRate / toRate;
+  const outLen = Math.floor(input.length / ratio);
+  const out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const pos = i * ratio;
+    const i0 = Math.floor(pos);
+    const i1 = Math.min(i0 + 1, input.length - 1);
+    const frac = pos - i0;
+    out[i] = input[i0] * (1 - frac) + input[i1] * frac;
+  }
+  return out;
+}

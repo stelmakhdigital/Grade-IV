@@ -89,7 +89,6 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 			seq++
 		}
 	}
-	ws.touch() // реплика ИИ завершена — отсчёт тишины кандидата
 }
 
 // splitSentences — разбивка текста на предложения для TTS-стриминга:

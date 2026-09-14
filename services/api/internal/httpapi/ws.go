@@ -116,6 +116,13 @@ type wsSession struct {
 	id         int64
 	ctx        context.Context // контекст соединения (отмена при обрыве)
 	lastActive int64           // unixnano
+	lastPCM    int64           // unixnano последнего PCM-кадра от микрофона
+
+	// nudge-лимиты: не чаще раза в 15 с, максимум 3 подряд (сброс при
+	// активности кандидата) — без лимита бесконечный поток nudge затапливает
+	// контекст LLM и UI («быстро сменяющийся текст»).
+	lastNudgeAt atomic.Int64 // unixnano
+	nudgeCount  atomic.Int32
 	vad        *vad.Detector
 	busy       atomic.Bool // голосовой ход занят (один параллельный, turn-taking)
 	ttsActive  atomic.Bool // ИИ говорит (стрим TTS) — микрофон не слушается
@@ -128,6 +135,17 @@ type wsSession struct {
 }
 
 func (w *wsSession) touch() { atomic.StoreInt64(&w.lastActive, time.Now().UnixNano()) }
+
+// lastCandActivity — когда кандидат последний раз был активен (PCM от
+// микрофона). Nudge-отсчёт ведётся от НЕЙ, а не от любой активности:
+// иначе nudge-цикл сам обновляет «активность» → бесконечный поток nudge
+// (текст «быстро сменяется»).
+func (w *wsSession) lastCandActivity() int64 {
+	if n := atomic.LoadInt64(&w.lastPCM); n > 0 {
+		return n
+	}
+	return atomic.LoadInt64(&w.lastActive)
+}
 
 // setPreSTT / takePreSTT — доступ к pre-STT результату (mutex: гоутрутин
 // записывает, ходовой конвейер читает).
@@ -146,7 +164,7 @@ func (w *wsSession) takePreSTT() *preSTTResult {
 }
 
 func (w *wsSession) silentS() int {
-	return int(time.Since(time.Unix(0, atomic.LoadInt64(&w.lastActive))).Seconds())
+	return int(time.Since(time.Unix(0, w.lastCandActivity())).Seconds())
 }
 
 // nudgeLoop — раз в секунду: если сессия активна, стадия voice и кандидат молчит
@@ -173,15 +191,26 @@ func (s *Server) nudgeLoop(ws *wsSession, ctx context.Context) {
 		}
 		silent := ws.silentS()
 		if silent < s.cfg.SilenceNudgeS {
+			ws.nudgeCount.Store(0) // кандидат активен — сброс счётчика
 			continue
 		}
+		if ws.nudgeCount.Load() >= 3 {
+			continue // лимит: ждём кандидата без новых реплик
+		}
+		if time.Since(time.Unix(0, ws.lastNudgeAt.Load())) < 15*time.Second {
+			continue // cooldown между nudge
+		}
+		ws.nudgeCount.Add(1)
 		text, err := s.interviewer.Nudge(ctx, ws.id, silent)
 		if err != nil {
 			s.log.Debug("nudge: ошибка LLM", "session", ws.id, "err", err)
 			continue
 		}
-		ws.touch()
+		// Nudge НЕ обновляет lastCandActivity (это не активность кандидата):
+		// иначе отсчёт тишины обнуляется и nudge-поток становится бесконечным.
+		ws.lastNudgeAt.Store(time.Now().UnixNano())
 		s.engine.SendTo(ws.id, map[string]any{"type": "ai_text", "text": text})
+		s.streamAIAudio(ws, text) // озвучка подсказки (FR-S3: пауза заполняется голосом)
 	}
 }
 
@@ -227,7 +256,10 @@ func (s *Server) readLoop(id int64, conn *websocket.Conn, ctx context.Context, w
 			s.log.Debug("ws: pcm-статистика", "session", id, "frames", pcmFrames, "bytes", pcmBytes, "err", err)
 			return
 		}
-		ws.touch() // любая активность сдвигает отсчёт nudge
+		ws.touch() // любая активность сдвигает lastActive
+		if typ == websocket.MessageBinary {
+			atomic.StoreInt64(&ws.lastPCM, time.Now().UnixNano()) // nudge-отсчёт — от активности кандидата
+		}
 		switch typ {
 		case websocket.MessageBinary:
 			// PCM16 16 кГц mono (ADR-001) → VAD → голосовой пайплайн (ADR-002).

@@ -3,7 +3,7 @@
  * планирование воспроизведения в AudioContext; isSpeaking() —
  * индикатор «ИИ говорит» (turn-taking UI, SRS §8).
  */
-import { pcmDurationS, TARGET_RATE } from './resample';
+import { resampleFloat, TARGET_RATE } from './resample';
 
 export class PcmPlayer {
   private ctx: AudioContext | null = null;
@@ -48,8 +48,12 @@ export class PcmPlayer {
 
   private ensureCtx(): AudioContext {
     if (this.ctx === null) {
+      // Частота по умолчанию = частота устройства (44.1/48 кГц): экзотический
+      // AudioContext(16000) нестабильно воспроизводится на некоторых стеках
+      // (PipeWire/ PulseAudio) — «обрыв» звука после первого слова. PCM
+      // ресемплируется в playChunk под ctx.sampleRate.
       const Ctx = window.AudioContext ?? (window as any).webkitAudioContext;
-      this.ctx = new Ctx({ sampleRate: TARGET_RATE });
+      this.ctx = new Ctx();
       this.nextStartAt = 0;
     }
     if (this.ctx.state === 'suspended') {
@@ -70,13 +74,16 @@ export class PcmPlayer {
   private pump(ctx: AudioContext): void {
     while (this.queue.length > 0) {
       const pcm = this.queue[0];
-      const buffer = ctx.createBuffer(1, pcm.length, TARGET_RATE);
-      buffer.copyToChannel(new Float32Array(this.floatFromPcm(pcm)), 0);
+      const f = this.floatFromPcm(pcm);
+      // PCM16 16 кГц → float32 под частоту устройства (линейно).
+      const samples = resampleFloat(f, TARGET_RATE, ctx.sampleRate);
+      const buffer = ctx.createBuffer(1, samples.length, ctx.sampleRate);
+      buffer.copyToChannel(samples, 0);
       const src = ctx.createBufferSource();
       src.buffer = buffer;
       src.connect(ctx.destination);
       src.start(this.nextStartAt);
-      this.nextStartAt += pcmDurationS(pcm);
+      this.nextStartAt += samples.length / ctx.sampleRate;
       this.queue.shift();
     }
   }
