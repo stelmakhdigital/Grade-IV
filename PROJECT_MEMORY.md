@@ -619,6 +619,27 @@
     2 вызова TTS). Regress: go vet+test (7 пакетов) — зелёные.
   - Эффект: perceived latency «LLM → первый звук» −(дл. синтеза всего ответа −
     дл. синтеза первого предложения) ≈ −0.5–2 с (зависит от длины ответа).
+- **2026-09-14** (запуск) — «Вся система работает на реальном LLM»:
+  - Модели: FOR_RUN/ (в .gitignore): stt/Systran/faster-whisper-small (~460 МБ),
+    tts/silero-tts-v5_ru.pt (~150 МБ). Скачаны scripts/download-models.sh
+    (MODELS_DIR=$PWD/FOR_RUN, LLM пропущен).
+  - LLM: qwen3.8-27b-dflash2 на http://192.168.1.114:8000/v1 (vLLM, max_model_len
+    262K) — /v1/models проверен; прямой chat/completions работает (2.9 с,
+    reasoning-модель: поле reasoning в ответе, content заполнен).
+  - Стек (запущен): sandbox :8200 (subprocess), voice :8100 (STT_MODEL=small,
+    STT_DOWNLOAD_ROOT=FOR_RUN/stt, TTS_MODEL_DIR=FOR_RUN/tts), api :8000
+    (LLM_MOCK=0, LLM_BASE_URL=http://192.168.1.114:8000/v1, LLM_MODEL=
+    qwen3.8-27b-dflash2), frontend :5173 (vite dev).
+  - Проверено end-to-end: (1) отчёт реального LLM готов (overall 2.45/2.6,
+    ~25 с — LLM медленнее мок); (2) голосовой ход: приветствие Qwen3.8 →
+    TTS Silero → реплика кандидата (текст + PCM: STT 2.6 с, conf 0.787) →
+    ответ LLM («Какие метрики говорят, что запрос стал узким местом…») + TTS;
+    (3) REST smoke-контур (report 202→200; ожидание smoke.sh 6 с < реального
+    LLM ~25 с — для smoke использовать LLM_MOCK=1 или увеличить wait в smoke.sh).
+  - PIDs: /tmp/{sbxrun,voicerun,apirun,front}.pid; логи /tmp/{sbxrun,voicerun,
+    apirun,frontlog}.log; БД /tmp/run.db.
+  - Замечание: LLM-ход ~6 с (reasoning-модель без стриминга) — стриминг LLM
+    (SSE) — следующий шаг к SLO p95<4 с (после pre-STT и TTS-стриминга).
 - **2026-09-14** (бэклог) — Шаг «Доверенность тестов задач» (TEST_PLAN §4.4,
   security-баг): кандидат сдавал /runs со своим набором файлов ВКЛЮЧАЯ тесты —
   тест-«троян» (всегда pass) проходил вместо тестов банка. Фикс в sandbox
