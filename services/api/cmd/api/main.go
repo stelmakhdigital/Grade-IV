@@ -18,13 +18,21 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-
 	cfg, err := config.Load()
 	if err != nil {
-		logger.Error("config", "err", err)
+		slog.Error("config", "err", err)
 		os.Exit(1)
 	}
+	// LOG_LEVEL (info|debug) — применяется к логгеру (баг Фазы 4: читалось
+	// из окружения, но не использовалось).
+	var level slog.Level
+	switch cfg.LogLevel {
+	case "debug":
+		level = slog.LevelDebug
+	default:
+		level = slog.LevelInfo
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	if cfg.JWTSecret == config.DevInsecureSecret {
 		logger.Warn("JWT_SECRET не задан — используется dev-секрет (только для разработки)")
 	}

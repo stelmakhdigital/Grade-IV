@@ -515,13 +515,27 @@
   - Регресс: api go vet+test зелёные (httpapi 24 с — с load), frontend tsc +
     57/57, sandbox 2 пакета.
 
+- **2026-09-14** (Фаза 4) — Шаг «Исправление багов, regression-прогон» (TEST_PLAN §6):
+  - Баг (найден в latency-шаге): LOG_LEVEL читалось из окружения, но не
+    применялось к логгеру (main.go: slog.NewJSONHandler(os.Stderr, nil)) —
+    debug-логи не писались. Фикс: HandlerOptions{Level} по cfg.LogLevel
+    (debug|info). Проверено: при LOG_LEVEL=debug пишутся DEBUG-строки
+    (ws: pcm-статистика при обрыве WS).
+  - Regression-прогон (критерий §6): go vet+test — api 7 пакетов, sandbox 2
+    (×1, load-тест входит в make test), frontend tsc + vitest 57/57 ×3
+    (стабильность), vite build; **SMOKE OK** на финальном бинарнике (:8903).
+  - ФЛЕЙКОВ нет (3 стабильных прогона).
+  - ФАЗА 4 ЗАКРЫТА (критерии TEST_PLAN §6): план, голосовой контур
+    (latency+качество), сандбокс (пробы + фикс таймаут-бага), load (50 WS),
+    баги исправлены, регресс зелёный. Phase gate: одобрение пользователя →
+    Фаза 5 (Deployment).
+  - Бэклоги фазы 4 (не блокирующие): стриминговый STT + EndSilence 700 мс
+    (SLO p95<4 с), GPU large-v3 (качество 0.9+), docker-пробы в CI (Фаза 5),
+    rlimit subprocess, TTS-стриминг + pacing, AEC/эхо-подавление, PNG-экспорт
+    холста + vision-оценка (ADR-004), read-only task tests, Silero-VAD onnx в Go.
+
 ## Next steps
-1. Коммит шага «Load-тест» (+roadmap [x]).
-2. Фаза 4: regression-прогон (make test ×3, make build, make smoke) +
-   закрыть фазу (критерии TEST_PLAN §6) → phase gate: явное одобрение
-   пользователя (AGENTS.md — на выходе фазы; коммиты — по стоящему
-   разрешению).
-3. Бэклоги: AEC/эхо-подавление, PNG-экспорт холста + vision-оценка (ADR-004),
-   запрет редактирования тестов задачи, стриминг TTS (+pacing), Silero-VAD onnx
-   в Go, стриминговый STT, GPU-конфиг (large-v3), long-lived контейнеры
-   sandbox, баг LOG_LEVEL, rlimit subprocess, docker-пробы в CI.
+1. Phase gate Фазы 4 → Фаза 5 (Deployment): CI/CD (сборка, тесты, деплой),
+   продакшен-среда (VPS/cloud, домен, TLS, медиа-потоки), мониторинг/алерты
+   (latency голосового контура — ключевой SLO).
+2. Бэклоги (см. выше).

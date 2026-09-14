@@ -47,12 +47,12 @@
 - [x] WP-11: Отчёт (генерация по критериям §12, UI, история) — коммит 2026-09-14 (см. git log)
 - [x] WP-12: Инфра и доки: docker-compose (profiles default/gpu), .env.example, Makefile, README, e2e-smoke скрипт — коммит 2026-09-14 (см. git log)
 
-## Фаза 4: Testing
+## Фаза 4: Testing — ЗАВЕРШЕНА (все 5 задач, коммиты 2026-09-14; phase gate: одобрение пользователя перед Фазой 5)
 - [x] План тестирования (юнит, интеграция, E2E, load) — docs/TEST_PLAN.md v1.0, 2026-09-14
 - [x] Тесты голосового контура: latency end-to-end, качество STT/TTS — docs/test-results/voice-latency-2026-09-14.md (probe + эталон 20, small ≥0.85), 2026-09-14
 - [x] Тесты сандбокса кода (изоляция, лимиты ресурсов, доверенность тестов) — пробы subprocess + фикс бага таймаута, docs/test-results/sandbox-2026-09-14.md, 2026-09-14
 - [x] Load-тест real-time нагрузки (одновременные сессии) — 50 WS-сессий в make test, отчёт docs/test-results/voice-latency-2026-09-14.md (load), 2026-09-14
-- [ ] Исправление багов, regression-прогон
+- [x] Исправление багов, regression-прогон — фикс LOG_LEVEL; регресс: go vet+test, vitest ×3, build, smoke — 2026-09-14
 
 ## Фаза 5: Deployment
 - [ ] CI/CD (сборка, тесты, деплой)
