@@ -534,8 +534,21 @@
     rlimit subprocess, TTS-стриминг + pacing, AEC/эхо-подавление, PNG-экспорт
     холста + vision-оценка (ADR-004), read-only task tests, Silero-VAD onnx в Go.
 
+- **2026-09-14** (Фаза 5) — Шаг «CI/CD» (задача 1):
+  - .github/workflows/ci.yml (push master + PR, concurrency): jobs
+    go (api+sandbox: vet/test/build CGO=0), frontend (tsc/vitest/build),
+    voice (pytest, fake-провайдеры; torch CPU ПЕРЕД requirements — иначе
+    nvidia-* ~2 ГБ), smoke (build api → LLM_MOCK :8877 → scripts/smoke.sh;
+    лог api при сбое). Все jobs эмулированы локально: SMOKE OK, pytest
+    12 passed, go/frontend зелёные.
+  - docs/DEPLOYMENT.md: prod-план (узел app 4vCPU/8GB, LLM-узел vLLM+
+    Qwen3.8-27B, nginx/TLS, чеклист развёртывания) + мониторинг (SLO
+    latency <4 с, STT conf ≥0.7, алерты по warn-логам) — задачи 2/3 Фазы 5
+    требуют VPS пользователя (phase gate).
+  - CD: артефактный (make up на узле); автодеплой по тегу — после prod-узла.
+  - ARCHITECTURE.md v0.4.12.
+
 ## Next steps
-1. Phase gate Фазы 4 → Фаза 5 (Deployment): CI/CD (сборка, тесты, деплой),
-   продакшен-среда (VPS/cloud, домен, TLS, медиа-потоки), мониторинг/алерты
-   (latency голосового контура — ключевой SLO).
+1. Phase gate: prod-узел (VPS) от пользователя → задачи 2/3 Фазы 5
+   (развёртывание, мониторинг). До этого — CI/CD готов.
 2. Бэклоги (см. выше).

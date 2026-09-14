@@ -55,7 +55,7 @@
 - [x] Исправление багов, regression-прогон — фикс LOG_LEVEL; регресс: go vet+test, vitest ×3, build, smoke — 2026-09-14
 
 ## Фаза 5: Deployment
-- [ ] CI/CD (сборка, тесты, деплой)
+- [x] CI/CD (сборка, тесты, деплой) — .github/workflows/ci.yml (go/frontend/voice-fake/smoke, jobs эмулированы локально); CD — make up (артефакт), 2026-09-14
 - [ ] Продакшен-среда (cloud/VPS), домен, TLS, медиа-потоки
 - [ ] Мониторинг, алерты, логи (latency голосового контура — ключевой SLO)
 

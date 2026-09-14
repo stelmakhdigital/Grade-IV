@@ -352,6 +352,11 @@ sequenceDiagram
 Алерты: p95 `turn_e2e_ms` > 6000 мс; `stt_errors` > 2%/5 мин; sandbox OOM/таймауты > 5/час.
 
 ## 7. История
+- v0.4.12 (2026-09-14) — Testing/Deployment: Фаза 4 закрыта (plan,
+  voice-latency [small ≥0.85; STT p95 6.5 с CPU — бэклог стриминга],
+  sandbox-пробы + фикс subprocess-таймаута, load 50 WS, фикс LOG_LEVEL);
+  Фаза 5: CI (.github/workflows/ci.yml: go/frontend/voice-fake/smoke),
+  docs/DEPLOYMENT.md (prod-план, мониторинг/SLO).
 - v0.4.11 (2026-09-14) — Implementation WP-12 (инфра и доки): §2 —
   docker-compose profiles (prod + gpu: voice на GPU-узле, device-requests
   nvidia), Makefile (up-gpu, smoke), scripts/smoke.sh (REST e2e: healthz →

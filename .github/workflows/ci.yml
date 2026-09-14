@@ -1,0 +1,113 @@
+# «Грейд» — CI (Фаза 5): сборка + тесты всех сервисов + REST-смоук.
+# Запуск: push в master + pull_request. Таймауты: go ~10 мин (load-тест 20 с
+# входит в make test), frontend ~5 мин, voice ~15 мин (pip ML-стек), smoke ~5 мин.
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go (api + sandbox: vet, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: |
+            services/api/go.sum
+            services/sandbox/go.sum
+      - name: api — vet + test + build
+        working-directory: services/api
+        run: |
+          go vet ./...
+          go test -count=1 ./...
+          CGO_ENABLED=0 go build -o bin/api ./cmd/api
+      - name: sandbox — vet + test + build
+        working-directory: services/sandbox
+        run: |
+          go vet ./...
+          go test -count=1 ./...
+          CGO_ENABLED=0 go build -o bin/sandbox ./cmd/sandbox
+
+  frontend:
+    name: Frontend (tsc, vitest, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: services/frontend/pnpm-lock.yaml
+      - name: install + checks
+        working-directory: services/frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec tsc --noEmit
+          pnpm exec vitest run
+          pnpm exec vite build
+
+  voice:
+    name: Voice (pytest, fake-провайдеры)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install (CPU torch ПЕРЕД requirements — иначе nvidia-* ~2 ГБ)
+        working-directory: services/voice
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/pip install -q -r requirements.txt
+      - name: pytest (fake-провайдеры — детерминизм CI, без ML-моделей)
+        working-directory: services/voice
+        env:
+          VOICE_STT_PROVIDER: fake
+          VOICE_TTS_PROVIDER: fake
+        run: .venv/bin/python -m pytest -q
+
+  smoke:
+    name: REST e2e-smoke (живой api, LLM_MOCK)
+    runs-on: ubuntu-latest
+    needs: [go]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: build + запустить api + smoke
+        run: |
+          cd services/api
+          go build -o /tmp/grade-api ./cmd/api
+          cd -
+          export DATABASE_URL="sqlite:////tmp/ci-grade.db"
+          export JWT_SECRET=ci-secret
+          export MINUTES_FREE_S=3600
+          export SANDBOX_URL=http://127.0.0.1:1
+          export LLM_MOCK=1
+          export VOICE_URL=http://127.0.0.1:1
+          export ADDR=:8877
+          /tmp/grade-api >/tmp/ci-api.log 2>&1 &
+          API_PID=$!
+          trap "kill $API_PID 2>/dev/null" EXIT
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8877/healthz >/dev/null && break
+            sleep 0.5
+          done
+          curl -sf http://127.0.0.1:8877/healthz >/dev/null || { cat /tmp/ci-api.log; exit 1; }
+          bash scripts/smoke.sh
+      - name: лог api (при сбое)
+        if: failure()
+        run: cat /tmp/ci-api.log || true
