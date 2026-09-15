@@ -372,6 +372,33 @@ p {
   color: #7aa2f7;
 }
 
+/* Эквалайзер микрофона (MicVisualizer): live — бирюза, muted — янтарь
+   (ИИ говорит, микрофон подавлен), idle — тусклый серый. */
+.mic-eq {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 30px;
+  padding: 4px 7px;
+  border: 1px solid #232a3a;
+  border-radius: 6px;
+  background: #0d1119;
+}
+.mic-eq-bar {
+  display: block;
+  width: 3px;
+  height: 2px;
+  border-radius: 2px;
+  background: #73daca;
+}
+.mic-eq.muted .mic-eq-bar {
+  background: #e5c07b;
+}
+.mic-eq.idle .mic-eq-bar {
+  background: #3a4150;
+  opacity: 0.55;
+}
+
 .task-box {
   border: 1px solid #232a3a;
   border-radius: 8px;

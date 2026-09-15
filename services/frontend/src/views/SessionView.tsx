@@ -13,6 +13,7 @@ import {
 } from '../api';
 import { useAuth } from '../auth';
 import { MicCapture, type MicState } from '../audio/mic';
+import { MicVisualizer, type MicEqMode } from './MicVisualizer';
 import { PcmPlayer } from '../audio/player';
 import { SessionWS, type StageTask, type WsMessage } from '../ws';
 import { apiErrorMessage } from './LoginView';
@@ -45,6 +46,7 @@ export function SessionView({ id }: { id: number }) {
 
   const wsRef = useRef<SessionWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);
+  const micLevelRef = useRef(0); // RMS с worklet (эквалайзер)
   const playerRef = useRef<PcmPlayer | null>(null);
   const stageRef = useRef<string>('voice');
 
@@ -185,6 +187,7 @@ export function SessionView({ id }: { id: number }) {
     if (micCap === null) return;
     if (mic === 'running') {
       micCap.stop();
+      micLevelRef.current = 0;
       setMic('stopped');
       return;
     }
@@ -200,6 +203,9 @@ export function SessionView({ id }: { id: number }) {
           // динамик → микрофон → VAD «речь кандидата»).
           if (playerRef.current?.isSpeaking()) return;
           wsRef.current?.sendPcm(pcm);
+        },
+        onLevel: (rms) => {
+          micLevelRef.current = rms;
         },
         onState: (s) => setMic(s),
       });

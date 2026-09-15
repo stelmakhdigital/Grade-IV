@@ -8,6 +8,8 @@ import { resampleToPcm16, TARGET_RATE } from './resample';
 export interface MicCaptureEvents {
   /** Чанк PCM16 16 кГц (обычно 4000 образцов = 250 мс). */
   onChunk: (pcm: Int16Array) => void;
+  /** Уровень микрофона (RMS float -1..1) каждые ~100 мс — эквалайзер UI. */
+  onLevel?: (rms: number) => void;
   onState?: (state: MicState) => void;
   onError?: (err: string) => void;
 }
@@ -22,12 +24,35 @@ class PcmCapture {
     this.chunkSamples = params.chunkSamples;
     this.acc = [];
     this.accLen = 0;
+    // Уровень для эквалайзера: окно ~100 мс по входной частоте.
+    this.levelWin = Math.max(1, Math.round(params.inputRate * 0.1));
+    this.levelSum = 0;
+    this.levelN = 0;
+  }
+  reportLevel() {
+    const rms = this.levelN > 0 ? Math.sqrt(this.levelSum / this.levelN) : 0;
+    this.levelSum = 0;
+    this.levelN = 0;
+    this.port.postMessage({ kind: 'level', rms: rms });
+  }
+  levelTick(n) {
+    this.levelN += n;
+    if (this.levelN >= this.levelWin) {
+      this.reportLevel();
+    }
   }
   process(inputs) {
     const ch = inputs[0] && inputs[0][0];
-    if (!ch || this.rate === this.target) {
+    if (!ch) {
+      return [true];
+    }
+    for (let i = 0; i < ch.length; i++) {
+      this.levelSum += ch[i] * ch[i];
+    }
+    this.levelTick(ch.length);
+    if (this.rate === this.target) {
       // однообразный случай обрабатывается ниже через общий путь
-      if (ch) this.push(ch);
+      this.push(ch);
       return [true];
     }
     // ресемплинг линейной интерполяцией в worklet
@@ -112,8 +137,11 @@ export class MicCapture {
       },
     });
     node.port.onmessage = (e: MessageEvent) => {
-      if (e.data instanceof Int16Array) {
-        events.onChunk(e.data);
+      const d = e.data;
+      if (d instanceof Int16Array) {
+        events.onChunk(d);
+      } else if (d && typeof d === 'object' && (d as { kind?: string }).kind === 'level') {
+        events.onLevel?.((d as { rms: number }).rms);
       }
     };
     source.connect(node);
