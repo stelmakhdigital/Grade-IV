@@ -73,8 +73,9 @@ type Engine struct {
 	users *db.UserStore
 	log   *slog.Logger
 
-	now          func() time.Time
-	pauseTimeout time.Duration
+	now           func() time.Time
+	pauseTimeout  time.Duration
+	sessionLimitS int // SESSION_LIMIT_S: >0 фикс., <0 без лимита, 0 по грейду
 
 	mu   sync.Mutex
 	rts  map[int64]*runtime
@@ -88,7 +89,13 @@ type Opt func(*Engine)
 // WithNow подменяет источник времени (тесты).
 func WithNow(f func() time.Time) Opt { return func(e *Engine) { e.now = f } }
 
-// WithPauseTimeout задаёт порок «обрыв без возобновления» (SRS §7).
+// WithSessionLimit — глобальный лимит длительности сессии (SESSION_LIMIT_S):
+// s > 0 — фиксированный лимит в секундах для всех сессий;
+// s < 0 — без лимита (сессия не финализируется по времени, таймер не шлётся);
+// s == 0 — дефолт: лимит по грейду (models.SessionDurationS).
+func WithSessionLimit(s int) Opt { return func(e *Engine) { e.sessionLimitS = s } }
+
+// WithPauseTimeout задаёт порог «обрыв без возобновления» (SRS §7).
 func WithPauseTimeout(d time.Duration) Opt {
 	return func(e *Engine) {
 		if d > 0 {
@@ -188,7 +195,9 @@ func (e *Engine) tick(now time.Time) {
 		rt.since = now
 		remaining := rt.limitS - int(rt.active)
 		conn := rt.conn
-		if remaining <= 0 {
+		// Лимит времени только при limitS > 0 (SESSION_LIMIT_S < 0 — без
+		// ограничения: финализация по времени и timer-сообщения отключены).
+		if rt.limitS > 0 && remaining <= 0 {
 			rt.connMu.Unlock()
 			e.log.Info("доставлен лимит времени сессии — финализация", "session", id)
 			_, _ = e.finish(id, false, "time_limit")
@@ -200,7 +209,7 @@ func (e *Engine) tick(now time.Time) {
 				_ = e.store.PersistActiveSeconds(context.Background(), id, rt.active)
 			}()
 		}
-		if conn != nil && now.Sub(rt.lastTimer) >= TimerBroadcast {
+		if rt.limitS > 0 && conn != nil && now.Sub(rt.lastTimer) >= TimerBroadcast {
 			rt.lastTimer = now
 			rt.connMu.Unlock()
 			e.sendJSON(id, map[string]any{"type": "timer", "remaining_s": remaining})
@@ -226,13 +235,20 @@ func (e *Engine) Create(ctx context.Context, userID int64, grade models.Grade, s
 		return models.Session{}, ErrNoMinutes
 	}
 	now := e.now()
+	limit := models.SessionDurationS(grade)
+	switch {
+	case e.sessionLimitS > 0:
+		limit = e.sessionLimitS // SESSION_LIMIT_S — фиксированный лимит, с
+	case e.sessionLimitS < 0:
+		limit = 0 // SESSION_LIMIT_S=0/off — без ограничения по времени
+	}
 	m, err := e.store.Create(ctx, models.Session{
 		UserID:         userID,
 		Grade:          grade,
 		Stack:          stack,
 		Stage:          models.StageVoice,
 		Status:         models.StatusActive,
-		DurationLimitS: models.SessionDurationS(grade),
+		DurationLimitS: limit,
 		StartedAt:      now,
 	})
 	if err != nil {

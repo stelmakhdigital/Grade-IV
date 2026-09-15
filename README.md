@@ -75,6 +75,9 @@ make stop-all       # остановить всё
 - **свой LLM-узел**: `LLM_BASE_URL=http://IP:8000/v1 LLM_MODEL=<имя> make run-all`
 - **модели в другом месте**: `bash scripts/download-models.sh` скачивает в
   `FOR_RUN/`; окружение `STT_MODEL` (tiny/small/large-v3) — `STT_MODEL=small make run-all`
+- **время сессии**: по умолчанию в dev-запуске — без ограничения
+  (`SESSION_LIMIT_S=off`); вернуть лимит по грейду — `SESSION_LIMIT_S= make run-all`
+  (пустое значение) или свой: `SESSION_LIMIT_S=7200 make run-all` (2 часа, в секундах)
 
 Логи и PID — в `FOR_RUN/logs/`, `FOR_RUN/pids/`; БД — `FOR_RUN/run.db`.
 

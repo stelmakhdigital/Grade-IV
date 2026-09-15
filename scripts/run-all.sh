@@ -29,6 +29,9 @@ LLM_BASE_URL="${LLM_BASE_URL:-http://192.168.1.114:8000/v1}"
 LLM_MODEL="${LLM_MODEL:-qwen3.8-27b-dflash2}"
 LLM_MOCK="${LLM_MOCK:-0}"
 STT_MODEL="${STT_MODEL:-small}"
+# SESSION_LIMIT_S: off — без ограничения времени сессии (dev); число — секунд;
+# пустое — лимит по грейду. Переопределяется переменной окружения.
+SESSION_LIMIT_S="${SESSION_LIMIT_S:-off}"
 VOICE_URL="http://127.0.0.1:8100"
 SANDBOX_URL="http://127.0.0.1:8200"
 
@@ -96,6 +99,7 @@ do_start() {
   echo "==> api :8000 (LLM_MOCK=$LLM_MOCK LLM=$LLM_BASE_URL/$LLM_MODEL)"
   (cd "$ROOT" && DATABASE_URL="sqlite://$DB" \
     JWT_SECRET="${JWT_SECRET:-grade-run-secret}" MINUTES_FREE_S=3600 \
+    SESSION_LIMIT_S="$SESSION_LIMIT_S" \
     LLM_MOCK="$LLM_MOCK" LLM_BASE_URL="$LLM_BASE_URL" LLM_MODEL="$LLM_MODEL" \
     VOICE_URL="$VOICE_URL" SANDBOX_URL="$SANDBOX_URL" ADDR=:8000 \
     nohup "$API_BIN" >>"$LOGS/api.log" 2>&1 & echo $! >"$PIDS/api.pid")

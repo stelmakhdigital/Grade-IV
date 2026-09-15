@@ -222,6 +222,63 @@ func TestTimeLimitAutoFinish(t *testing.T) {
 	}
 }
 
+// withLimitEnv — среда, где движок собран с явным SESSION_LIMIT_S (s):
+// <0 — без ограничения, >0 — фиксированный лимит, с.
+func withLimitEnv(t *testing.T, grantS, limitS int) *testEnv {
+	t.Helper()
+	base := newTestEnv(t, grantS)
+	eng := New(base.store, base.users, slog.New(slog.DiscardHandler),
+		WithNow(func() time.Time { return *base.now }),
+		WithPauseTimeout(DefaultPauseTimeout),
+		WithSessionLimit(limitS))
+	base.engine = eng
+	return base
+}
+
+func TestSessionLimitUnlimited(t *testing.T) {
+	// SESSION_LIMIT_S < 0: сессия переживает нормальный лимит грейда.
+	e := withLimitEnv(t, 100000, -1)
+	ctx := context.Background()
+	m, err := e.engine.Create(ctx, e.userID, models.GradeJunior, models.StackGo) // грейду было бы 2700 с
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if m.DurationLimitS != 0 {
+		t.Fatalf("без лимита: DurationLimitS=%d, хочу 0", m.DurationLimitS)
+	}
+	e.advance(9999 * time.Second) // далеко за лимит грейда
+	e.engine.tick(*e.now)
+	snap, err := e.engine.Snapshot(m.ID)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if snap.Status != models.StatusActive {
+		t.Fatalf("без лимита сессия должна остаться active, got %s", snap.Status)
+	}
+}
+
+func TestSessionLimitFixed(t *testing.T) {
+	// SESSION_LIMIT_S > 0: фиксированный лимит переопределяет грейд.
+	e := withLimitEnv(t, 100000, 600)
+	ctx := context.Background()
+	m, err := e.engine.Create(ctx, e.userID, models.GradeJunior, models.StackGo)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if m.DurationLimitS != 600 {
+		t.Fatalf("фикс. лимит: DurationLimitS=%d, хочу 600", m.DurationLimitS)
+	}
+	e.advance(600 * time.Second)
+	e.engine.tick(*e.now)
+	snap, err := e.engine.Snapshot(m.ID)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if snap.Status != models.StatusFinished {
+		t.Fatalf("фикс. лимит 600 с должен завершить сессию, got %s", snap.Status)
+	}
+}
+
 func TestTransitions(t *testing.T) {
 	e := newTestEnv(t, 3600)
 	ctx := context.Background()
