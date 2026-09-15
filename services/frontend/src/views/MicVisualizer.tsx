@@ -29,7 +29,11 @@ export function MicVisualizer({ mode, levelRef }: { mode: MicEqMode; levelRef: {
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
       // Новое значение уровня + экспоненциальное затухание (пад быстрее подъёма).
-      const target = mode === 'live' ? Math.min(1, levelRef.current * 2.2) : 0;
+      // Коэффициент 14: обычная громкая речь RMS ~0.05-0.1 → 0.7-1.4 (потолок 1);
+      // фон комнаты ~0.003-0.01 → 0.04-0.14 (полоски едва заметно дышат).
+      // В muted (ИИ говорит) уровень тоже показываем — видно, что микрофон
+      // «слышит» кандидата, но кадры не шлются (эхо-подавление).
+      const target = mode === 'idle' ? 0 : Math.min(1, levelRef.current * 14);
       energy += (target - energy) * (target > energy ? Math.min(1, dt * 18) : Math.min(1, dt * 7));
       const t = now / 1000;
       for (let i = 0; i < bars.length; i++) {
@@ -38,7 +42,7 @@ export function MicVisualizer({ mode, levelRef }: { mode: MicEqMode; levelRef: {
         const wobble = mode === 'idle'
           ? 0.12
           : 0.25 + 0.75 * Math.abs(Math.sin(t * (1.7 + (i % 5) * 0.35) + i * 0.9));
-        const h = mode === 'idle' ? 2 : Math.max(2, Math.round(energy * wobble * 26));
+        const h = mode === 'idle' ? 2 : Math.max(2, Math.round(energy * wobble * 30));
         bars[i].style.height = `${h}px`;
       }
       raf = requestAnimationFrame(tick);
