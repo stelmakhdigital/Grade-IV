@@ -619,6 +619,18 @@
     2 вызова TTS). Regress: go vet+test (7 пакетов) — зелёные.
   - Эффект: perceived latency «LLM → первый звук» −(дл. синтеза всего ответа −
     дл. синтеза первого предложения) ≈ −0.5–2 с (зависит от длины ответа).
+- **2026-09-15** (багфикс) — звук ИИ обрывается после первых слов (причина найдена):
+  - Корень: PcmPlayer.playChunk — pump() вызывался только при первом кадре
+    (startPlayback). Kадры TTS приходят потоком burst-ами по фразам: первый
+    burst (0.7 c) проигрывался, последующие копились в очереди и не
+    закачивались (playing=true, startPlayback не идёт, очередь не пустеет
+    без pump). Симптом: первая половина слова и тишина.
+  - Фикс: playChunk после каждого push делает pump(this.ctx), если
+    воспроизведение уже идёт. Регресс-тест src/audio/player.test.ts (мок
+    AudioContext, burst-кадры): без фикса падает (проверено git stash).
+  - Инструмент: services/frontend/public/audio-debug.html — запись каждой
+    реплики в WAV (кнопка скачивания) для диагностики.
+  - Проверка: tsc, vitest 59/59 (12 файлов), vite build — зелёные.
 - **2026-09-15** (инфра) — «как запускать после перезагрузки»:
   - scripts/run-all.sh (start|stop|status|restart): сборка (FOR_RUN/bin) +
     sandbox/voice/api/frontend через nohup; PID — FOR_RUN/pids/, логи —

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Грейд — аудио-отладка</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3; padding: 24px; max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; } .row { margin: 10px 0; } button { padding: 8px 16px; margin: 4px; cursor: pointer; }
+  pre { background: #161b22; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 12px; max-height: 300px; overflow-y: auto; }
+  .ok { color: #3fb950; } .err { color: #f85149; }
+</style>
+</head>
+<body>
+<h1>Аудио-отладка «Грейд»</h1>
+<div class="row">
+  <label>Сессия ID: <input id="sid" size="6"> </label>
+  <button id="connect">Подключить и слушать</button>
+</div>
+<p>Страница подключается к активной сессии, воспроизводит голос ИИ и <b>записывает каждую реплику в WAV</b>.
+После каждой реплики появится кнопка скачивания — скачайте и отправьте файлы (или сообщите, что звук полный).</p>
+<div class="row"><pre id="log"></pre></div>
+<div id="downloads"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const log = (s, cls) => { const p = $('log'); const d = document.createElement('div'); if (cls) d.className = cls; d.textContent = s; p.prepend(d); };
+
+// WAV-сборщик: 16 кГц mono PCM16
+class WavBuilder {
+  constructor() { this.chunks = []; this.n = 0; }
+  push(pcm) { this.chunks.push(pcm); this.n += pcm.length; }
+  blob() {
+    const data = new Int16Array(this.n);
+    let off = 0;
+    for (const c of this.chunks) { data.set(c, off); off += c.length; }
+    const buf = new ArrayBuffer(44 + data.byteLength);
+    const v = new DataView(buf);
+    const ws = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    ws(0, 'RIFF'); v.setUint32(4, 36 + data.byteLength, true); ws(8, 'WAVE');
+    ws(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    ws(36, 'data'); v.setUint32(40, data.byteLength, true);
+    new Uint8Array(buf, 44).set(new Uint8Array(data.buffer));
+    return new Blob([buf], { type: 'audio/wav' });
+  }
+}
+
+let ws = null, current = null, curName = '';
+
+$('connect').onclick = async () => {
+  const token = localStorage.getItem('grade.token');
+  const sid = $('sid').value.trim();
+  if (!token) { log('Нет токена: сначала войдите в приложение (левая вкладка).', 'err'); return; }
+  if (!sid) {
+    // авто: последняя активная сессия
+    const list = await fetch('/api/v1/sessions', { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+    const arr = Array.isArray(list) ? list : (list.sessions || []);
+    const act = arr.find((s) => s.status === 'active') || arr[0];
+    if (!act) { log('Нет сессий — создайте интервью в приложении.', 'err'); return; }
+    $('sid').value = act.id;
+  }
+  const url = `ws://${location.host}/ws/session/${sid}?token=${encodeURIComponent(token)}`;
+  log('Подключение ' + url.replace(token, '***') + ' ...');
+  ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+  let aiCounter = 0;
+  ws.onopen = () => log('WS открыт. Говорите/ждите реплик ИИ.', 'ok');
+  ws.onmessage = (e) => {
+    if (e.data instanceof ArrayBuffer) {
+      const view = new DataView(e.data);
+      const flags = view.getUint16(2, true);
+      const pcm = new Int16Array(e.data, 4, (e.data.byteLength - 4) / 2);
+      if (!current) { current = new WavBuilder(); curName = 'tts-' + (++aiCounter); log('Начала реплика ' + curName); }
+      current.push(pcm);
+      if (flags & 1) {
+        // конец реплики: воспроизвести + дать скачать
+        const wav = current.blob();
+        const url2 = URL.createObjectURL(wav);
+        const a = document.createElement('a');
+        a.href = url2; a.download = 'grade-' + curName + '-' + (current.n / 16000).toFixed(1) + 's.wav';
+        $('downloads').appendChild(a);
+        a.textContent = 'Скачать ' + curName + ' (' + (current.n / 16000).toFixed(1) + ' с)';
+        a.style.cssText = 'display:inline-block;margin:4px;padding:8px 16px;background:#238636;color:white;border-radius:6px;text-decoration:none';
+        log(curName + ': конец, ' + (current.n / 16000).toFixed(1) + ' с аудио, ' + current.chunks.length + ' кадров', 'ok');
+        try { const audio = new Audio(url2); audio.play().then(() => log(curName + ' воспроизводится', 'ok')).catch((err) => log(curName + ' play(): ' + err.message, 'err')); } catch (err) { log('play ошибка: ' + err.message, 'err'); }
+        current = null;
+      }
+    } else {
+      const d = JSON.parse(String(e.data));
+      if (d.type === 'ai_text') log('ai_text: ' + d.text.slice(0, 60));
+      else if (d.type === 'error') log('ошибка: ' + d.msg, 'err');
+    }
+  };
+  ws.onclose = (e) => log('WS закрыт: ' + e.code, 'err');
+  ws.onerror = () => log('WS ошибка', 'err');
+};
+// автозаполнение ID из hash (#12)
+if (location.hash) $('sid').value = location.hash.slice(1);
+</script>
+</body>
+</html>

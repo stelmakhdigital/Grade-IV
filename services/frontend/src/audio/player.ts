@@ -13,11 +13,20 @@ export class PcmPlayer {
   private speaking = false;
   private checkTimer: number | null = null;
 
-  /** Добавляет кадр PCM16; стартует воспроизведение, если не идёт. */
+  /** Добавляет кадр PCM16; стартует воспроизведение, если не идёт.
+   * ВАЖНО: каждый новый кадр прогоняется через pump() — кадры TTS приходят
+   * потоком (репликой по фразам), и «прокачать» только первый burst — баг
+   * «звук обрывается после первых слов»: очередь росла, а pump не вызывался
+   * (playing уже true → startPlayback не идёт, а доигрывания не дождаешься:
+   * очередь не пустеет, пока её не закачаешь). */
   playChunk(pcm: Int16Array): void {
     if (pcm.length === 0) return;
     this.queue.push(pcm);
-    if (!this.playing) this.startPlayback();
+    if (!this.playing) {
+      this.startPlayback();
+      return;
+    }
+    if (this.ctx !== null) this.pump(this.ctx);
   }
 
   /** Последняя реплика ИИ завершена (end-флаг) — доигрываем очередь. */
