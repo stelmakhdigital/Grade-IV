@@ -106,6 +106,7 @@ export class MicCapture {
   private node: AudioWorkletNode | null = null;
   private inputRate = 0;
   private micState: MicState = 'idle';
+  private noDataTimer: number | null = null;
 
   async start(events: MicCaptureEvents): Promise<void> {
     if (this.micState === 'running') return;
@@ -119,12 +120,33 @@ export class MicCapture {
     });
     this.stream = stream;
     const Ctx = window.AudioContext ?? (window as any).webkitAudioContext;
-    const ctx = new Ctx();
+    let ctx: AudioContext;
+    try {
+      ctx = new Ctx();
+    } catch (err) {
+      stream.getTracks().forEach((t) => t.stop());
+      this.stream = null;
+      events.onError?.('Web Audio недоступен — обновите браузер (Chrome/Edge последних лет).');
+      throw err;
+    }
     this.ctx = ctx;
     this.inputRate = ctx.sampleRate;
-    await ctx.audioWorklet.addModule(
-      URL.createObjectURL(new Blob([WORKLET_CODE], { type: 'application/javascript' })),
-    );
+    try {
+      await ctx.audioWorklet.addModule(
+        URL.createObjectURL(new Blob([WORKLET_CODE], { type: 'application/javascript' })),
+      );
+    } catch (err) {
+      // Диагностика: без AudioWorklet микрофон «включён», но данных нет.
+      stream.getTracks().forEach((t) => t.stop());
+      this.stream = null;
+      void ctx.close();
+      this.ctx = null;
+      events.onError?.(
+        'Микрофон не работает: браузер не загрузил аудио-модуль (AudioWorklet). ' +
+          'Откройте в актуальном Chrome или Edge и повторите.',
+      );
+      throw err;
+    }
     const source = ctx.createMediaStreamSource(stream);
     const node = new AudioWorkletNode(ctx, 'pcm-capture', {
       numberOfInputs: 1,
@@ -136,9 +158,25 @@ export class MicCapture {
         chunkSamples: Math.round(TARGET_RATE * 0.25), // 250 мс
       },
     });
+    // Диагностика: 3 с без первого чанка — данные не приходят
+    // (устройство молчит / браузер не гоняет аудио-поток).
+    let warned = false;
+    this.noDataTimer = window.setTimeout(() => {
+      this.noDataTimer = null;
+      if (this.micState === 'running' && !warned) {
+        warned = true;
+        events.onError?.(
+          'Микрофон включён, но аудио-данные не приходят — проверьте устройство и разрешения браузера.',
+        );
+      }
+    }, 3000);
     node.port.onmessage = (e: MessageEvent) => {
       const d = e.data;
       if (d instanceof Int16Array) {
+        if (this.noDataTimer !== null) {
+          window.clearTimeout(this.noDataTimer);
+          this.noDataTimer = null;
+        }
         events.onChunk(d);
       } else if (d && typeof d === 'object' && (d as { kind?: string }).kind === 'level') {
         events.onLevel?.((d as { rms: number }).rms);
@@ -156,6 +194,10 @@ export class MicCapture {
 
   stop(): void {
     if (this.micState === 'idle') return;
+    if (this.noDataTimer !== null) {
+      window.clearTimeout(this.noDataTimer);
+      this.noDataTimer = null;
+    }
     this.node?.disconnect();
     this.node = null;
     this.stream?.getTracks().forEach((t) => t.stop());

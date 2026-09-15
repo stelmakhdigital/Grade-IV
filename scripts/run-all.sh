@@ -91,8 +91,11 @@ do_start() {
   if [[ ! -d "$RUN/stt" || ! -f "$RUN/tts/silero-tts-v5_ru.pt" ]]; then
     echo "!! модели не найдены — сначала: bash scripts/download-models.sh" >&2
   fi
+  # TTS_SPEAKER: мужской голос по умолчанию (персона интервьюера — мужчина);
+  # переопределить: TTS_SPEAKER=eugene|ru_01 make run-all
   (cd "$ROOT/services/voice" && STT_MODEL="$STT_MODEL" STT_DEVICE=cpu \
     STT_DOWNLOAD_ROOT="$RUN/stt" TTS_MODEL_DIR="$RUN/tts" \
+    TTS_SPEAKER="${TTS_SPEAKER:-aidar}" \
     nohup .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8100 >>"$LOGS/voice.log" 2>&1 & \
     echo $! >"$PIDS/voice.pid")
 

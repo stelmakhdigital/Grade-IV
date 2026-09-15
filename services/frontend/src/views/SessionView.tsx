@@ -208,6 +208,7 @@ export function SessionView({ id }: { id: number }) {
           micLevelRef.current = rms;
         },
         onState: (s) => setMic(s),
+        onError: (msg) => setError(msg),
       });
     } catch {
       setMic('denied');
@@ -315,6 +316,10 @@ export function SessionView({ id }: { id: number }) {
           )}
 
           <div className="voice-controls">
+            {(() => {
+              const eqMode: MicEqMode = mic !== 'running' ? 'idle' : speaking ? 'muted' : 'live';
+              return <MicVisualizer mode={eqMode} levelRef={micLevelRef} />;
+            })()}
             {mic === 'denied' && (
               <span className="form-error">Нет доступа к микрофону.</span>
             )}

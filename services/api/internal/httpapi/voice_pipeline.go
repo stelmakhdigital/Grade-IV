@@ -48,7 +48,12 @@ func (s *Server) runCandidateTurn(ws *wsSession, text string) {
 // Стриминг по предложениям (бэклог TTS-стриминг): текст реплики разбивается на
 // предложения, каждое синтезируется отдельно и отправляется сразу (первый звук —
 // через ~0.3 с после LLM, а не после синтеза всего ответа). seq сквозной по
-// реплике; end-флаг — только на последнем кадре последнего предложения.
+// реплике; end-флаг — только на последнем кадре всего потока.
+//
+// Подготовка для TTS: латинские термины транслитерируются (prepareTTS) —
+// Silero v5 не озвучивает латиницу («Go» -> «гоу»); текст в UI остаётся
+// оригинальным. Между предложениями вставляется тишина (пауза): 250 мс
+// после «.»/«...», 500 мс после «?»/«!» — чтобы реплики не сливались.
 func (s *Server) streamAIAudio(ws *wsSession, text string) {
 	if s.voice == nil || strings.TrimSpace(text) == "" {
 		return
@@ -58,17 +63,18 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 	defer ws.ttsActive.Store(false)
 
 	seq := 0
+	sentAny := false // уходил ли хоть один кадр (для финального end-кадра)
+	silence := make([]byte, ttsChunkBytes) // 250 мс тишины
 	for i, sentence := range sentences {
 		if ws.ctx.Err() != nil {
 			return
 		}
-		pcm, err := s.voice.TTS(ws.ctx, sentence)
+		pcm, err := s.voice.TTS(ws.ctx, prepareTTS(sentence))
 		if err != nil {
 			s.log.Warn("tts: синтез предложения не удался", "session", ws.id, "sentence", i+1, "err", err)
-			// Дegrade: пропускаем предложение, идём дальше (голос не критичен, текст уже есть).
+			// Degrade: пропускаем предложение, идём дальше (голос не критичен, текст уже есть).
 			continue
 		}
-		isLast := i == len(sentences)-1
 		for off := 0; off < len(pcm); off += ttsChunkBytes {
 			if ws.ctx.Err() != nil {
 				return
@@ -80,14 +86,43 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 			frame := make([]byte, 0, 4+end-off)
 			var hdr [4]byte
 			binary.LittleEndian.PutUint16(hdr[0:2], uint16(seq))
-			if isLast && end == len(pcm) {
-				binary.LittleEndian.PutUint16(hdr[2:4], ttsFlagEnd)
-			}
 			frame = append(frame, hdr[:]...)
 			frame = append(frame, pcm[off:end]...)
 			s.engine.SendBinary(ws.id, frame)
 			seq++
+			sentAny = true
 		}
+		// Пауза между предложениями (не ставим после последнего).
+		if i < len(sentences)-1 {
+			gap := 1
+			if strings.HasSuffix(sentence, "?") || strings.HasSuffix(sentence, "!") {
+				gap = 2
+			}
+			for g := 0; g < gap; g++ {
+				if ws.ctx.Err() != nil {
+					return
+				}
+				frame := make([]byte, 0, 4+len(silence))
+				var hdr [4]byte
+				binary.LittleEndian.PutUint16(hdr[0:2], uint16(seq))
+				frame = append(frame, hdr[:]...)
+				frame = append(frame, silence...)
+				s.engine.SendBinary(ws.id, frame)
+				seq++
+			}
+		}
+	}
+	// Финальный кадр с end-флагом: чистый хвост (тишина 250 мс) и гарантия
+	// остановки плеера. Только если реплики реально озвучивались (хотя бы
+	// один кадр ушёл) — иначе потока кадров не было и stop не нужен.
+	if sentAny && ws.ctx.Err() == nil {
+		frame := make([]byte, 0, 4+len(silence))
+		var hdr [4]byte
+		binary.LittleEndian.PutUint16(hdr[0:2], uint16(seq))
+		binary.LittleEndian.PutUint16(hdr[2:4], ttsFlagEnd)
+		frame = append(frame, hdr[:]...)
+		frame = append(frame, silence...)
+		s.engine.SendBinary(ws.id, frame)
 	}
 }
 
