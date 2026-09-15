@@ -125,7 +125,9 @@ type statusRecorder struct {
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
-	r.status = code
+	if r.status == 0 {
+		r.status = code
+	}
 	r.ResponseWriter.WriteHeader(code)
 }
 

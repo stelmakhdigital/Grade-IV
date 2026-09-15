@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -84,6 +85,7 @@ func (c *Client) Chat(ctx context.Context, req Request) (Response, error) {
 	if req.Model == "" {
 		req.Model = c.model
 	}
+	c.logf("llm: запрос model=%s msgs=%d max_tokens=%d", req.Model, len(req.Messages), req.MaxTokens)
 	body, err := json.Marshal(req)
 	if err != nil {
 		return Response{}, fmt.Errorf("сериализация запроса: %w", err)
@@ -179,7 +181,13 @@ func (c *Client) Chat(ctx context.Context, req Request) (Response, error) {
 			return Response{}, ErrLLMUnavailable{Err: fmt.Errorf("LLM вернул пустой контент (reasoning_len=%d)", len(msg.Message.Reasoning))}
 		}
 	}
+	c.logf("llm: ответ len=%d", len(content))
 	return Response{Content: content}, nil
+}
+
+// logf — лог LLM-клиента (slog, дефолтный; достаточно для диагностики).
+func (c *Client) logf(format string, args ...any) {
+	slog.Debug(format, args...)
 }
 
 

@@ -346,7 +346,6 @@ func (s *Server) handleReportGet(w http.ResponseWriter, r *http.Request) {
 	overall, gradeRec, criteria, strengths, weaknesses, recommendations, err :=
 		s.reports.Get(r.Context(), id)
 	if errors.Is(err, db.ErrReportNotFound) {
-		w.WriteHeader(http.StatusAccepted)
 		writeJSON(w, http.StatusAccepted, map[string]any{"status": "generating"})
 		return
 	}

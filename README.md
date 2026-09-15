@@ -58,21 +58,36 @@ make models         # или: MODELS_DIR=$PWD/FOR_RUN bash scripts/download-mode
 LLM-модель (Qwen3.8-27B, ~60 ГБ) не скачивается (опционально в скрипте) — для dev
 достаточно `LLM_MOCK=1` (эхо-ответы) или внешний LLM-узел (см. Шаг 4).
 
-### Шаг 3. Запустить сервисы (4 терминала)
+### Шаг 3. Запустить весь стек (одна команда)
 
 ```sh
-# Терминал 1: sandbox (:8200)
-make run-sandbox
-
-# Терминал 2: voice (:8100) — STT/TTS на этом ПК (модели из FOR_RUN/)
-STT_MODEL=small STT_DOWNLOAD_ROOT=$PWD/FOR_RUN/stt TTS_MODEL_DIR=$PWD/FOR_RUN/tts make run-voice
-
-# Терминал 3: api (:8000) — LLM_MOCK=1 (без LLM-узла)
-LLM_MOCK=1 make run-api
-
-# Терминал 4: frontend (:5173)
-make run-frontend
+make run-all        # сборка + sandbox :8200 + voice :8100 + api :8000 + frontend :5173
+make status         # состояние (процессы + health)
+make stop-all       # остановить всё
 ```
+
+После перезагрузки ПК достаточно `make run-all` — скрипт сам пересоберёт
+бинарники и поднимет сервисы (модели и БД живут в `FOR_RUN/` и переживают
+перезагрузку).
+
+Варианты:
+- **без LLM-узла** (детерминированный эхо-интервьюер): `LLM_MOCK=1 make run-all`
+- **свой LLM-узел**: `LLM_BASE_URL=http://IP:8000/v1 LLM_MODEL=<имя> make run-all`
+- **модели в другом месте**: `bash scripts/download-models.sh` скачивает в
+  `FOR_RUN/`; окружение `STT_MODEL` (tiny/small/large-v3) — `STT_MODEL=small make run-all`
+
+Логи и PID — в `FOR_RUN/logs/`, `FOR_RUN/pids/`; БД — `FOR_RUN/run.db`.
+
+<details><summary>Вручную, по терминалам (разработка)</summary>
+
+```sh
+make run-sandbox    # :8200
+STT_MODEL=small STT_DOWNLOAD_ROOT=$PWD/FOR_RUN/stt TTS_MODEL_DIR=$PWD/FOR_RUN/tts make run-voice
+LLM_MOCK=1 make run-api
+make run-frontend   # :5173
+```
+
+</details>
 
 ### Шаг 4. (Опционально) Подключить реальный LLM-узел
 
@@ -121,9 +136,8 @@ make smoke
 ### Остановка сервисов
 
 ```sh
-# Если запущены вручную (не make):
-kill $(cat /tmp/sbxrun.pid /tmp/voicerun.pid /tmp/apirun.pid /tmp/front.pid)
-# или Ctrl+C в каждом терминале (make run-*)
+make stop-all       # всё, что запущено через make run-all
+# вручную (4 терминала): Ctrl+C в каждом
 ```
 
 ## Тесты и сборка

@@ -10,6 +10,8 @@ help:
 	@echo "  make install     — зависимости (Go, pnpm, Python venv)"
 	@echo "  make test        — все тесты (go vet+test, vitest, pytest)"
 	@echo "  make build       — сборка (go build, vite build)"
+	@echo "  make run-all     — весь стек одной командой (sandbox+voice+api+frontend)"
+	@echo "  make stop-all    — остановить весь стек; make status — состояние"
 	@echo "  make run-api     — запустить api (dev, :8000)"
 	@echo "  make run-sandbox — запустить sandbox (dev, :8200)"
 	@echo "  make run-voice   — запустить voice (dev, :8100)"
@@ -42,6 +44,13 @@ build:
 	@(cd services/api && go build -o bin/api ./cmd/api)
 	@(cd services/sandbox && go build -o bin/sandbox ./cmd/sandbox)
 	@cd services/frontend && pnpm -s build
+
+run-all:        ## весь стек одной командой: sandbox+voice+api+frontend (FOR_RUN/, LLM-узел)
+	bash scripts/run-all.sh start
+stop-all:       ## остановить весь стек
+	bash scripts/run-all.sh stop
+status:         ## состояние стека (процессы + health)
+	bash scripts/run-all.sh status
 
 run-api:
 	@(cd services/api && go run ./cmd/api)

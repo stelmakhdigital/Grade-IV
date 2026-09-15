@@ -67,8 +67,11 @@ STATUS=$(jget status)
 [ "$STATUS" = "finished" ] || fail "finish: status=$STATUS"
 
 step "GET /report: 202 → 200"
+# Ожидание: 6 с при LLM_MOCK=1 (быстро); с реальным LLM (reasoning-модель)
+# отчёт ~20-40 с — переменная SMOKE_REPORT_WAIT_S (дефолт 60 при LLM_MOCK=0).
+SMOKE_REPORT_WAIT_S="${SMOKE_REPORT_WAIT_S:-120}"
 REPORT=""
-for i in $(seq 1 30); do
+for i in $(seq 1 $((SMOKE_REPORT_WAIT_S * 5))); do  # интервал 0.2 с
   code=$(curl -s -o $BODY -w '%{http_code}' -H "$AUTH" \
     "$API/api/v1/sessions/$SID/report")
   if [ "$code" = "200" ]; then
@@ -78,7 +81,7 @@ for i in $(seq 1 30); do
   [ "$code" = "202" ] || fail "report: HTTP $code: $(cat /tmp/smoke-body)"
   sleep 0.2
 done
-[ -n "$REPORT" ] || fail "report: не появился за 6 с"
+[ -n "$REPORT" ] || fail "report: не появился за $SMOKE_REPORT_WAIT_S с"
 OVERALL=$(jget overall)
 REC=$(jget grade_recommendation)
 NCRIT=$($PY -c "import json;print(len(json.load(open('$BODY'))['criteria']))")

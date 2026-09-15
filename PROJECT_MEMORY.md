@@ -619,6 +619,26 @@
     2 вызова TTS). Regress: go vet+test (7 пакетов) — зелёные.
   - Эффект: perceived latency «LLM → первый звук» −(дл. синтеза всего ответа −
     дл. синтеза первого предложения) ≈ −0.5–2 с (зависит от длины ответа).
+- **2026-09-15** (инфра) — «как запускать после перезагрузки»:
+  - scripts/run-all.sh (start|stop|status|restart): сборка (FOR_RUN/bin) +
+    sandbox/voice/api/frontend через nohup; PID — FOR_RUN/pids/, логи —
+    FOR_RUN/logs/, БД — FOR_RUN/run.db (переживает перезагрузку). Stop — по
+    pid-файлу + подстраховка по порту (ss). Готовность: опрос health до 60 с.
+  - Makefile: make run-all / stop-all / status (+ help-строки).
+  - README «Быстрый старт» шаг 3 — make run-all (вручную — в details-блоке);
+    варианты: LLM_MOCK=1 (без узла), LLM_BASE_URL/LLM_MODEL (свой узел),
+    STT_MODEL.
+  - smoke.sh: SMOKE_REPORT_WAIT_S (дефолт 120 с; цикл по времени, не
+    итерациям — был баг: «120» = 120 итераций × 0.2 с ≈ 30 с).
+  - session_handlers: убран двойной WriteHeader 202 в GET /report
+    (90+ предупреждений «superfluous response.WriteHeader» в логе);
+    server.go statusRecorder: статус фиксируется первым WriteHeader.
+  - llm.Client: slog.Debug-логи запроса/ответа (диагностика LLM-узла).
+  - Проверка: make status — 4 сервиса OK; SMOKE OK с реальным LLM (отчёт
+    ~30-60 с, reasoning-модель). Регресс: зелёные.
+  - Ограничение: сервисы, запущенные из среды ИИ-агента, не переживают
+    завершение сессии агента (kill process tree) — для постоянной работы
+    `make run-all` запускать в собственном терминале (или tmux/systemd).
 - **2026-09-15** (багфикс) — «Голос ИИ обрывается на ПРиве» + доработка nudge:
   - **Плеер TTS: AudioContext(16000) → частота устройства** (player.ts):
     экзотический 16-кГц контекст нестабильно воспроизводится на некоторых
