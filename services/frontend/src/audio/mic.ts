@@ -107,6 +107,7 @@ export class MicCapture {
   private inputRate = 0;
   private micState: MicState = 'idle';
   private noDataTimer: number | null = null;
+  private spNode: ScriptProcessorNode | null = null; // резервный захват
 
   async start(events: MicCaptureEvents): Promise<void> {
     if (this.micState === 'running') return;
@@ -158,25 +159,14 @@ export class MicCapture {
         chunkSamples: Math.round(TARGET_RATE * 0.25), // 250 мс
       },
     });
-    // Диагностика: 3 с без первого чанка — данные не приходят
-    // (устройство молчит / браузер не гоняет аудио-поток).
-    let warned = false;
-    this.noDataTimer = window.setTimeout(() => {
-      this.noDataTimer = null;
-      if (this.micState === 'running' && !warned) {
-        warned = true;
-        events.onError?.(
-          'Микрофон включён, но аудио-данные не приходят — проверьте устройство и разрешения браузера.',
-        );
-      }
-    }, 3000);
+    // Диагностика: 3 с без чанков — AudioWorklet молчит (в некоторых
+    // средах процессор не расписывается). Тогда — резервный путь:
+    // legacy ScriptProcessor (он работает там, где worklet не гонится).
+    this.armNoDataTimeout(events);
     node.port.onmessage = (e: MessageEvent) => {
       const d = e.data;
       if (d instanceof Int16Array) {
-        if (this.noDataTimer !== null) {
-          window.clearTimeout(this.noDataTimer);
-          this.noDataTimer = null;
-        }
+        this.onFirstChunk();
         events.onChunk(d);
       } else if (d && typeof d === 'object' && (d as { kind?: string }).kind === 'level') {
         events.onLevel?.((d as { rms: number }).rms);
@@ -198,6 +188,11 @@ export class MicCapture {
       window.clearTimeout(this.noDataTimer);
       this.noDataTimer = null;
     }
+    if (this.spNode !== null) {
+      this.spNode.onaudioprocess = null;
+      this.spNode.disconnect();
+      this.spNode = null;
+    }
     this.node?.disconnect();
     this.node = null;
     this.stream?.getTracks().forEach((t) => t.stop());
@@ -209,6 +204,84 @@ export class MicCapture {
 
   get state(): MicState {
     return this.micState;
+  }
+
+  // 3 с без аудио-чанков: либо переключаемся на резервный захват
+  // (ScriptProcessor), либо (если он уже активен) — предупреждение.
+  private armNoDataTimeout(events: MicCaptureEvents): void {
+    if (this.noDataTimer !== null) {
+      window.clearTimeout(this.noDataTimer);
+    }
+    this.noDataTimer = window.setTimeout(() => {
+      this.noDataTimer = null;
+      if (this.micState !== 'running') return;
+      if (this.spNode === null) {
+        this.switchToScriptProcessor(events);
+      } else {
+        events.onError?.(
+          'Микрофон включён, но аудио-данные не приходят — проверьте устройство и разрешения браузера.',
+        );
+      }
+    }, 3000);
+  }
+
+  // Первый чанок от любого пути — снимаем таймер диагностики.
+  private onFirstChunk(): void {
+    if (this.noDataTimer !== null) {
+      window.clearTimeout(this.noDataTimer);
+      this.noDataTimer = null;
+    }
+  }
+
+  // Резервный захват (legacy ScriptProcessorNode, main thread): работает в
+  // средах, где AudioWorklet не расписывается. Чанки — по каждому callback
+  // (~107 мс @48 кГц → ~36 мс @16 кГц после ресемплинга — VAD не требует
+  // фиксированного размера кадра).
+  private switchToScriptProcessor(events: MicCaptureEvents): void {
+    const ctx = this.ctx;
+    const stream = this.stream;
+    if (!ctx || !stream || this.micState !== 'running') return;
+    try {
+      // Выключаем worklet, чтобы не было двух потоков из одного микрофона.
+      this.node?.disconnect();
+      this.node = null;
+      const source = ctx.createMediaStreamSource(stream);
+      const sp = ctx.createScriptProcessor(4096, 1, 1);
+      let winSamples = Math.max(1, Math.round(ctx.sampleRate * 0.1));
+      let sum = 0;
+      let n = 0;
+      sp.onaudioprocess = (e: AudioProcessingEvent) => {
+        const input = e.inputBuffer.getChannelData(0);
+        for (let i = 0; i < input.length; i++) {
+          sum += input[i] * input[i];
+        }
+        n += input.length;
+        if (n >= winSamples) {
+          events.onLevel?.(Math.sqrt(sum / n));
+          sum = 0;
+          n = 0;
+          winSamples = Math.max(1, Math.round(ctx.sampleRate * 0.1));
+        }
+        e.outputBuffer.getChannelData(0).fill(0); // без звука в динамики
+        const pcm = resampleToPcm16(input, ctx.sampleRate);
+        if (pcm.length > 0) {
+          this.onFirstChunk();
+          events.onChunk(pcm);
+        }
+      };
+      const silence = ctx.createGain();
+      silence.gain.value = 0;
+      source.connect(sp);
+      sp.connect(silence);
+      silence.connect(ctx.destination);
+      this.spNode = sp;
+      // Если и резервный путь молчит — предупреждение в UI.
+      this.armNoDataTimeout(events);
+    } catch {
+      events.onError?.(
+        'Микрофон не работает: ни AudioWorklet, ни резервный захват не дали данных. Обновите браузер (Chrome/Edge).',
+      );
+    }
   }
 
   private setState(next: MicState, events?: MicCaptureEvents): void {

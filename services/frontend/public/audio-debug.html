@@ -22,12 +22,16 @@
   <b>Проверка микрофона</b>
   <div class="row">
     <button id="micbtn">Проверить микрофон (5 с)</button>
+    <button id="wlbtn" style="margin-left:8px">Тест AudioWorklet (4 с)</button>
     <span id="micstate" style="margin-left:12px"></span>
   </div>
   <div style="height:18px;background:#161b22;border-radius:4px;overflow:hidden;margin-top:8px">
     <div id="micbar" style="height:100%;width:0%;background:#3fb950;transition:width .1s"></div>
   </div>
   <div style="margin-top:6px;font-size:12px;color:#8b949e">Полоса должна двигаться, когда вы говорите.</div>
+  <div style="margin-top:6px;font-size:12px;color:#8b949e">
+    Кнопка «Тест AudioWorklet» — показывает, расписывает ли браузер процессор (process) и приходят ли чанки. Если process=0, но полоса сверху живая — браузер не гоняет worklet (нужен резервный захват / другой браузер).
+  </div>
 </div>
 <div class="row"><pre id="log"></pre></div>
 <div id="downloads"></div>
@@ -166,6 +170,126 @@ $('micbtn').onclick = async () => {
 };
 // автозаполнение ID из hash (#12)
 if (location.hash) $('sid').value = location.hash.slice(1);
+
+// Тест AudioWorklet: ТОТ ЖЕ процессор, что в приложении (копия PcmCapture),
+// но с дополнительным счётчиком вызовов process(). Меряем 4 с: вызовы
+// process, Int16-чанки, level-сообщения, RMS.
+const WL_CODE = `
+class PcmCapture {
+  constructor(params) {
+    this.rate = params.inputRate;
+    this.target = params.targetRate;
+    this.chunkSamples = params.chunkSamples;
+    this.acc = [];
+    this.accLen = 0;
+    this.levelWin = Math.max(1, Math.round(params.inputRate * 0.1));
+    this.levelSum = 0;
+    this.levelN = 0;
+    this.processCalls = 0;
+    this.maxAbs = 0;
+  }
+  reportLevel() {
+    const rms = this.levelN > 0 ? Math.sqrt(this.levelSum / this.levelN) : 0;
+    this.levelSum = 0; this.levelN = 0;
+    this.port.postMessage({ kind: 'level', rms: rms });
+  }
+  levelTick(n) { this.levelN += n; if (this.levelN >= this.levelWin) this.reportLevel(); }
+  process(inputs) {
+    this.processCalls++;
+    const ch = inputs[0] && inputs[0][0];
+    if (!ch) { return [true]; }
+    for (let i = 0; i < ch.length; i++) {
+      this.levelSum += ch[i] * ch[i];
+      if (Math.abs(ch[i]) > this.maxAbs) this.maxAbs = Math.abs(ch[i]);
+    }
+    this.levelTick(ch.length);
+    if (this.processCalls === 1) this.port.postMessage({ kind: 'first' });
+    if (this.processCalls % 200 === 0) this.port.postMessage({ kind: 'tick', n: this.processCalls, maxAbs: this.maxAbs });
+    if (this.rate === this.target) { this.push(ch); return [true]; }
+    const ratio = this.rate / this.target;
+    const outLen = Math.floor(ch.length / ratio);
+    const out = new Float32Array(outLen);
+    for (let i = 0; i < outLen; i++) {
+      const pos = i * ratio;
+      const i0 = Math.floor(pos);
+      const i1 = Math.min(i0 + 1, ch.length - 1);
+      const f = pos - i0;
+      out[i] = ch[i0] * (1 - f) + ch[i1] * f;
+    }
+    this.push(out);
+    return [true];
+  }
+  push(samples) {
+    this.acc.push(samples);
+    this.accLen += samples.length;
+    while (this.accLen >= this.chunkSamples && this.acc.length > 0) {
+      const out = new Float32Array(this.chunkSamples);
+      let off = 0;
+      while (off < this.chunkSamples) {
+        const head = this.acc[0];
+        const take = Math.min(head.length, this.chunkSamples - off);
+        out.set(head.subarray(0, take), off);
+        off += take;
+        if (take === head.length) this.acc.shift();
+        else this.acc[0] = head.subarray(take);
+      }
+      this.accLen -= this.chunkSamples;
+      const i16 = new Int16Array(this.chunkSamples);
+      for (let i = 0; i < this.chunkSamples; i++) {
+        let v = out[i];
+        if (v > 1) v = 1;
+        if (v < -1) v = -1;
+        i16[i] = Math.round(v * 32767);
+      }
+      this.port.postMessage(i16);
+    }
+    return [true];
+  }
+}
+registerProcessor('pcm-capture', PcmCapture);
+`;
+$('wlbtn').onclick = async () => {
+  const st = $('micstate');
+  st.style.color = '#8b949e';
+  st.textContent = 'тест worklet…';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelRate: 16000, channelCount: 1 } });
+    const ac = new AudioContext();
+    await ac.resume().catch(() => {});
+    await ac.audioWorklet.addModule(URL.createObjectURL(new Blob([WL_CODE], { type: 'application/javascript' })));
+    const src = ac.createMediaStreamSource(stream);
+    const node = new AudioWorkletNode(ac, 'pcm-capture', {
+      numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+      processorOptions: { inputRate: ac.sampleRate, targetRate: 16000, chunkSamples: 4000 },
+    });
+    const stats = { first: false, ticks: 0, chunks: 0, levels: 0, lastTick: null };
+    node.port.onmessage = (e) => {
+      const d = e.data;
+      if (d instanceof Int16Array) { stats.chunks++; }
+      else if (d && d.kind === 'level') { stats.levels++; }
+      else if (d && d.kind === 'first') { stats.first = true; }
+      else if (d && d.kind === 'tick') { stats.ticks++; stats.lastTick = d; }
+    };
+    src.connect(node);
+    const g = ac.createGain(); g.gain.value = 0;
+    node.connect(g); g.connect(ac.destination);
+    await new Promise(r => setTimeout(r, 4000));
+    const n = stats.lastTick ? stats.lastTick.n : 0;
+    const verdict = !stats.first
+      ? 'process() НЕ вызывается — браузер не расписывает worklet. Резервный захват включится автоматически в приложении.'
+      : 'process() работает (' + n + ' вызовов, maxAbs=' + (stats.lastTick ? stats.lastTick.maxAbs.toFixed(3) : '?') + '), чанков PCM: ' + stats.chunks + ', level: ' + stats.levels;
+    st.textContent = verdict;
+    st.style.color = stats.first ? '#3fb950' : '#f85149';
+    log('Worklet-тест: ' + verdict + ' | ctx=' + ac.state + ' @ ' + ac.sampleRate + ' Гц', stats.first ? 'ok' : 'err');
+    node.disconnect();
+    stream.getTracks().forEach(t => t.stop());
+    await ac.close();
+  } catch (err) {
+    st.textContent = 'ОШИБКА: ' + err.message;
+    st.style.color = '#f85149';
+    log('Worklet-тест: ' + err.message, 'err');
+  }
+};
 </script>
 </body>
 </html>
