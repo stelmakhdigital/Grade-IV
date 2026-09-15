@@ -189,6 +189,10 @@ export function SessionView({ id }: { id: number }) {
       return;
     }
     try {
+      // Клик — user-gesture: разрешаем браузеру вернуть аудио-контекст
+      // плеера в running (иначе TTS может молчать, а флаг «ИИ говорит»
+      // висеть — см. player.resume()).
+      playerRef.current?.resume();
       await micCap.start({
         onChunk: (pcm) => {
           // Эхо-подавление (бэклог AEC, упрощение MVP): пока ИИ говорит
@@ -269,7 +273,7 @@ export function SessionView({ id }: { id: number }) {
                 : wsState === 'error' ? 'ошибка соединения'
                 : 'соединение закрыто (сессия на паузе)'}
             </span>
-            {speaking && <span className="saying">ИИ говорит…</span>}
+            {speaking && <span className="saying">ИИ говорит — чтобы ответить, дождитесь паузы</span>}
             {mic === 'running' && <span className="listening">микрофон: включён</span>}
             {mic !== 'running' && mic !== 'denied' && stage === 'voice' && wsState === 'open' && (
               <span className="form-error" role="alert">

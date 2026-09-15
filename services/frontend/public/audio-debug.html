@@ -18,6 +18,17 @@
 </div>
 <p>Страница подключается к активной сессии, воспроизводит голос ИИ и <b>записывает каждую реплику в WAV</b>.
 После каждой реплики появится кнопка скачивания — скачайте и отправьте файлы (или сообщите, что звук полный).</p>
+<div class="row" style="border:1px solid #30363d;border-radius:8px;padding:12px;margin:14px 0">
+  <b>Проверка микрофона</b>
+  <div class="row">
+    <button id="micbtn">Проверить микрофон (5 с)</button>
+    <span id="micstate" style="margin-left:12px"></span>
+  </div>
+  <div style="height:18px;background:#161b22;border-radius:4px;overflow:hidden;margin-top:8px">
+    <div id="micbar" style="height:100%;width:0%;background:#3fb950;transition:width .1s"></div>
+  </div>
+  <div style="margin-top:6px;font-size:12px;color:#8b949e">Полоса должна двигаться, когда вы говорите.</div>
+</div>
 <div class="row"><pre id="log"></pre></div>
 <div id="downloads"></div>
 <script>
@@ -92,6 +103,66 @@ $('connect').onclick = async () => {
   };
   ws.onclose = (e) => log('WS закрыт: ' + e.code, 'err');
   ws.onerror = () => log('WS ошибка', 'err');
+};
+// --- Проверка микрофона ---
+let micRec = null;
+$('micbtn').onclick = async () => {
+  const st = $('micstate');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+    const ac = new AudioContext();
+    const src = ac.createMediaStreamSource(stream);
+    const an = ac.createAnalyser();
+    an.fftSize = 1024;
+    src.connect(an);
+    st.textContent = 'устройство: ' + (stream.getAudioTracks()[0].label || 'по умолчанию') + ' @ ' + ac.sampleRate + ' Гц';
+    st.style.color = '#3fb950';
+    const data = new Float32Array(an.fftSize);
+    const chunks = [];
+    let n = 0;
+    const iv = setInterval(() => {
+      an.getFloatTimeDomainData(data);
+      let s = 0;
+      for (let i = 0; i < data.length; i++) s += data[i] * data[i];
+      const rms = Math.sqrt(s / data.length);
+      $('micbar').style.width = Math.min(100, rms * 400) + '%';
+      // накапливаем float32 -> int16 для WAV
+      const i16 = new Int16Array(data.length);
+      for (let i = 0; i < data.length; i++) i16[i] = Math.max(-32768, Math.min(32767, Math.round(data[i] * 32768)));
+      chunks.push(i16);
+      n += i16.length;
+    }, 100);
+    await new Promise(r => setTimeout(r, 5000));
+    clearInterval(iv);
+    stream.getTracks().forEach(t => t.stop());
+    await ac.close();
+    $('micbar').style.width = '0%';
+    // WAV из накопленного (частота ctx.sampleRate)
+    const rate = 48000; // приблизительная; для прослушки достаточно
+    const total = new Int16Array(n);
+    let off = 0;
+    for (const c of chunks) { total.set(c, off); off += c.length; }
+    const buf = new ArrayBuffer(44 + total.byteLength);
+    const v = new DataView(buf);
+    const ws2 = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+    ws2(0, 'RIFF'); v.setUint32(4, 36 + total.byteLength, true); ws2(8, 'WAVE');
+    ws2(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    ws2(36, 'data'); v.setUint32(40, total.byteLength, true);
+    new Uint8Array(buf, 44).set(new Uint8Array(total.buffer));
+    const url = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'mic-test.wav';
+    $('downloads').appendChild(a);
+    a.textContent = 'Скачать mic-test.wav (5 с с микрофона)';
+    a.style.cssText = 'display:inline-block;margin:4px;padding:8px 16px;background:#238636;color:white;border-radius:6px;text-decoration:none';
+    st.textContent = 'готово — скачайте wav и отправьте';
+    log('Микрофон: записал 5 с (' + (n / rate).toFixed(1) + ' с аудио)', 'ok');
+  } catch (err) {
+    st.textContent = 'ОШИБКА: ' + err.message;
+    st.style.color = '#f85149';
+    log('getUserMedia: ' + err.message, 'err');
+  }
 };
 // автозаполнение ID из hash (#12)
 if (location.hash) $('sid').value = location.hash.slice(1);

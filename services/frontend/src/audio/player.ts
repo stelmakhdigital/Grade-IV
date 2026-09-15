@@ -12,6 +12,7 @@ export class PcmPlayer {
   private playing = false;
   private speaking = false;
   private checkTimer: number | null = null;
+  private lastChunkAt = 0; // performance.now() последнего кадра (watchdog)
 
   /** Добавляет кадр PCM16; стартует воспроизведение, если не идёт.
    * ВАЖНО: каждый новый кадр прогоняется через pump() — кадры TTS приходят
@@ -21,12 +22,25 @@ export class PcmPlayer {
    * очередь не пустеет, пока её не закачаешь). */
   playChunk(pcm: Int16Array): void {
     if (pcm.length === 0) return;
+    this.lastChunkAt = performance.now();
     this.queue.push(pcm);
     if (!this.playing) {
       this.startPlayback();
       return;
     }
     if (this.ctx !== null) this.pump(this.ctx);
+  }
+
+  /** Resume аудио-контекста (вызывать из user-gesture, напр. клик кнопки
+   * микрофона): Chrome не даёт resume() без жеста, а контекст создаётся
+   * без жеста (по WS-кадру) и может остаться suspended — тогда часы
+   * AudioContext стоят и флаг «говорит» висит навечно (watchdog спасает,
+   * но звук не идёт). */
+  resume(): void {
+    const ctx = this.ensureCtx();
+    if (ctx.state === 'suspended') {
+      void ctx.resume();
+    }
   }
 
   /** Последняя реплика ИИ завершена (end-флаг) — доигрываем очередь. */
@@ -112,7 +126,12 @@ export class PcmPlayer {
       const ctx = this.ctx;
       if (ctx === null) return;
       const queueEndsAt = this.nextStartAt;
-      if (this.queue.length === 0 && ctx.currentTime >= queueEndsAt) {
+      // Watchdog: если кадров нет > 3 с и очередь пуста — сбрасываем флаг
+      // «говорит» даже если часы контекста стоят (suspended/tab-throttle):
+      // иначе флаг висит вечно и микрофон кандидата подавляется навсегда.
+      const noChunksFor = this.lastChunkAt > 0 ? performance.now() - this.lastChunkAt : 0;
+      if (this.queue.length === 0 &&
+          (ctx.currentTime >= queueEndsAt || noChunksFor > 3000)) {
         this.speaking = false;
         this.playing = false;
         return;
