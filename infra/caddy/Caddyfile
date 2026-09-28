@@ -1,0 +1,14 @@
+# Caddy — TLS reverse-proxy «Грейд» (compose-профиль prod).
+#
+# Всё трафик (SPA + /api/ + /ws) уходит на frontend:80 (nginx), который уже
+# проксирует /api/, /healthz и /ws (Upgrade-заголовки) на api:8000.
+#
+# Переменные (env контейнера caddy, из .env):
+#   GRADE_DOMAIN — публичный домен (Let's Encrypt).
+#   CADDY_TLS    — пустое = автоматический Let's Encrypt;
+#                  internal = встроенный CA Caddy (локальная VPS-проверка
+#                  без публичного IP/имени; CA — /data/caddy/pki/authorities/local/root.crt).
+{$GRADE_DOMAIN:localhost} {
+	tls {$CADDY_TLS:letsencrypt}
+	reverse_proxy frontend:80
+}

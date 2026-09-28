@@ -1,0 +1,8 @@
+# Grafana provisioning: дашборды из /etc/grafana/dashboards.
+apiVersion: 1
+providers:
+  - name: grade
+    folder: Grade
+    type: file
+    options:
+      path: /etc/grafana/dashboards

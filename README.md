@@ -163,6 +163,9 @@ make down
 подставляются из окружения/`.env` (шаблон — [`.env.example`](.env.example)).
 LLM в проде — vLLM + Qwen3.8-27B (OpenAI-совместимый API, ADR-005).
 
+Prod с TLS (caddy) и мониторингом (Prometheus + Grafana):
+`--profile prod --profile monitoring` — гайд по VPS/обновлению/бэкапу: [docs/OPERATIONS.md](docs/OPERATIONS.md).
+
 ## Лицензия
 
 MIT — см. [`LICENSE`](LICENSE). Self-hosted стек (faster-whisper, Silero v5,

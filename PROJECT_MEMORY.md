@@ -834,3 +834,25 @@
     (обрезка по max_tokens=300) — повтор только при пустом контенте.
   - Следующее (по решению пользователя): ограничение reasoning-бюджета на
     LLM-узле / более быстрый сервинг — инфраструктурное.
+- **2026-09-28** (Фаза 5, артефакты; НЕ закоммичено — ждёт ревью) — Prod-состав
+  с TLS + мониторинг:
+  - compose (infra/docker-compose.yml): caddy (prod; GRADE_DOMAIN, CADDY_TLS=
+    letsencrypt|internal; всё → frontend:80, nginx уже проксирует /api/, /healthz,
+    /ws с Upgrade — отдельного маршрутизации в caddy не нужно; frontend-prod
+    НЕ нужен: frontend.Dockerfile уже multi-stage nginx+dist).
+  - monitoring-профиль: prometheus v2.53 (retention 7d, скрейп api:8000/metrics +
+    self) + grafana 11.1 (provisioned datasource + дашборд infra/monitoring/
+    grafana-dashboard.json: SLO-стат p95 llm_first_token < 4 с, p50/p95 по
+    стадиям grade_ai_turn_seconds, rate ходов/мин, ошибки LLM/TTS).
+  - prod-гигиена: restart: unless-stopped на всех prod-сервисах; voice — limits
+    (VOICE_CPU_LIMIT/VOICE_MEM_LIMIT) + mount ../models:/models:ro
+    (STT_DOWNLOAD_ROOT=/models/stt, TTS_MODEL_DIR=/models/tts).
+  - Dockerfile: HEALTHCHECK добавлен во все 4 (api/sandbox/frontend — wget;
+    voice — python urllib, curl в slim нет).
+  - .env.example: GRADE_DOMAIN, CADDY_TLS, VOICE_CPU_LIMIT, VOICE_MEM_LIMIT,
+    GRAFANA_ADMIN_USER/PASSWORD. docs/OPERATIONS.md (новый runbook) + ссылка в README.
+  - Отклонения от постановки: БД — Postgres (volume pgdata уже был), run.db/sqlite
+    в prod не используется (бэкап — pg_dump); фактический WS-путь /ws/session/{id}
+    (не /api/v1/sessions/{id}/ws); профили в compose — prod/gpu (не default/gpu).
+  - Проверка: docker в окружении агента отсутствует → YAML/JSON валидированы
+    python (compose config не запускался), контейнеры не поднимались, коммита нет.

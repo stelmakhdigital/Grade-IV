@@ -1,0 +1,121 @@
+{
+  "title": "Grade — голосовой контур (voice SLO)",
+  "uid": "grade-voice-slo",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "tags": ["grade", "voice"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "SLO: p95 llm_first_token (< 4 с)",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(grade_ai_turn_seconds_bucket{stage=\"llm_first_token\"}[5m])) by (le))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 4 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Ходы в минуту (rate)",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(grade_ai_turns_total[5m])) * 60" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 1 } }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Ошибки / мин (LLM-стрим, TTS)",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(grade_ai_llm_stream_errors_total[5m])) * 60", "legendFormat": "LLM" },
+        { "refId": "B", "expr": "sum(rate(grade_ai_tts_errors_total[5m])) * 60", "legendFormat": "TTS" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Latency хода: p50 / p95 по стадиям",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 6 },
+      "targets": [
+        { "refId": "A", "legendFormat": "turn_start p50", "expr": "histogram_quantile(0.50, sum(rate(grade_ai_turn_seconds_bucket{stage=\"turn_start\"}[5m])) by (le))" },
+        { "refId": "B", "legendFormat": "turn_start p95", "expr": "histogram_quantile(0.95, sum(rate(grade_ai_turn_seconds_bucket{stage=\"turn_start\"}[5m])) by (le))" },
+        { "refId": "C", "legendFormat": "llm_first_token p50", "expr": "histogram_quantile(0.50, sum(rate(grade_ai_turn_seconds_bucket{stage=\"llm_first_token\"}[5m])) by (le))" },
+        { "refId": "D", "legendFormat": "llm_first_token p95", "expr": "histogram_quantile(0.95, sum(rate(grade_ai_turn_seconds_bucket{stage=\"llm_first_token\"}[5m])) by (le))" },
+        { "refId": "E", "legendFormat": "tts_first_frame p50", "expr": "histogram_quantile(0.50, sum(rate(grade_ai_turn_seconds_bucket{stage=\"tts_first_frame\"}[5m])) by (le))" },
+        { "refId": "F", "legendFormat": "tts_first_frame p95", "expr": "histogram_quantile(0.95, sum(rate(grade_ai_turn_seconds_bucket{stage=\"tts_first_frame\"}[5m])) by (le))" },
+        { "refId": "G", "legendFormat": "turn_end p50", "expr": "histogram_quantile(0.50, sum(rate(grade_ai_turn_seconds_bucket{stage=\"turn_end\"}[5m])) by (le))" },
+        { "refId": "H", "legendFormat": "turn_end p95", "expr": "histogram_quantile(0.95, sum(rate(grade_ai_turn_seconds_bucket{stage=\"turn_end\"}[5m])) by (le))" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "fillOpacity": 10 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "llm_first_token p95" },
+            "properties": [ { "id": "custom.lineWidth", "value": 3 }, { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ]
+          }
+        ]
+      },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "right" },
+        "thresholds": [
+          { "value": 4, "colorMode": "line", "lineWidth": 1, "dashed": true }
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Ходы в минуту по результату (ok | error | no_audio)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "targets": [
+        { "refId": "A", "legendFormat": "{{result}}", "expr": "sum by (result) (rate(grade_ai_turns_total[5m])) * 60" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Счётчики ошибок (rate, /мин)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "targets": [
+        { "refId": "A", "legendFormat": "LLM-стрим", "expr": "sum(rate(grade_ai_llm_stream_errors_total[5m])) * 60" },
+        { "refId": "B", "legendFormat": "TTS", "expr": "sum(rate(grade_ai_tts_errors_total[5m])) * 60" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 #   gpu  — voice на GPU-узле (nvidia; STT large-v3 + TTS быстрее)
 # Запуск:  docker compose -f infra/docker-compose.yml --profile prod up --build
 # GPU:     docker compose -f infra/docker-compose.yml --profile prod --profile gpu up
+# Prod + TLS (caddy) и мониторинг (Prometheus+Grafana): + --profile monitoring, см. docs/OPERATIONS.md
 # Локальный dev без compose: make install && make run-api (см. Makefile/README).
 name: grade
 
@@ -26,6 +27,7 @@ services:
       - postgres
       - voice
       - sandbox
+    restart: unless-stopped
     profiles: [prod]
 
   sandbox:
@@ -40,6 +42,7 @@ services:
     volumes:
       # WP-6: управление контейнерами сессий
       - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
     profiles: [prod]
 
   voice:
@@ -53,10 +56,20 @@ services:
       # GPU-профиль: CUDA-torch + large-v3 (переопределяется host-переменными)
       STT_DEVICE: "${STT_DEVICE:-cpu}"
       STT_MODEL: "${STT_MODEL:-small}"
+      # ML-модели — каталог ./models в корне репо (scripts/download-models.sh)
+      STT_DOWNLOAD_ROOT: /models/stt
+      TTS_MODEL_DIR: /models/tts
+    volumes:
+      - ../models:/models:ro
+    restart: unless-stopped
     profiles: [prod, gpu]
-    # gpu-профиль: device-requests (nvidia-container-toolkit на хосте)
+    # gpu-профиль: device-requests (nvidia-container-toolkit на хосте);
+    # limits — потолок CPU/памяти (VOICE_CPU_LIMIT / VOICE_MEM_LIMIT из .env)
     deploy:
       resources:
+        limits:
+          cpus: "${VOICE_CPU_LIMIT:-4}"
+          memory: ${VOICE_MEM_LIMIT:-8g}
         reservations:
           devices:
             - driver: nvidia
@@ -72,6 +85,7 @@ services:
       - "8080:80"
     depends_on:
       - api
+    restart: unless-stopped
     profiles: [prod]
 
   postgres:
@@ -82,7 +96,61 @@ services:
       POSTGRES_DB: grade
     volumes:
       - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
     profiles: [prod]
+
+  # === prod: TLS reverse-proxy (Фаза 5) ===
+  # Всё (SPA + /api/ + /ws) -> frontend:80 (nginx), который проксирует
+  # /api/, /healthz, /ws (Upgrade) на api:8000. TLS: Let's Encrypt (default)
+  # или internal CA Caddy (CADDY_TLS=internal — локальная VPS-проверка).
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      GRADE_DOMAIN: "${GRADE_DOMAIN:-localhost}"
+      CADDY_TLS: "${CADDY_TLS:-}"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+    restart: unless-stopped
+    profiles: [prod]
+
+  # === monitoring: Prometheus + Grafana (Фаза 5) ===
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    profiles: [monitoring]
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-change-me}"
+    volumes:
+      - ./monitoring/grafana-datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+      - ./monitoring/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./monitoring/grafana-dashboard.json:/etc/grafana/dashboards/grade-voice-slo.json:ro
+      - grafana_data:/var/lib/grafana
+    profiles: [monitoring]
 
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:
+  prometheus_data:
+  grafana_data:
