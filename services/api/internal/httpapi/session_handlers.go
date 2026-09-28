@@ -109,14 +109,8 @@ func (s *Server) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	userID := userIDFromContext(r.Context())
-	m, err := s.sessions.GetOwned(r.Context(), id, userID)
-	if errors.Is(err, db.ErrSessionNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "сессия не найдена")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "не удалось получить сессию")
+	m, ok := s.ownedSession(w, r, id)
+	if !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, toDTO(m, s.engineSnapshot(id)))
@@ -200,6 +194,21 @@ func (s *Server) engineSnapshot(id int64) *session.Snapshot {
 	return snap
 }
 
+// ownedSession — сессия с проверкой владения; при ошибке пишет ответ и возвращает ok=false.
+func (s *Server) ownedSession(w http.ResponseWriter, r *http.Request, id int64) (models.Session, bool) {
+	m, err := s.sessions.GetOwned(r.Context(), id, userIDFromContext(r.Context()))
+	if errors.Is(err, db.ErrSessionNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "сессия не найдена")
+		return models.Session{}, false
+	}
+	if err != nil {
+		s.log.Error("get session", "session", id, "err", err)
+		writeError(w, http.StatusInternalServerError, "internal", "не удалось получить сессию")
+		return models.Session{}, false
+	}
+	return m, true
+}
+
 // parseSessionID — {id} из пути; при ошибке пишет ответ и возвращает ok=false.
 func parseSessionID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -240,15 +249,8 @@ func (s *Server) handleWhiteboardPut(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	userID := userIDFromContext(r.Context())
-	m, err := s.sessions.GetOwned(r.Context(), id, userID)
-	if errors.Is(err, db.ErrSessionNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "сессия не найдена")
-		return
-	}
-	if err != nil {
-		s.log.Error("get session", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal", "не удалось получить сессию")
+	m, ok := s.ownedSession(w, r, id)
+	if !ok {
 		return
 	}
 	if session.IsTerminalStatus(m.Status) {
@@ -329,14 +331,8 @@ func (s *Server) handleReportGet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	userID := userIDFromContext(r.Context())
-	m, err := s.sessions.GetOwned(r.Context(), id, userID)
-	if errors.Is(err, db.ErrSessionNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "сессия не найдена")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "не удалось получить сессию")
+	m, ok := s.ownedSession(w, r, id)
+	if !ok {
 		return
 	}
 	if m.Status != models.StatusFinished && m.Status != models.StatusAborted {

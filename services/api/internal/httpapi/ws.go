@@ -9,7 +9,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -59,9 +58,8 @@ func (s *Server) wsAuthUser(r *http.Request) (int64, error) {
 // К→С: бинарные PCM-кадры (в WP-3 принимаются и передаются в очередь голосового
 // оркестратора — пока подсчитываются), текстовые ui-события.
 func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil || id <= 0 {
-		writeError(w, http.StatusBadRequest, "invalid_session_id", "некорректный идентификатор сессии")
+	id, ok := parseSessionID(w, r)
+	if !ok {
 		return
 	}
 	userID, err := s.wsAuthUser(r)
@@ -98,10 +96,7 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 	if snap.Stage == models.StageVoice && !hasAIUtterance(ctx, s.sessions, id) {
 		text, err := s.interviewer.OnStageChanged(ctx, id,
 			"Кандидат только что начал интервью. Кратко поприветствуй и задай первый вопрос.")
-		s.sendInterviewerText(ctx, id, text, err)
-		if err == nil {
-			s.streamAIAudio(ws, text) // приветствие озвучивается (TTS)
-		}
+		s.speak(ctx, id, ws, text, err) // приветствие озвучивается (TTS)
 	}
 	go s.nudgeLoop(ws, ctx) // решение #7: ИИ заполняет долгие паузы
 
@@ -124,9 +119,9 @@ type wsSession struct {
 	// контекст LLM и UI («быстро сменяющийся текст»).
 	lastNudgeAt atomic.Int64 // unixnano
 	nudgeCount  atomic.Int32
-	vad        *vad.Detector
-	busy       atomic.Bool // голосовой ход занят (один параллельный, turn-taking)
-	ttsActive  atomic.Bool // ИИ говорит (стрим TTS) — микрофон не слушается
+	vad         *vad.Detector
+	busy        atomic.Bool // голосовой ход занят (один параллельный, turn-taking)
+	ttsActive   atomic.Bool // ИИ говорит (стрим TTS) — микрофон не слушается
 	// Pre-STT (voice_pipeline.go): предварительное распознавание при первой
 	// тишине — перекрывает VAD-хвост, экономит время STT.
 	preSTTActive atomic.Bool  // pre-STT запущен (на текущий буфер)
@@ -225,6 +220,14 @@ func (s *Server) sendInterviewerText(ctx context.Context, id int64, result strin
 	s.engine.SendTo(id, map[string]any{"type": "ai_text", "text": result})
 }
 
+// speak — ai_text по WS (fallback при ошибке LLM) + озвучка (TTS) при успехе.
+func (s *Server) speak(ctx context.Context, id int64, ws *wsSession, text string, err error) {
+	s.sendInterviewerText(ctx, id, text, err)
+	if err == nil {
+		s.streamAIAudio(ws, text)
+	}
+}
+
 // wsSendError — сообщение error по протоколу (с кодом по ошибке).
 func (s *Server) wsSendError(id int64, conn *websocket.Conn, err error) {
 	code := "internal"
@@ -316,10 +319,7 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage, ws *wsSession) {
 		case models.StageDesign:
 			text, err := s.interviewer.OnStageChanged(ctx, id,
 				"Кандидат переходит к System Design. Представь формат стадии и задай первую задачу на проектирование.")
-			s.sendInterviewerText(ctx, id, text, err)
-			if err == nil {
-				s.streamAIAudio(ws, text) // озвучка формата стадии (TTS)
-			}
+			s.speak(ctx, id, ws, text, err) // озвучка формата стадии (TTS)
 		}
 
 	case "finish":
@@ -403,10 +403,7 @@ func (s *Server) enterLiveCode(ctx context.Context, id int64, ws *wsSession) {
 		})
 	}
 	text, err := s.interviewer.OnStageChanged(ctx, id, stageNote(task))
-	s.sendInterviewerText(ctx, id, text, err)
-	if err == nil {
-		s.streamAIAudio(ws, text) // озвучка задачи (TTS)
-	}
+	s.speak(ctx, id, ws, text, err) // озвучка задачи (TTS)
 }
 
 // stageNote — контекст входа на Live-Code для LLM (задача, если выбрана).

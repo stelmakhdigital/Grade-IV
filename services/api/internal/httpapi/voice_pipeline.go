@@ -65,7 +65,7 @@ func (s *Server) streamCandidateTurn(ws *wsSession, deltas <-chan string) {
 
 	voiceOn := s.voice != nil
 	var turnDone chan struct{} // завершение аудио-конвейера (pacing)
-	var frames chan []byte // PCM-кадры (≤ ttsChunkBytes) из TTS-воркера
+	var frames chan []byte     // PCM-кадры (≤ ttsChunkBytes) из TTS-воркера
 	if voiceOn {
 		ws.ttsActive.Store(true) // gate микрофона: сброс строго после end-кадра
 		frames = make(chan []byte, 64)
@@ -113,7 +113,10 @@ func (s *Server) streamCandidateTurn(ws *wsSession, deltas <-chan string) {
 			}
 		}()
 	} else {
-		go func() { for range sentences { } }() // voice нет — просто сливаем
+		go func() {
+			for range sentences {
+			}
+		}() // voice нет — просто сливаем
 	}
 
 	full := <-fullText // LLM-текст собран (стрим завершён)
@@ -175,7 +178,7 @@ func (s *Server) paceFrames(ws *wsSession, turnStart time.Time, frames chan []by
 	ticker := time.NewTicker(25 * time.Millisecond) // разрешение pacing-списка
 	defer ticker.Stop()
 	var hold []byte
-	var queue [][]byte // накопленные кадры (LLM/TTS обгоняют pacing)
+	var queue [][]byte     // накопленные кадры (LLM/TTS обгоняют pacing)
 	var nextSend time.Time // zero = можно отправлять сразу (первый кадр)
 	var firstAt, endAt time.Time
 	sentAny := false
@@ -247,7 +250,7 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 	defer ws.ttsActive.Store(false)
 
 	seq := 0
-	sentAny := false // уходил ли хоть один кадр (для финального end-кадра)
+	sentAny := false                       // уходил ли хоть один кадр (для финального end-кадра)
 	silence := make([]byte, ttsChunkBytes) // 250 мс тишины
 	for i, sentence := range sentences {
 		if ws.ctx.Err() != nil {
