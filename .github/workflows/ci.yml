@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   go:
-    name: Go (api + sandbox: vet, test, build)
+    name: "Go (api + sandbox: vet, test, build)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
