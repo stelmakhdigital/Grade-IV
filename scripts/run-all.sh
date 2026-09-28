@@ -24,6 +24,14 @@ LOGS="$RUN/logs"
 DB="$RUN/run.db"
 mkdir -p "$PIDS" "$LOGS" "$RUN/sbxw"
 export PATH="$PATH:$HOME/.local/go-toolchain/bin"
+# ponytail: фолбэк на /tmp/go (тулчейн сессии агента), если основного нет — убрать после миграции
+if ! command -v go >/dev/null; then
+  [[ -x /tmp/go/bin/go ]] && export PATH="$PATH:/tmp/go/bin"
+fi
+if ! command -v go >/dev/null; then
+  echo "ошибка: go не найден (ожидается в PATH или $HOME/.local/go-toolchain/bin)" >&2
+  exit 1
+fi
 
 LLM_BASE_URL="${LLM_BASE_URL:-http://192.168.1.114:8000/v1}"
 LLM_MODEL="${LLM_MODEL:-qwen3.8-27b-fp8}"
