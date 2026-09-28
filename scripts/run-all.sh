@@ -9,7 +9,7 @@
 #
 # Переменные окружения (опционально, есть дефолты):
 #   LLM_BASE_URL  (дефолт http://192.168.1.114:8000/v1) — LLM-узел (vLLM)
-#   LLM_MODEL     (дефолт qwen3.8-27b-dflash2)
+#   LLM_MODEL     (дефолт qwen3.8-27b-fp8)
 #   LLM_MOCK      (дефолт 0; 1 — без LLM-узла, эхо-интервьюер)
 #   STT_MODEL     (дефолт small)
 #
@@ -26,7 +26,7 @@ mkdir -p "$PIDS" "$LOGS" "$RUN/sbxw"
 export PATH="$PATH:$HOME/.local/go-toolchain/bin"
 
 LLM_BASE_URL="${LLM_BASE_URL:-http://192.168.1.114:8000/v1}"
-LLM_MODEL="${LLM_MODEL:-qwen3.8-27b-dflash2}"
+LLM_MODEL="${LLM_MODEL:-qwen3.8-27b-fp8}"
 LLM_MOCK="${LLM_MOCK:-0}"
 STT_MODEL="${STT_MODEL:-small}"
 # SESSION_LIMIT_S: off — без ограничения времени сессии (dev); число — секунд;

@@ -86,6 +86,51 @@ func (i *Interviewer) OnUserUtterance(ctx context.Context, sessionID int64, text
 	return resp.Content, nil
 }
 
+// OnUserUtteranceStream — реплика кандидата → ответ ИИ стримом (SSE LLM).
+// Возвращает канал приращений content; полный текст пишется в БД
+// (ai_utterance) ПО ЗАВЕРШЕНИИ стрима. Ошибки запроса/соединения — в error.
+func (i *Interviewer) OnUserUtteranceStream(ctx context.Context, sessionID int64, text string) (<-chan string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, fmt.Errorf("пустая реплика")
+	}
+	ctx, cancel := context.WithTimeout(ctx, llm.DefaultTimeout)
+
+	sess, msgs, err := i.context(ctx, sessionID, text)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	ch, err := i.llm.ChatStream(ctx, llm.Request{
+		Messages:    msgs,
+		Temperature: 0.7,
+		MaxTokens:   300,
+	})
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	// Tee: единый потребитель стрима провайдера — собирает полный текст для БД
+	// и пересылает приращения наружу (потребителю — голосовой пайплайн).
+	var sb strings.Builder
+	out := make(chan string, 16)
+	go func() {
+		defer cancel()
+		defer close(out)
+		for delta := range ch {
+			sb.WriteString(delta)
+			out <- delta
+		}
+		content := strings.TrimSpace(sb.String())
+		if content != "" {
+			i.saveEvent(ctx, sessionID, "ai_utterance", map[string]any{
+				"text": content, "stage": sess.Stage,
+			})
+		}
+	}()
+	return out, nil
+}
+
 // OnStageChanged — вход на стадию: первый вопрос/представление (voice/livecode/design).
 func (i *Interviewer) OnStageChanged(ctx context.Context, sessionID int64, stageNote string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, llm.DefaultTimeout)

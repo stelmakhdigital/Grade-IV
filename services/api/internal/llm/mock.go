@@ -52,6 +52,20 @@ func (m *MockProvider) Chat(_ context.Context, req Request) (Response, error) {
 	return Response{Content: fmt.Sprintf("[mock-интервьюер] принял реплику: %s", last)}, nil
 }
 
+// ChatStream — стриминг поверх Chat: весь ответ одной фразой в канал.
+func (m *MockProvider) ChatStream(ctx context.Context, req Request) (<-chan string, error) {
+	resp, err := m.Chat(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	ch := make(chan string, 1)
+	go func() {
+		defer close(ch)
+		ch <- resp.Content
+	}()
+	return ch, nil
+}
+
 // SetResponder — подмена ответа (тесты: управляемый LLM).
 func (m *MockProvider) SetResponder(f func(req Request) (string, error)) {
 	m.mu.Lock()

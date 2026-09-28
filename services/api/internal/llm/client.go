@@ -1,8 +1,10 @@
 // Package llm — OpenAI-совместимый LLM-клиент (ADR-005: vLLM в prod / llama.cpp в dev /
-// мок в CI). MVP — non-streaming; стриминг — бэклог (построчный вывод интерфейра).
+// мок в CI). Non-streaming Chat и стриминг ChatStream (SSE, reasoning-модели:
+// delta.reasoning отбрасывается — не озвучивается и не входит в ответ).
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -38,6 +40,7 @@ type Request struct {
 	Messages    []Message `json:"messages"`
 	Temperature float64   `json:"temperature,omitempty"`
 	MaxTokens   int       `json:"max_tokens,omitempty"`
+	Stream      bool      `json:"stream,omitempty"`
 }
 
 // Response — ответ LLM.
@@ -51,6 +54,10 @@ type Provider interface {
 	Name() string
 	// Chat — одиночный ход диалога.
 	Chat(ctx context.Context, req Request) (Response, error)
+	// ChatStream — стриминг хода: канал приращений content (reasoning
+	// отбрасывается). Канал закрывается по [DONE]/finish. Error — только
+	// ошибки запроса/соединения (поток читается из канала).
+	ChatStream(ctx context.Context, req Request) (<-chan string, error)
 }
 
 // ErrLLMUnavailable — LLM-эндпоинт недоступен/ошибка HTTP (не fatal для сессии).
@@ -68,6 +75,8 @@ type Client struct {
 }
 
 // NewClient создаёт клиент (baseURL — корень, напр. http://host:8300/v1).
+// Жёсткого http.Client.Timeout нет сознательно: таймаут хода задаёт ctx
+// вызывающего (в стриминге он должен покрывать весь поток, а не запрос).
 func NewClient(baseURL, model, apiKey string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -77,22 +86,18 @@ func NewClient(baseURL, model, apiKey string) *Client {
 	}
 }
 
-// Name — идентификатор провайдера.
+// Name — идентификатор.
 func (c *Client) Name() string { return "openai-compat:" + c.model }
 
-// Chat — POST {baseURL}/chat/completions.
-func (c *Client) Chat(ctx context.Context, req Request) (Response, error) {
-	if req.Model == "" {
-		req.Model = c.model
-	}
-	c.logf("llm: запрос model=%s msgs=%d max_tokens=%d", req.Model, len(req.Messages), req.MaxTokens)
+// doRequest — POST {baseURL}/chat/completions (тело — сериализованный req).
+func (c *Client) doRequest(ctx context.Context, req Request) (*http.Response, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
-		return Response{}, fmt.Errorf("сериализация запроса: %w", err)
+		return nil, fmt.Errorf("сериализация запроса: %w", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return Response{}, fmt.Errorf("запрос: %w", err)
+		return nil, fmt.Errorf("запрос: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
@@ -100,15 +105,25 @@ func (c *Client) Chat(ctx context.Context, req Request) (Response, error) {
 	}
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return Response{}, ErrLLMUnavailable{Err: err}
+		return nil, ErrLLMUnavailable{Err: err}
+	}
+	return resp, nil
+}
+
+// doOnce — одиночный POST: разбор JSON-ответа, текст первого выбора и
+// finish_reason (повтор при пустом контенте — на стороне Chat).
+func (c *Client) doOnce(ctx context.Context, req Request) (content string, finish string, err error) {
+	resp, err := c.doRequest(ctx, req)
+	if err != nil {
+		return "", "", err
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return Response{}, ErrLLMUnavailable{Err: fmt.Errorf("чтение ответа: %w", err)}
+		return "", "", ErrLLMUnavailable{Err: fmt.Errorf("чтение ответа: %w", err)}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return Response{}, ErrLLMUnavailable{Err: fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))}
+		return "", "", ErrLLMUnavailable{Err: fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))}
 	}
 	var parsed struct {
 		Choices []struct {
@@ -120,69 +135,124 @@ func (c *Client) Chat(ctx context.Context, req Request) (Response, error) {
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return Response{}, fmt.Errorf("разбор ответа: %w", err)
+		return "", "", fmt.Errorf("разбор ответа: %w", err)
 	}
 	if len(parsed.Choices) == 0 {
-		return Response{}, fmt.Errorf("пустой ответ LLM")
+		return "", "", fmt.Errorf("пустой ответ LLM")
 	}
-	msg := parsed.Choices[0]
-	content := strings.TrimSpace(msg.Message.Content)
-	if content == "" {
+	return parsed.Choices[0].Message.Content, parsed.Choices[0].FinishReason, nil
+}
+
+// Chat — POST {baseURL}/chat/completions (non-streaming).
+func (c *Client) Chat(ctx context.Context, req Request) (Response, error) {
+	if req.Model == "" {
+		req.Model = c.model
+	}
+	c.logf("llm: запрос model=%s msgs=%d max_tokens=%d", req.Model, len(req.Messages), req.MaxTokens)
+	content, finish, err := c.doOnce(ctx, req)
+	if err != nil {
+		return Response{}, err
+	}
+	if strings.TrimSpace(content) == "" && finish == "length" {
 		// Reasoning-модели (qwen3.x-hybrid и др.): при finish_reason=length весь
 		// бюджет токенов уходит на рассуждение — контент пустой. Повторяем с
 		// увеличенным бюджетом (рассуждение короче, контент есть).
-		if msg.FinishReason == "length" {
-			origMax := req.MaxTokens
-			req.MaxTokens = origMax * 2
+		req.MaxTokens = req.MaxTokens * 2
+		if req.MaxTokens < 1500 {
+			req.MaxTokens = 1500
+		}
+		if content2, _, err := c.doOnce(ctx, req); err == nil {
+			content = content2
+		}
+	}
+	if strings.TrimSpace(content) == "" {
+		return Response{}, ErrLLMUnavailable{Err: fmt.Errorf("LLM вернул пустой контент (finish=%s)", finish)}
+	}
+	c.logf("llm: ответ len=%d", len(content))
+	return Response{Content: strings.TrimSpace(content)}, nil
+}
+
+// ChatStream — SSE-стриминг: POST stream:true, канал приращений content
+// (delta.reasoning отбрасывается). При finish_reason=length и пустом контенте —
+// повтор всего запроса в стрим-режиме с увеличенным бюджетом (как в Chat).
+func (c *Client) ChatStream(ctx context.Context, req Request) (<-chan string, error) {
+	if req.Model == "" {
+		req.Model = c.model
+	}
+	req.Stream = true
+	c.logf("llm: стрим-запрос model=%s msgs=%d max_tokens=%d", req.Model, len(req.Messages), req.MaxTokens)
+	resp, err := c.doRequest(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		return nil, ErrLLMUnavailable{Err: fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))}
+	}
+	ch := make(chan string, 32)
+	go func() {
+		defer close(ch)
+		defer resp.Body.Close()
+		delivered, finish := c.readSSE(resp.Body, ch)
+		if delivered == 0 && finish == "length" {
+			// Повтор в стрим-режиме с увеличенным бюджетом (см. Chat).
+			req.MaxTokens = req.MaxTokens * 2
 			if req.MaxTokens < 1500 {
 				req.MaxTokens = 1500
 			}
-			body2, err := json.Marshal(req)
+			resp2, err := c.doRequest(ctx, req)
 			if err != nil {
-				return Response{}, ErrLLMUnavailable{Err: err}
-			}
-			httpReq2, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body2))
-			if err != nil {
-				return Response{}, ErrLLMUnavailable{Err: err}
-			}
-			httpReq2.Header.Set("Content-Type", "application/json")
-			if c.apiKey != "" {
-				httpReq2.Header.Set("Authorization", "Bearer "+c.apiKey)
-			}
-			resp2, err := c.http.Do(httpReq2)
-			if err != nil {
-				return Response{}, ErrLLMUnavailable{Err: err}
+				c.logf("llm: стрим-повтор не удался: %v", err)
+				return
 			}
 			defer resp2.Body.Close()
-			raw2, err := io.ReadAll(io.LimitReader(resp2.Body, 1<<20))
-			if err != nil {
-				return Response{}, ErrLLMUnavailable{Err: fmt.Errorf("чтение ответа (повтор): %w", err)}
-			}
-			if resp2.StatusCode < 200 || resp2.StatusCode >= 300 {
-				return Response{}, ErrLLMUnavailable{Err: fmt.Errorf("HTTP %d (повтор): %s", resp2.StatusCode, strings.TrimSpace(string(raw2)))}
-			}
-			var parsed2 struct {
-				Choices []struct {
-					Message struct {
-						Content   string `json:"content"`
-						Reasoning string `json:"reasoning"`
-					} `json:"message"`
-					FinishReason string `json:"finish_reason"`
-				} `json:"choices"`
-			}
-			if err := json.Unmarshal(raw2, &parsed2); err != nil {
-				return Response{}, fmt.Errorf("разбор ответа (повтор): %w", err)
-			}
-			if len(parsed2.Choices) > 0 {
-				content = strings.TrimSpace(parsed2.Choices[0].Message.Content)
-			}
+			c.readSSE(resp2.Body, ch)
 		}
-		if content == "" {
-			return Response{}, ErrLLMUnavailable{Err: fmt.Errorf("LLM вернул пустой контент (reasoning_len=%d)", len(msg.Message.Reasoning))}
+	}()
+	return ch, nil
+}
+
+// readSSE — чтение SSE-потока: строки «data: …»; чанк {choices[].delta}:
+// reasoning игнорируется, content уходит в ch. Возвращает (выдано байт
+// content, finish_reason). Одиночная некорректная строка — пропускается.
+func (c *Client) readSSE(r io.Reader, ch chan<- string) (int, string) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	delivered := 0
+	finish := ""
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue // комментарии/keep-alive и прочие поля SSE
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "[DONE]" {
+			break
+		}
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Reasoning string `json:"reasoning"`
+					Content   string `json:"content"`
+				} `json:"delta"`
+				FinishReason string `json:"finish_reason"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			continue
+		}
+		for _, choice := range chunk.Choices {
+			if choice.FinishReason != "" {
+				finish = choice.FinishReason
+			}
+			if choice.Delta.Content != "" {
+				ch <- choice.Delta.Content
+				delivered += len(choice.Delta.Content)
+			}
 		}
 	}
-	c.logf("llm: ответ len=%d", len(content))
-	return Response{Content: content}, nil
+	return delivered, finish
 }
 
 // logf — лог LLM-клиента (slog, дефолтный; достаточно для диагностики).

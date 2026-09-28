@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -73,5 +74,128 @@ func TestClientUnavailable(t *testing.T) {
 	defer cancel()
 	if _, err := c.Chat(ctx, Request{Messages: []Message{{Role: RoleUser, Content: "x"}}}); err == nil {
 		t.Fatal("ожидалась ошибка")
+	}
+}
+
+// sseMock — SSE-сервер: для каждого запроса отдаёт предзаданные data-строки.
+func sseMock(responses ...[]string) (*httptest.Server, *int) {
+	reqs := new(int)
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		i := *reqs
+		*reqs++
+		var req struct {
+			MaxTokens int  `json:"max_tokens"`
+			Stream    bool `json:"stream"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if !req.Stream {
+			http.Error(w, "ожидался stream:true", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, line := range responses[min(i, len(responses)-1)] {
+			_, _ = w.Write([]byte("data: " + line + "\n\n"))
+		}
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	})), reqs
+}
+
+func sseChunk(delta map[string]string, finish string) string {
+	b, _ := json.Marshal(map[string]any{
+		"object":  "chat.completion.chunk",
+		"choices": []map[string]any{{"delta": delta, "finish_reason": finish}},
+	})
+	return string(b)
+}
+
+// collect — собрать весь канал в строку (с таймаутом от висящего потока).
+func collect(t *testing.T, ch <-chan string) string {
+	t.Helper()
+	var sb strings.Builder
+	for {
+		select {
+		case d, ok := <-ch:
+			if !ok {
+				return sb.String()
+			}
+			sb.WriteString(d)
+		case <-time.After(5 * time.Second):
+			t.Fatal("таймаут чтения SSE-канала")
+		}
+	}
+}
+
+func TestClientChatStream(t *testing.T) {
+	ts, _ := sseMock([]string{
+		// reasoning-токены — НЕ озвучиваются, в канал не попадают.
+		sseChunk(map[string]string{"reasoning": "Давайте"}, ""),
+		sseChunk(map[string]string{"reasoning": " подумаем..."}, ""),
+		sseChunk(map[string]string{"content": "Привет, "}, ""),
+		sseChunk(map[string]string{"content": "расскажите о Go."}, ""),
+		sseChunk(nil, "stop"),
+		"[DONE]",
+	})
+	defer ts.Close()
+	c := NewClient(ts.URL, "m", "")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ch, err := c.ChatStream(ctx, Request{Messages: []Message{{Role: RoleUser, Content: "привет"}}})
+	if err != nil {
+		t.Fatalf("chatstream: %v", err)
+	}
+	got := collect(t, ch)
+	if got != "Привет, расскажите о Go." {
+		t.Fatalf("content: %q", got)
+	}
+}
+
+func TestClientChatStreamLengthRetry(t *testing.T) {
+	// Первый ход: весь бюджет на reasoning, finish_reason=length, контент пустой.
+	ts, reqs := sseMock(
+		[]string{sseChunk(map[string]string{"reasoning": "хм"}, ""), sseChunk(nil, "length")},
+		[]string{
+			sseChunk(map[string]string{"content": "О, теперь есть "}, ""),
+			sseChunk(map[string]string{"content": "контент."}, "stop"),
+			"[DONE]",
+		},
+	)
+	defer ts.Close()
+	c := NewClient(ts.URL, "m", "")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ch, err := c.ChatStream(ctx, Request{Messages: []Message{{Role: RoleUser, Content: "x"}}, MaxTokens: 400})
+	if err != nil {
+		t.Fatalf("chatstream: %v", err)
+	}
+	got := collect(t, ch)
+	if got != "О, теперь есть контент." {
+		t.Fatalf("content после length-повтора: %q", got)
+	}
+	if *reqs != 2 {
+		t.Fatalf("ожидается 2 запроса (повтор), фактически %d", *reqs)
+	}
+}
+
+func TestClientChatStreamUnavailable(t *testing.T) {
+	c := NewClient("http://127.0.0.1:1", "m", "")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if _, err := c.ChatStream(ctx, Request{Messages: []Message{{Role: RoleUser, Content: "x"}}}); err == nil {
+		t.Fatal("ожидалась ошибка соединения")
+	}
+}
+
+func TestMockProviderChatStream(t *testing.T) {
+	m := NewMockProvider()
+	ch, err := m.ChatStream(context.Background(), Request{Messages: []Message{{Role: RoleUser, Content: "привет"}}})
+	if err != nil {
+		t.Fatalf("mock chatstream: %v", err)
+	}
+	got := collect(t, ch)
+	if !strings.Contains(got, "привет") {
+		t.Fatalf("mock-ответ: %q", got)
 	}
 }

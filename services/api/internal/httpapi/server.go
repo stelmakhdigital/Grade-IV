@@ -16,6 +16,7 @@ import (
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/interviewer"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/metrics"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/session"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/voicesvc"
 )
@@ -79,6 +80,7 @@ func (s *Server) Engine() *session.Engine { return s.engine }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("GET /metrics", metrics.Handler)
 	mux.HandleFunc("POST /api/v1/auth/register", s.handleRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.Handle("GET /api/v1/auth/me", s.requireAuth(http.HandlerFunc(s.handleMe)))

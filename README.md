@@ -101,7 +101,7 @@ make run-frontend   # :5173
 # Вместо LLM_MOCK=1:
 LLM_MOCK=0 \
 LLM_BASE_URL=http://IP_УЗЛА:8000/v1 \
-LLM_MODEL=qwen3.8-27b-dflash2 \
+LLM_MODEL=qwen3.8-27b-fp8 \
 make run-api
 ```
 
@@ -128,7 +128,7 @@ make smoke
 |------------|----------|----------|
 | `LLM_MOCK` | `1` / `0` | `1` — детерминированный эхо-LLM (без узла), `0` — реальный LLM |
 | `LLM_BASE_URL` | `http://IP:8000/v1` | Адрес LLM-узла (OpenAI-совместимый API) |
-| `LLM_MODEL` | `qwen3.8-27b-dflash2` | Имя модели на узле |
+| `LLM_MODEL` | `qwen3.8-27b-fp8` | Имя модели на узле |
 | `STT_MODEL` | `small` / `tiny` / `large-v3` | Модель STT (faster-whisper) |
 | `STT_DOWNLOAD_ROOT` | `FOR_RUN/stt` | Директория кэша STT-моделей |
 | `TTS_MODEL_DIR` | `FOR_RUN/tts` | Директория TTS-модели (Silero) |

@@ -2,15 +2,19 @@ package httpapi
 
 import (
 	"encoding/binary"
+	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/metrics"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/voicesvc"
 )
 
 // Пайплайн голосового хода (ADR-002): PCM-кадры кандидата → VAD → voice /stt →
-// движок интервьюера (LLM) → voice /tts → бинарные кадры PCM16 по WS.
+// движок интервьюера (LLM, SSE-стрим) → voice /tts (по предложениям, до-стриминг)
+// → бинарные кадры PCM16 по WS с pacing (не быстрее real-time).
 //
 // Ходовой режим (SRS §8): пока ИИ «говорит» (стрим TTS) или конвейер занят,
 // входящий PCM не слушается (barge-in — вне скоупа MVP).
@@ -20,10 +24,13 @@ import (
 const (
 	ttsChunkBytes = 8000 // 250 мс @ 16 кГц PCM16 (ADR-001: кадры ~250 мс)
 	ttsFlagEnd    = 0x01
+	// frameDur — pacing: один кадр = 250 мс аудио, кадры уходят не чаще
+	// одного за 250 мс (реальное время).
+	frameDur = 250 * time.Millisecond
 )
 
-// runCandidateTurn — ход кандидата: событие + transcript, ответ ИИ, ai_text,
-// transcript, синтез речи (если voice-сервис доступен).
+// runCandidateTurn — ход кандидата: событие + transcript, ответ ИИ (SSE-стрим),
+// ai_text (единым сообщением по завершении LLM-текста), TTS-кадры с pacing.
 // Вызывается из readLoop (текстовый utterance) и из goroutine голосового STT.
 func (s *Server) runCandidateTurn(ws *wsSession, text string) {
 	ctx := ws.ctx
@@ -34,14 +41,191 @@ func (s *Server) runCandidateTurn(ws *wsSession, text string) {
 	if _, err := s.eventData(ctx, ws.id, "user_utterance", map[string]any{"text": text}); err == nil {
 		s.engine.SendTo(ws.id, map[string]any{"type": "transcript", "who": "user", "text": text})
 	}
-	reply, err := s.interviewer.OnUserUtterance(ctx, ws.id, text)
+	ch, err := s.interviewer.OnUserUtteranceStream(ctx, ws.id, text)
 	if err != nil {
+		metrics.LLMStreamErrors.Inc(nil)
+		metrics.TurnsTotal.Inc(metrics.ResultLabel("error"))
 		s.sendInterviewerText(ctx, ws.id, "", err)
 		return
 	}
-	s.engine.SendTo(ws.id, map[string]any{"type": "transcript", "who": "ai", "text": reply})
-	s.engine.SendTo(ws.id, map[string]any{"type": "ai_text", "text": reply})
-	s.streamAIAudio(ws, reply)
+	s.streamCandidateTurn(ws, ch)
+}
+
+// streamCandidateTurn — конвейер хода: LLM-токены → полные предложения (логика
+// splitSentences) → TTS по мере готовности (до-стриминг: LLM ещё пишет, а TTS
+// уже синтезирует) → кадры в WS с pacing. ai_text/transcript — одним
+// сообщением, когда весь LLM-текст собран (frontend использует ai_text как
+// финальный текст, не инкрементальный).
+func (s *Server) streamCandidateTurn(ws *wsSession, deltas <-chan string) {
+	start := time.Now() // turn_start (после STT)
+
+	sentences := make(chan string, 8)
+	fullText := make(chan string, 1)
+	go splitDeltas(start, deltas, sentences, fullText)
+
+	voiceOn := s.voice != nil
+	var turnDone chan struct{} // завершение аудио-конвейера (pacing)
+	var frames chan []byte // PCM-кадры (≤ ttsChunkBytes) из TTS-воркера
+	if voiceOn {
+		ws.ttsActive.Store(true) // gate микрофона: сброс строго после end-кадра
+		frames = make(chan []byte, 64)
+		go func() {
+			defer close(frames)
+			silence := make([]byte, ttsChunkBytes)
+			prev := "" // предыдущее предложение (пауза перед текущим)
+			for sentence := range sentences {
+				if prev != "" {
+					gap := 1
+					if strings.HasSuffix(prev, "?") || strings.HasSuffix(prev, "!") {
+						gap = 2
+					}
+					for g := 0; g < gap; g++ {
+						frames <- silence
+					}
+				}
+				prev = sentence
+				pcm, err := s.voice.TTS(ws.ctx, prepareTTS(sentence))
+				if err != nil {
+					metrics.TTSErrors.Inc(nil)
+					s.log.Warn("tts: синтез предложения не удался", "session", ws.id, "err", err)
+					continue // Degrade: пропускаем (голос не критичен, текст уже есть)
+				}
+				for off := 0; off < len(pcm); off += ttsChunkBytes {
+					end := off + ttsChunkBytes
+					if end > len(pcm) {
+						end = len(pcm)
+					}
+					frames <- pcm[off:end]
+				}
+			}
+		}()
+		// Pacing параллельно LLM-стриму: кадры уходят, пока LLM ещё пишет.
+		turnDone = make(chan struct{})
+		go func() {
+			defer close(turnDone)
+			defer ws.ttsActive.Store(false) // строго после end-кадра
+			_, _, ended := s.paceFrames(ws, start, frames)
+			if ended {
+				metrics.TurnStage.Observe(metrics.StageLabel("turn_end"), time.Since(start).Seconds())
+				metrics.TurnsTotal.Inc(metrics.ResultLabel("ok"))
+			} else {
+				metrics.TurnsTotal.Inc(metrics.ResultLabel("no_audio")) // ctx-отмена/без кадров
+			}
+		}()
+	} else {
+		go func() { for range sentences { } }() // voice нет — просто сливаем
+	}
+
+	full := <-fullText // LLM-текст собран (стрим завершён)
+	full = strings.TrimSpace(full)
+	if full == "" {
+		// Деградация: LLM не дала текста (оборванный стрим) — fallback как при ошибке.
+		metrics.TurnsTotal.Inc(metrics.ResultLabel("error"))
+		s.log.Warn("interviewer: LLM-стрим вернул пустой ответ", "session", ws.id)
+		s.sendInterviewerText(ws.ctx, ws.id, "", errEmptyStream)
+	} else {
+		s.engine.SendTo(ws.id, map[string]any{"type": "transcript", "who": "ai", "text": full})
+		s.engine.SendTo(ws.id, map[string]any{"type": "ai_text", "text": full})
+	}
+
+	if turnDone != nil {
+		<-turnDone // ждём конца аудио (end-кадр ушёл, ttsActive сброшен)
+	} else {
+		// Без voice: ход завершён сбором текста.
+		metrics.TurnStage.Observe(metrics.StageLabel("turn_end"), time.Since(start).Seconds())
+		metrics.TurnsTotal.Inc(metrics.ResultLabel("ok"))
+	}
+}
+
+var errEmptyStream = errors.New("LLM-стрим вернул пустой ответ")
+
+// splitDeltas — LLM-стрим → полные предложения (TTS) + полный текст (ai_text).
+// Предложение считается готовым, когда по логике splitSentences после него
+// начинается новое; остаток — по завершении стрима.
+func splitDeltas(start time.Time, deltas <-chan string, sentences chan<- string, fullText chan<- string) {
+	var full, pending string
+	for d := range deltas {
+		if full == "" {
+			metrics.TurnStage.Observe(metrics.StageLabel("llm_first_token"), time.Since(start).Seconds())
+		}
+		full += d
+		pending += d
+		parts := splitSentences(pending)
+		if len(parts) > 1 {
+			for _, p := range parts[:len(parts)-1] {
+				sentences <- p
+			}
+			pending = parts[len(parts)-1]
+		}
+	}
+	if p := strings.TrimSpace(pending); p != "" {
+		sentences <- p
+	}
+	close(sentences)
+	fullText <- full
+}
+
+// paceFrames — очередь кадров → WS: не быстрее одного кадра за 250 мс
+// (1 кадр = 250 мс аудио), очередь опустошается к концу стрима; end-флаг —
+// на самом последнем кадре. Возвращает время первого/последнего кадра и
+// завершён ли поток end-кадром (ctx-отмена — нет).
+func (s *Server) paceFrames(ws *wsSession, turnStart time.Time, frames chan []byte) (time.Time, time.Time, bool) {
+	var seq uint16
+	silence := make([]byte, ttsChunkBytes)
+	ticker := time.NewTicker(25 * time.Millisecond) // разрешение pacing-списка
+	defer ticker.Stop()
+	var hold []byte
+	var queue [][]byte // накопленные кадры (LLM/TTS обгоняют pacing)
+	var nextSend time.Time // zero = можно отправлять сразу (первый кадр)
+	var firstAt, endAt time.Time
+	sentAny := false
+	endPending := false
+	for {
+		if ws.ctx.Err() != nil {
+			return firstAt, endAt, false
+		}
+		if len(queue) > 0 && !nextSend.After(time.Now()) {
+			hold, queue = queue[0], queue[1:]
+			sendEnd := endPending
+			frame := make([]byte, 0, 4+len(hold))
+			var hdr [4]byte
+			binary.LittleEndian.PutUint16(hdr[0:2], seq)
+			if sendEnd {
+				binary.LittleEndian.PutUint16(hdr[2:4], ttsFlagEnd)
+			}
+			frame = append(frame, hdr[:]...)
+			frame = append(frame, hold...)
+			s.engine.SendBinary(ws.id, frame)
+			seq++
+			now := time.Now()
+			if !sentAny {
+				firstAt = now
+				metrics.TurnStage.Observe(metrics.StageLabel("tts_first_frame"), now.Sub(turnStart).Seconds())
+			}
+			sentAny = true
+			if sendEnd {
+				endAt = now
+				return firstAt, endAt, true
+			}
+			hold = nil
+			nextSend = now.Add(frameDur)
+			continue
+		}
+		select {
+		case <-ticker.C:
+		case pcm, ok := <-frames:
+			if ok {
+				queue = append(queue, pcm)
+				continue
+			}
+			if sentAny {
+				queue = append(queue, silence)
+				endPending = true // финальный end-кадр (тишина 250 мс)
+				continue
+			}
+			return firstAt, endAt, sentAny // кадров не было (все TTS-ошибки) — stop не нужен
+		}
+	}
 }
 
 // streamAIAudio — TTS ответа ИИ → бинарные кадры {seq,flags}+PCM16 (через engine.SendBinary).
