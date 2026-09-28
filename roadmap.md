@@ -57,16 +57,17 @@
 
 ## Фаза 5: Deployment
 - [x] CI/CD (сборка, тесты, деплой) — .github/workflows/ci.yml (go/frontend/voice-fake/smoke, jobs эмулированы локально); CD — make up (артефакт), 2026-09-14
-- [ ] Продакшен-среда (cloud/VPS), домен, TLS, медиа-потоки
-- [ ] Мониторинг, алерты, логи (latency голосового контура — ключевой SLO)
+- [x] Продакшен-среда (cloud/VPS), домен, TLS, медиа-потоки — 2026-09-28 (9f18dfb): prod-compose (Caddy+TLS Let's Encrypt/internal), OPERATIONS.md; факт-деплой ждёт VPS
+- [x] Мониторинг, алерты, логи (latency голосового контура — ключевой SLO) — 2026-09-28 (9f18dfb): Prometheus+Grafana, SLO-дашборд p95 llm_first_token<4с; алерт-правила — бэклог
 
 ## Фаза 6: Operations
-- [ ] Документация по эксплуатации
+- [x] Документация по эксплуатации — 2026-09-28 (9f18dfb): docs/OPERATIONS.md (VPS, бэкап, troubleshooting)
 - [ ] Бэклог улучшений: full-duplex с barge-in, мультиязычие, A/B промптов
 
 ## Бэклог ML/latency
 - [x] Стриминг LLM (SSE) + до-стриминг TTS + real-time pacing + /metrics (grade_ai_turn_seconds{stage}) — 2026-09-28 (3cc09d8): накладка конвейера 3 мс–0.3 с; узкое место — LLM-узел (reasoning 2.7–7.9 с до первого content-токена); LLM_MODEL → qwen3.8-27b-fp8
-- [ ] Ускорение на стороне LLM-узла: ограничение reasoning-бюджета / более быстрый сервинг (нужно решение по инфраструктуре)
+- [x] Ускорение на стороне LLM-узла: отключение reasoning через chat_template_kwargs.enable_thinking (LLM_ENABLE_THINKING, дефолт off) — 2026-09-28 (847f319): TTFB 7.38с→0.70с
+- [x] Рефакторинг долга: engine.go 651→4 файла, дубли ws-хендлеров (speak/ownedSession/parseSessionID), SessionView→хук useVoiceSession — 2026-09-28
 
 ## Риски (предварительный список, обновлять по фазам)
 - R1: Latency голосового контура (STT+LLM+TTS) — превысит приемлемые 2–3 с (MVP), >1 с (цель)

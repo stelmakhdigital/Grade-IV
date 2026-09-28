@@ -856,3 +856,22 @@
     (не /api/v1/sessions/{id}/ws); профили в compose — prod/gpu (не default/gpu).
   - Проверка: docker в окружении агента отсутствует → YAML/JSON валидированы
     python (compose config не запускался), контейнеры не поднимались, коммита нет.
+- **2026-09-28** (latency SLO) — Отключение reasoning-фазы LLM, коммит 847f319:
+  - Узел vLLM принимает в теле /chat/completions `chat_template_kwargs:
+    {"enable_thinking": false}` (проверено зондом: content-токены сразу).
+  - config: LLM_ENABLE_THINKING (дефолт false); llm.Client.WithEnableThinking
+    (wire-поле в doRequest — общий для Chat/ChatStream); тест на тело запроса.
+  - Live-замер (fp8, fake TTS): grade_ai_turn_seconds llm_first_token avg
+    7.38с→0.70с (все <1с), tts_first_frame 7.49→0.78с, turn_end 8.80→2.60с.
+    SLO p95<4с по первому звуку — достигается.
+- **2026-09-28** (рефакторинг долга) — коммиты после 9f18dfb:
+  - api: session/engine.go 651 → engine.go(230)+engine_lifecycle.go(309)+
+    engine_timer.go(77)+engine_events.go(62) — чистый перенос методов, API пакета
+    не изменён. httpapi: вынесены дубли speak() (sendInterviewerText+условный
+    streamAIAudio, 3 вхождения), ownedSession() (GetOwned+404/500, 3 хендлера),
+    parseSessionID в WS; чистый выигрыш ~10 строк (пересечение оказалось слабым).
+  - frontend: SessionView.tsx 403→197 + hooks/useVoiceSession.ts (258): WS-цикл,
+    PCM-кадры/плеер, микрофон/эхо, таймер, маршрутизация ai_text — хук; JSX не
+    менялся. Тесты SessionView.test.tsx без правок.
+  - Регресс: go vet+test -count=1 (все пакеты), tsc, vitest 59/59, vite build —
+    зелёные. gofmt поправлен в voice_pipeline{,_test}.go (был неровным с 3cc09d8).
