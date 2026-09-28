@@ -875,3 +875,13 @@
     менялся. Тесты SessionView.test.tsx без правок.
   - Регресс: go vet+test -count=1 (все пакеты), tsc, vitest 59/59, vite build —
     зелёные. gofmt поправлен в voice_pipeline{,_test}.go (был неровным с 3cc09d8).
+- **2026-09-28** (инфра dev) — «make run-all: go: command not found» (коммит после dc0dce0):
+  - Причина: Go-тулчейн и voice-venv жили во временных каталогах рабочей сессии
+    (/tmp/go, временный venv) — не переживают перезагрузку/очистку /tmp.
+  - Фикс: тулчейн перенесён в $HOME/.local/go-toolchain (путь, который уже ждёт
+    run-all.sh); run-all.sh — фолбэк /tmp/go + явная ошибка вместо Error 127.
+  - services/voice/.venv пересоздан (python3 venv + torch CPU + requirements.txt) —
+    voice :8100 снова поднимается; стек 4/4 OK после make run-all.
+  - Известное: сервисы, запущенные из-под ИИ-агента, убиваются вместе с деревом
+    процессов агента — постоянный запуск: make run-all в собственном терминале
+    (или tmux). make install всё ещё требует pnpm в PATH (node_modules есть).
