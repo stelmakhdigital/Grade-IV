@@ -809,3 +809,28 @@
    (chunked faster-whisper), TTS-стриминг + pacing, AEC/эхо-подавление,
    Silero-VAD onnx в Go, read-only task tests, GPU-конфиг (large-v3).
 3. Phase gate: prod-узел (VPS) от пользователя → задачи 2/3 Фазы 5.
+- **2026-09-28** (latency SLO) — Стриминг LLM (SSE) + до-стриминг TTS + pacing + /metrics, коммит 3cc09d8:
+  - llm: `ChatStream` (SSE stream:true, парсинг data:-чанков; reasoning-модель —
+    delta.reasoning отбрасывается, в ответ не входит); length-повтор (×max_tokens,
+    min 1500) сохранён, дублирование кода в Chat убрано (doOnce); MockProvider —
+    через Chat. Тесты: SSE-парсинг, [DONE], length-повтор, ошибка соединения.
+  - interviewer: `OnUserUtteranceStream` (чан фраз, тот же промпт/контекст);
+    ai_utterance в БД — ПО ЗАВЕРШЕНИИ стрима.
+  - voice_pipeline: runCandidateTurn — LLM-токены → splitDeltas (предложения) →
+    TTS-воркер параллельно генерации → paceFrames (≤1 кадр/250 мс, end-флаг,
+    ttsActive=false строго после end-кадра). ai_text/transcript — единым сообщением
+    по завершении LLM-текста (frontend использует ai_text как финальный).
+    streamAIAudio (приветствие/nudge/входы на стадию) — без изменений, burst-долг там.
+  - metrics (новый пакет, без зависимостей): grade_ai_turn_seconds{stage=
+    llm_first_token|tts_first_frame|turn_end} + счётчики ошибок; GET /metrics.
+  - LLM_MODEL: qwen3.8-27b-dflash2 → qwen3.8-27b-fp8 (на узле 192.168.1.114:8000
+    старое имя — 404, проверено live). SSE-поддержка узла подтверждена зондом.
+  - Live-замер (fp8, fake STT/TTS): первый TTS-кадр 7.5–12 с (ход), накладка
+    конвейера (первый content-токен → первый кадр) 3 мс–0.3 с; сырой замер к
+    vLLM: reasoning-токены 2.7–7.9 с до первого content-токена — узкое место
+    теперь LLM-узел, SLO p95<4 с упирается в него, а не в конвейер.
+  - Регресс: go vet+test (7 пакетов) зелёные, vitest 59/59, frontend не тронут.
+  - Ограничение (как было и до): finish_reason=length с НЕПУСТЫМ контентом
+    (обрезка по max_tokens=300) — повтор только при пустом контенте.
+  - Следующее (по решению пользователя): ограничение reasoning-бюджета на
+    LLM-узле / более быстрый сервинг — инфраструктурное.
