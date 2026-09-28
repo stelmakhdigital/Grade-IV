@@ -68,10 +68,24 @@ func (e ErrLLMUnavailable) Unwrap() error { return e.Err }
 
 // Client — HTTP-клиент OpenAI-совместимого /chat/completions.
 type Client struct {
-	baseURL string
-	apiKey  string
-	http    *http.Client
-	model   string
+	baseURL        string
+	apiKey         string
+	http           *http.Client
+	model          string
+	enableThinking bool // vLLM: chat_template_kwargs.enable_thinking (дефолт false)
+}
+
+// WithEnableThinking — включить/выключить reasoning-фазу LLM (vLLM-специфичное
+// поле тела запроса chat_template_kwargs.enable_thinking, LLM_ENABLE_THINKING).
+func (c *Client) WithEnableThinking(v bool) *Client {
+	c.enableThinking = v
+	return c
+}
+
+// chatTemplateKwargs — vLLM-специфичный параметр шаблона (thinking-модели
+// qwen3.x): отключает reasoning-фазу, контент идёт сразу (latency).
+type chatTemplateKwargs struct {
+	EnableThinking bool `json:"enable_thinking"`
 }
 
 // NewClient создаёт клиент (baseURL — корень, напр. http://host:8300/v1).
@@ -89,9 +103,15 @@ func NewClient(baseURL, model, apiKey string) *Client {
 // Name — идентификатор.
 func (c *Client) Name() string { return "openai-compat:" + c.model }
 
-// doRequest — POST {baseURL}/chat/completions (тело — сериализованный req).
+// doRequest — POST {baseURL}/chat/completions (тело — req + chat_template_kwargs).
 func (c *Client) doRequest(ctx context.Context, req Request) (*http.Response, error) {
-	body, err := json.Marshal(req)
+	// wireRequest — req плюс vLLM-поле chat_template_kwargs (остальные
+	// OpenAI-совместимые бэкенды игнорируют незнакомые поля тела).
+	wire := struct {
+		Request
+		ChatTemplateKwargs *chatTemplateKwargs `json:"chat_template_kwargs"`
+	}{Request: req, ChatTemplateKwargs: &chatTemplateKwargs{EnableThinking: c.enableThinking}}
+	body, err := json.Marshal(wire)
 	if err != nil {
 		return nil, fmt.Errorf("сериализация запроса: %w", err)
 	}
@@ -259,7 +279,6 @@ func (c *Client) readSSE(r io.Reader, ch chan<- string) (int, string) {
 func (c *Client) logf(format string, args ...any) {
 	slog.Debug(format, args...)
 }
-
 
 // DefaultTimeout — верхний предел хода интервьюера (SRS: p95 хода < 4 с; запас на 4B-модель CPU).
 const DefaultTimeout = 60 * time.Second

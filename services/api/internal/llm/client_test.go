@@ -188,6 +188,73 @@ func TestClientChatStreamUnavailable(t *testing.T) {
 	}
 }
 
+// TestClientChatTemplateKwargs — тело запроса содержит верхнеуровневое поле
+// chat_template_kwargs.enable_thinking с нужным значением (vLLM) — и в
+// non-streaming Chat, и в ChatStream. Фейковый сервер читает тело.
+func TestClientChatTemplateKwargs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Stream             bool `json:"stream"`
+			ChatTemplateKwargs struct {
+				EnableThinking bool `json:"enable_thinking"`
+			} `json:"chat_template_kwargs"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.ChatTemplateKwargs.EnableThinking {
+			t.Errorf("enable_thinking: want false (клиент без WithEnableThinking), got true")
+		}
+		if req.Stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: " + sseChunk(map[string]string{"content": "ок"}, "stop") + "\n\ndata: [DONE]\n\n"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": "ок"}}},
+		})
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	c := NewClient(srv.URL, "m", "")
+	if _, err := c.Chat(ctx, Request{Messages: []Message{{Role: RoleUser, Content: "x"}}}); err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	ch, err := c.ChatStream(ctx, Request{Messages: []Message{{Role: RoleUser, Content: "x"}}})
+	if err != nil {
+		t.Fatalf("chatstream: %v", err)
+	}
+	if got := collect(t, ch); got != "ок" {
+		t.Fatalf("stream content: %q", got)
+	}
+
+	// Явно включённое thinking — true в теле.
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ChatTemplateKwargs struct {
+				EnableThinking bool `json:"enable_thinking"`
+			} `json:"chat_template_kwargs"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if !req.ChatTemplateKwargs.EnableThinking {
+			t.Errorf("enable_thinking: want true (WithEnableThinking(true)), got false")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": "ок"}}},
+		})
+	}))
+	defer srv2.Close()
+	if _, err := NewClient(srv2.URL, "m", "").WithEnableThinking(true).
+		Chat(ctx, Request{Messages: []Message{{Role: RoleUser, Content: "x"}}}); err != nil {
+		t.Fatalf("chat (thinking on): %v", err)
+	}
+}
+
 func TestMockProviderChatStream(t *testing.T) {
 	m := NewMockProvider()
 	ch, err := m.ChatStream(context.Background(), Request{Messages: []Message{{Role: RoleUser, Content: "привет"}}})

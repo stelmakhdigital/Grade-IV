@@ -41,7 +41,8 @@ func New(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *slog.Log
 	if cfg.LLMMock {
 		provider = llm.NewMockProvider()
 	} else {
-		provider = llm.NewClient(cfg.LLMBaseURL, cfg.LLMModel, cfg.LLMAPIKey)
+		provider = llm.NewClient(cfg.LLMBaseURL, cfg.LLMModel, cfg.LLMAPIKey).
+			WithEnableThinking(cfg.LLMEnableThinking)
 	}
 	return NewWithLLM(cfg, database, dialect, log, provider)
 }
