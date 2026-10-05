@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"nhooyr.io/websocket"
 )
 
@@ -358,6 +359,131 @@ func TestTTSStreaming(t *testing.T) {
 	if len(sentences[0]) >= len(text) {
 		t.Fatalf("первое предложение не короче полного текста: %v", sentences)
 	}
+}
+
+// pcmPeak — пиковая амплитуда PCM16LE (маркер предложения в мок-TTS).
+func pcmPeak(pcm []byte) int {
+	peak := 0
+	for i := 0; i+1 < len(pcm); i += 2 {
+		v := int(int16(binary.LittleEndian.Uint16(pcm[i:])))
+		if v < 0 {
+			v = -v
+		}
+		if v > peak {
+			peak = v
+		}
+	}
+	return peak
+}
+
+// TestTTSParallelSynthesis — pipeline TTS-синтез (очередь #3): при искусственной
+// задержке синтеза ≥ pacing-окна предложения (2 кадра = 500 мс; delay 700 мс)
+// второе предложение начинает синтезироваться ДО конца синтеза первого
+// (перекрытие — по времени вызовов mock /tts), а порядок вывода сохранён:
+// кадры первого предложения (амплитудный маркер A1) полностью предшествуют
+// кадрам второго (A2).
+func TestTTSParallelSynthesis(t *testing.T) {
+	ts, token, sessionID, m, e := newVoiceEnv(t)
+	// Мок-LLM: ответ из 2 предложений (приветствие и ход — один и тот же).
+	e.mock.SetResponder(func(req llm.Request) (string, error) {
+		return "Привет! Как дела?", nil
+	})
+	// Мок-TTS: задержка синтеза ≥ pacing-окна предложения + амплитуда на
+	// предложение (маркер предложения в PCM для проверки порядка).
+	m.ttsPCMSize = 16000 // 500 мс = 2 pacing-кадра на предложение
+	m.ttsDelay = 700 * time.Millisecond
+	m.ttsAmp = map[string]int{"Привет!": 1000, "Как дела?": 2000}
+
+	conn := dialWS(t, ts, token, sessionID)
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	// Приветствие: пролистать до TTS end-кадра.
+	msgs := wsReadMixed(t, conn, 2, 3*time.Second)
+	if msgs[0] != "text:stage/<nil>/<nil>" || !startsWith(msgs[1], "text:ai_text/") {
+		t.Fatalf("старт: %v", msgs)
+	}
+	// Читаем до TTS end-кадра. Таймаут Read (2 с) длиннее паузы синтеза
+	// (700 мс): nhooyr закрывает соединение при истечении ctx у Read, поэтому
+	// короткий таймаут (как 500 мс в bargeInReadOne) оборвал бы conn во время TTS-паузы.
+	greetEnd := false
+	gd := time.Now().Add(10 * time.Second)
+	for !greetEnd && time.Now().Before(gd) {
+		rctx, rcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		mt, data, rerr := conn.Read(rctx)
+		rcancel()
+		if rerr != nil || mt != websocket.MessageBinary || len(data) < 4 {
+			continue
+		}
+		if binary.LittleEndian.Uint16(data[2:4])&0x01 != 0 {
+			greetEnd = true
+		}
+	}
+	if !greetEnd {
+		t.Fatal("TTS-приветствие не завершено end-кадром")
+	}
+	greetBase := len(m.TTSStarts())
+
+	// Ход кандидата (текстовая реплика) → ответ ИИ «Привет! Как дела?».
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	_ = conn.Write(ctx, websocket.MessageText, mustJSON(
+		map[string]any{"type": "ui", "name": "utterance", "payload": map[string]string{"text": "расскажи"}}))
+	cancel()
+
+	// Ход ИИ: читать до TTS end-кадра, собирать амплитудные маркеры кадров.
+	var markers []int
+	sawEnd := false
+	dl := time.Now().Add(15 * time.Second)
+	for !sawEnd && time.Now().Before(dl) {
+		rctx, rcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		mt, data, rerr := conn.Read(rctx)
+		rcancel()
+		if rerr != nil || mt != websocket.MessageBinary || len(data) < 8 {
+			continue
+		}
+		if binary.LittleEndian.Uint16(data[2:4])&0x01 != 0 {
+			sawEnd = true
+		}
+		markers = append(markers, pcmPeak(data[4:]))
+	}
+	if !sawEnd {
+		t.Fatalf("TTS end-кадр хода ИИ не пришёл (markers=%v)", markers)
+	}
+
+	// (1) Порядок: кадры A1 (первое предложение) полностью предшествуют A2.
+	firstA2, lastA1 := -1, -1
+	for i, pk := range markers {
+		switch {
+		case pk >= 1500: // A2 (амплитуда 2000)
+			if firstA2 < 0 {
+				firstA2 = i
+			}
+		case pk >= 500: // A1 (амплитуда 1000), не тишина
+			lastA1 = i
+		}
+	}
+	if firstA2 < 0 {
+		t.Fatalf("нет кадров второго предложения (markers=%v)", markers)
+	}
+	if lastA1 < 0 {
+		t.Fatalf("нет кадров первого предложения (markers=%v)", markers)
+	}
+	if lastA1 >= firstA2 {
+		t.Errorf("порядок нарушен: кадр первого предложения после второго (lastA1=%d firstA2=%d markers=%v)",
+			lastA1, firstA2, markers)
+	}
+
+	// (2) Перекрытие: второе предложение начало синтез до конца синтеза первого.
+	starts := m.TTSStarts()
+	if len(starts) < greetBase+2 {
+		t.Fatalf("ожидалось ≥ %d TTS-вызовов, получено %d", greetBase+2, len(starts))
+	}
+	s1, s2 := starts[greetBase], starts[greetBase+1]
+	gap := s2.Sub(s1)
+	if gap >= m.ttsDelay {
+		t.Errorf("синтез не параллельный: второе предложение стартовало через %v после первого (ожидалось < delay %v) — последовательный синтез",
+			gap, m.ttsDelay)
+	}
+	t.Logf("перекрытие синтеза: s2-s1=%v (delay=%v); маркеры=%v", gap, m.ttsDelay, markers)
 }
 
 // TestSTTStreamPartialBeforeTranscript — стриминговый STT (ADR-007):

@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/voicesvc"
 	"testing"
@@ -22,12 +23,18 @@ import (
 // VAD на rms > 1000 → state/partial/final с тем же фиксированным текстом).
 // Считает вызовы (sttCalls — и batch /stt, и стримовый final).
 type mockVoice struct {
+	mu           sync.Mutex // /tts теперь параллельный (пул воркеров, очередь #3)
 	sttCalls     int
 	ttsCalls     int
 	ttsTexts     []string
 	sttBytes     int
 	ttsPCMSize   int
 	streamBroken bool // true: /stt/stream отвечает 500 (тест fallback на batch)
+	// Тест параллельного TTS: искусственная задержка синтеза и амплитуда
+	// на предложение (маркер предложения в PCM для проверки порядка вывода).
+	ttsDelay  time.Duration
+	ttsAmp    map[string]int
+	ttsStarts []time.Time
 }
 
 func (m *mockVoice) server(t *testing.T) *httptest.Server {
@@ -48,13 +55,29 @@ func (m *mockVoice) server(t *testing.T) *httptest.Server {
 				Text string `json:"text"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&p)
+			m.mu.Lock()
 			m.ttsCalls++
 			m.ttsTexts = append(m.ttsTexts, p.Text)
+			m.ttsStarts = append(m.ttsStarts, time.Now())
+			delay := m.ttsDelay
+			amp := 3000
+			if m.ttsAmp != nil {
+				if a, ok := m.ttsAmp[p.Text]; ok {
+					amp = a
+				}
+			}
+			m.mu.Unlock()
+			if delay > 0 {
+				time.Sleep(delay)
+			}
 			w.Header().Set("Content-Type", "audio/pcm")
+			// Честный PCM16LE (2 байта/сэмпл): амплитуда = маркер предложения
+			// (ttsAmp), 300 Гц. Размер pcm = ttsPCMSize (чётный) не меняется.
 			pcm := make([]byte, m.ttsPCMSize)
-			for i := range pcm {
-				v := int16(3000 * math.Sin(2*math.Pi*300*float64(i)/16000))
+			for i := 0; i+1 < len(pcm); i += 2 {
+				v := int16(float64(amp) * math.Sin(2*math.Pi*300*float64(i/2)/16000))
 				pcm[i] = byte(v)
+				pcm[i+1] = byte(v >> 8)
 			}
 			_, _ = w.Write(pcm)
 		case "/api/v1/health":
@@ -65,6 +88,15 @@ func (m *mockVoice) server(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(ts.Close)
 	return ts
+}
+
+// TTSStarts — времена начала каждого /tts-вызова (тесты: перекрытие синтеза).
+func (m *mockVoice) TTSStarts() []time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]time.Time, len(m.ttsStarts))
+	copy(out, m.ttsStarts)
+	return out
 }
 
 // streamWS — мок стримингового STT (ADR-007): бинарные PCM-кадры →
