@@ -8,8 +8,9 @@ from fastapi.testclient import TestClient
 
 from app.main import build_app
 from app.providers import FakeSTT, FakeTTS, SAMPLE_RATE
+from app.stt_stream import EnergyVAD
 
-client = TestClient(build_app(FakeSTT(), FakeTTS()))
+client = TestClient(build_app(FakeSTT(), FakeTTS(), EnergyVAD()))
 
 
 def _pcm16(freq: float = 440.0, seconds: float = 0.5, sr: int = SAMPLE_RATE) -> bytes:

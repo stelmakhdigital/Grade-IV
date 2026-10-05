@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .providers import SAMPLE_RATE, FakeSTT, FakeTTS
+from .stt_stream import build_vad, register_stt_stream
 
 logger = logging.getLogger("voice")
 
@@ -56,7 +57,7 @@ def _build_tts():
     raise ValueError(f"Неизвестный VOICE_TTS_PROVIDER: {name!r}")
 
 
-def build_app(stt=None, tts=None) -> FastAPI:
+def build_app(stt=None, tts=None, vad=None) -> FastAPI:
     """Собирает FastAPI-приложение с заданными (или env-выбранными) провайдерами.
 
     Тесты передают провайдеры явно (fake/реальные), prod — `app` ниже.
@@ -65,13 +66,19 @@ def build_app(stt=None, tts=None) -> FastAPI:
 
     stt = stt if stt is not None else _build_stt()
     tts = tts if tts is not None else _build_tts()
+    vad = vad if vad is not None else build_vad()
     app.state.stt = stt
     app.state.tts = tts
+    app.state.vad = vad
 
     @app.get("/api/v1/health")
     def health() -> dict:
         """Состояние сервиса и провайдеров (используется health-check из api)."""
-        return {"service": "grade-voice", "stt": stt.health(), "tts": tts.health()}
+        return {"service": "grade-voice", "stt": stt.health(), "tts": tts.health(), "vad": vad.name}
+
+    # Стриминговый STT (ADR-007): WS /api/v1/stt/stream — PCM-кадры →
+    # state/partial/final (Silero VAD, partial каждые ~500 мс).
+    register_stt_stream(app, stt, vad)
 
     @app.post("/api/v1/stt")
     async def stt_endpoint(

@@ -9,8 +9,9 @@ from fastapi.testclient import TestClient
 
 from app.main import app, build_app
 from app.providers import FakeSTT, FakeTTS
+from app.stt_stream import EnergyVAD
 
-client = TestClient(build_app(FakeSTT(), FakeTTS()))
+client = TestClient(build_app(FakeSTT(), FakeTTS(), EnergyVAD()))
 
 
 def test_health_fake() -> None:
