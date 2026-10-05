@@ -71,6 +71,7 @@
 - [x] Стриминг LLM (SSE) + до-стриминг TTS + real-time pacing + /metrics (grade_ai_turn_seconds{stage}) — 2026-09-28 (3cc09d8): накладка конвейера 3 мс–0.3 с; узкое место — LLM-узел (reasoning 2.7–7.9 с до первого content-токена); LLM_MODEL → qwen3.8-27b-fp8
 - [x] Ускорение на стороне LLM-узла: отключение reasoning через chat_template_kwargs.enable_thinking (LLM_ENABLE_THINKING, дефолт off) — 2026-09-28 (847f319): TTFB 7.38с→0.70с
 - [x] Рефакторинг долга: engine.go 651→4 файла, дубли ws-хендлеров (speak/ownedSession/parseSessionID), SessionView→хук useVoiceSession — 2026-09-28
+- [x] Стриминговый STT + Silero VAD (onnx) + Pre-STT (очередь #2, T-20261005132522 R1) — 2026-10-05 (ab0bc3f/6556b72/e00b4c6/abb57f6): WS /api/v1/stt/stream (voice: Silero VAD, partial ≤1/500 мс, final по тишине 600 мс), partial → UI (интеримная строка), ход по final, barge-in и во время речи (500 мс от state=true), fallback на batch (grade_stt_stream_fallbacks_total); live: транскрипт 3-с реплики 754→695 мс (A/B), partial за 2.1 с до конца речи, ложных final на тишине нет; ADR-007
 
 ## Риски (предварительный список, обновлять по фазам)
 - R1: Latency голосового контура (STT+LLM+TTS) — превысит приемлемые 2–3 с (MVP), >1 с (цель)
