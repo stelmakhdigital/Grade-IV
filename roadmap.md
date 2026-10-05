@@ -63,7 +63,8 @@
 ## Фаза 6: Operations
 - [x] Документация по эксплуатации — 2026-09-28 (9f18dfb): docs/OPERATIONS.md (VPS, бэкап, troubleshooting)
 - [x] Локальный voice-контур (предварительная pipeline-задача) — 2026-10-05 (67e1694): STT large-v3 GPU (cuda/float16, 0.2 с/5 с аудио) + TTS Silero v5 CPU, модели в `services/voice/models/`, LLM `qwen3.8-27b-fp8`; живые пробы STT/TTS/LLM зелёные (roundtrip conf 0.857, сходство 0.846, отчёт 18 с)
-- [ ] Бэклог улучшений: full-duplex с barge-in, мультиязычие, A/B промптов
+- [x] Full-duplex с barge-in (a3bfc11): VAD слушает кандидата во время речи ИИ, порог 500 мс (BargeInMinSpeechMS), WS tts_stop, player.stop(), браузерный AEC, метрика grade_barge_ins_total; live-замер подтверждён
+- [ ] Бэклог улучшений: мультиязычие, A/B промптов
 
 ## Бэклог ML/latency
 - [x] Стриминг LLM (SSE) + до-стриминг TTS + real-time pacing + /metrics (grade_ai_turn_seconds{stage}) — 2026-09-28 (3cc09d8): накладка конвейера 3 мс–0.3 с; узкое место — LLM-узел (reasoning 2.7–7.9 с до первого content-токена); LLM_MODEL → qwen3.8-27b-fp8

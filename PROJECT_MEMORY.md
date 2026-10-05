@@ -69,6 +69,7 @@
 | 29 | 2026-09-14 | WP-4: STT faster-whisper (lazy load singleton+lock, CPU int8, VAD-фильтр Silero-onnx против галлюцинаций, принимает raw PCM16 и WAV, молчание → text=""); TTS Silero v5 (официальный torch-пакет v5_ru с models.silero.ai — pypi-обёртка silero 0.5.5 оказалась устаревшей; 5 рус. спикеров; нативные 24 кГц → ресемплинг 24→16 кГц (линейная интерполяция) в контракт; `TTS_SPEAKER` с fallback + warning). `VOICE_STT_PROVIDER`/`VOICE_TTS_PROVIDER`: реальные по умолчанию, `fake` для CI. Bэклог: стриминг TTS по предложениям, GPU-конфиг, кэш моделей в docker-образ |
 | 30 | 2026-09-14 | WP-4/WP-6: окружение без pip/ensurepip — venv создаётся `python3 -m venv --without-pip` + get-pip.py; torch ставится с CPU-индекса pytorch.org/whl/cpu (иначе nvidia-* ~2GB); make install учитывает (Makefile, только voice-цель) |
 | 31 | 2026-09-14 | Голосовой конвейер (ADR-002) реализован в api: PCM-кадры → энергетический VAD (RMS-порог, тишина-хвост, мин/макс реплики) → voice /stt → движок интервьюера → voice /tts → бинарные кадры {seq,flags LE}+PCM16. Ходовой режим: turn-taking (время TTS/занятость конвейера — микрофон не слушается, barge-in вне скоупа), один параллельный голосовой ход. MVP-упрощение VAD — энергетический (без onnx в Go; точная Silero-VAD-модель — бэклог). Kонтракт кадров зафиксирован: 4-байтный заголовок LE, 250 мс, bit0 flags — конец потока. LLM-ответ и приветствие озвучиваются; сбой voice — warn-лог, текстовый режим жив |
+| 33 | 2026-10-05 | Full-duplex barge-in (a3bfc11, T-20261005093230 R1): VAD слушает кандидата и во время речи ИИ (тtsActive); порог barge-in — именованная константа BargeInMinSpeechMS=500 мс речи (краткие всплески не прерывают); barge-in → stopTTS (ttsStop), WS {type:tts_stop}, end-кадр прерванного стрима, метрика grade_barge_ins_total, log Info. runCandidateTurn — асинхронно (readLoop не блокируется — иначе реплика не читалась бы во время речи ИИ). Фикс paceFrames: hot-spin на закрытом канале и end-флаг на чужом кадре. Frontend: AEC (echoCancellation+noiseSuppression в getUserMedia), player.stop() останавливает запланированные источники, PCM — всегда (без гейта «ИИ говорит»). Live-замер: tts_stop мгновенно, end-кадр, метрика=1, ложных срабатываний нет |
 | 32 | 2026-10-05 | Локальный voice-контур (pipeline T-20261005080715 R1): STT — faster-whisper large-v3 на GPU (RTX 5070 Ti, cuda/float16), TTS — Silero v5 на CPU. Модели — в `services/voice/models/{stt,tts}` (gitignore; run-all.sh указывает туда по умолчанию, STT_MODEL=large-v3, STT_DEVICE=cuda, STT_COMPUTE_TYPE=float16). ctranslate2 требует внешние CUDA 12-библиотеки: `nvidia-cublas-cu12` + `nvidia-cudnn-cu12` в voice-venv (PyPI), run-all.sh собирает LD_LIBRARY_PATH из `site-packages/nvidia/*/lib`. LLM — `http://192.168.1.114:8000/v1` / `qwen3.8-27b-fp8` (defолты run-all). Замер: STT 5 с аудио = 0.2 с (GPU) vs ~2.5–3 с (CPU int8); сходство TTS→STT 0.846 (3 фразы); LLM-отчёт ~18 с |
 
 ## Ограничения
@@ -911,3 +912,10 @@
   - Регресс: pytest 12 passed (fake), go vet+test (api 7 пакетов, sandbox 2),
     tsc, vitest 59/59, vite build — зелёные. Стек 4/4 OK (run-all, setsid).
   - Коммит: [см. git log] + roadmap (Фаза 6: локальный voice-контур).
+  - **2026-10-05** — full-duplex barge-in (pipeline T-20261005093230 R1): см. решение #33.
+    Live-проба (FOR_RUN/probe-bargein.py, реальные voice/LLM): во время pacing-стрима хода ИИ
+    синтетическая реплика (тон 500 мс + тишина 1250 мс) → tts_stop мгновенно, после него
+    ровно один end-кадр, grade_barge_ins_total=1, log Info «barge-in: кандидат прервал речь ИИ».
+    Go-тесты: TestBargeIn_InterruptsTTS, TestBargeIn_ShortUtteranceDoesNotInterrupt (PASS).
+    Регресс: pytest 12, go vet+test (api, sandbox), tsc, vitest 61/61, vite build — зелёные.
+    Коммит a3bfc11 + roadmap.
