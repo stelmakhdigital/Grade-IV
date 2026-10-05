@@ -72,6 +72,7 @@
 - [x] Ускорение на стороне LLM-узла: отключение reasoning через chat_template_kwargs.enable_thinking (LLM_ENABLE_THINKING, дефолт off) — 2026-09-28 (847f319): TTFB 7.38с→0.70с
 - [x] Рефакторинг долга: engine.go 651→4 файла, дубли ws-хендлеров (speak/ownedSession/parseSessionID), SessionView→хук useVoiceSession — 2026-09-28
 - [x] Стриминговый STT + Silero VAD (onnx) + Pre-STT (очередь #2, T-20261005132522 R1) — 2026-10-05 (ab0bc3f/6556b72/e00b4c6/abb57f6): WS /api/v1/stt/stream (voice: Silero VAD, partial ≤1/500 мс, final по тишине 600 мс), partial → UI (интеримная строка), ход по final, barge-in и во время речи (500 мс от state=true), fallback на batch (grade_stt_stream_fallbacks_total); live: транскрипт 3-с реплики 754→695 мс (A/B), partial за 2.1 с до конца речи, ложных final на тишине нет; ADR-007
+- [x] Параллельный TTS-синтез (pipeline, очередь #3, T-20261005184303 R1) — 2026-10-06 (f2aa87e/94d45e9): пул TTSParallelism=3 (stdlib goroutine+channel) в streamCandidateTurn — предложение N+1/N+2 синтезируется, пока N уходит по pacing; порядок кадров сохранён (реордер по idx), barge-in (недопущенные не стартуют) и деградация (ошибка→skip) без изменений; метрика grade_ai_tts_synth_seconds (длительность на предложение); live A/B: first_tts 388/435/730→367/359/433 мс (в пределах LLM-шума), межфразовые разрывы ~без изменений (750–1500 мс) — узкое место LLM-стриминг, синтез ~89 мс/предложение (не bottleneck)
 
 ## Риски (предварительный список, обновлять по фазам)
 - R1: Latency голосового контура (STT+LLM+TTS) — превысит приемлемые 2–3 с (MVP), >1 с (цель)
