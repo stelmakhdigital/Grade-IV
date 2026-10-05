@@ -116,6 +116,13 @@ func (c *Client) TTS(ctx context.Context, text string) ([]byte, error) {
 	return pcm, nil
 }
 
+// NewSTTStream — WS-клиент стримингового STT voice /stt/stream (ADR-007):
+// PCM-кадры → state/partial/final события (onEvent); недоступность voice —
+// событие "unavailable" (деградация на batch-путь).
+func (c *Client) NewSTTStream(onEvent func(StreamEvent)) *STTStream {
+	return NewSTTStream(c.baseURL, onEvent)
+}
+
 // Healthy — GET /api/v1/health (health-check).
 func (c *Client) Healthy(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)

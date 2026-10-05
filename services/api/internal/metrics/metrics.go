@@ -165,6 +165,9 @@ var (
 	TTSErrors = NewCounter("grade_ai_tts_errors_total", "ошибок синтеза TTS")
 	// BargeInsTotal — barge-in: кандидат прервал речь ИИ во время TTS-стрима.
 	BargeInsTotal = NewCounter("grade_barge_ins_total", "barge-in (кандидат прервал речь ИИ)")
+	// STTStreamFallbacks — деградации стримингового STT на batch-путь
+	// (voice /stt/stream недоступен; ADR-007).
+	STTStreamFallbacks = NewCounter("grade_stt_stream_fallbacks_total", "деградаций стримингового STT на batch-путь")
 )
 
 // StageLabel — метка стадии хода.
@@ -175,7 +178,7 @@ func ResultLabel(result string) Labels { return Labels{"result": result} }
 
 type texter interface{ text() string }
 
-var all = []texter{TurnStage, TurnsTotal, LLMStreamErrors, TTSErrors, BargeInsTotal}
+var all = []texter{TurnStage, TurnsTotal, LLMStreamErrors, TTSErrors, BargeInsTotal, STTStreamFallbacks}
 
 // Handler — GET /metrics (Prometheus text format).
 func Handler(w http.ResponseWriter, _ *http.Request) {

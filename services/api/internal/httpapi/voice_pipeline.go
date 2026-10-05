@@ -94,8 +94,8 @@ func (s *Server) streamCandidateTurn(ws *wsSession, deltas <-chan string) {
 					}
 				}
 				prev = sentence
-						pcm, err := s.voice.TTS(ws.ctx, prepareTTS(sentence))
-					if err != nil {
+				pcm, err := s.voice.TTS(ws.ctx, prepareTTS(sentence))
+				if err != nil {
 					metrics.TTSErrors.Inc(nil)
 					s.log.Warn("tts: синтез предложения не удался", "session", ws.id, "err", err)
 					continue // Degrade: пропускаем (голос не критичен, текст уже есть)
@@ -302,10 +302,10 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 			if end > len(pcm) {
 				end = len(pcm)
 			}
-				s.sendTTSFrame(ws, uint16(seq), pcm[off:end], false)
+			s.sendTTSFrame(ws, uint16(seq), pcm[off:end], false)
 			seq++
 			sentAny = true
-			}
+		}
 		// Пауза между предложениями (не ставим после последнего).
 		if i < len(sentences)-1 {
 			gap := 1
@@ -446,20 +446,182 @@ func (s *Server) handleVoiceUtterance(ws *wsSession, pcm []byte) {
 	s.runCandidateTurn(ws, text)
 }
 
-// feedVAD — бинарный кадр PCM из readLoop: VAD; по завершённой реплике — конвейер.
-// Turn-taking: пока ход занят И ИИ не говорит (LLM-фаза) — кадры не слушаются.
-// Barge-in: пока ИИ говорит (ttsActive) — кадры питают VAD; завершённая
-// реплика длиной ≥ BargeInMinSpeechMS прерывает TTS (stop-канал, WS tts_stop,
-// метрика BargeInsTotal, log Info) и обрабатывается как обычный ход.
-// Pre-STT: при первой тишине после речи (vad.PreSilence) запускаем распознавание
-// на текущем буфере реплики — оно перекрывает остаток VAD-хвоста и экономит
-// время STT (~0.7 с на CPU). Инвалидация при возобновлении речи (новые speech-
-// кадры расширяют буфер → preSTTBytes не совпадёт).
+// feedVAD — бинарный кадр PCM из readLoop.
+// Стриминговый STT (ADR-007, дефолт): кадры уходят в voice /stt/stream —
+// VAD (Silero) и распознавание на стороне voice: state/partial/final-
+// события обрабатываются onSTTStreamEvent (partial → WS stt_partial, final →
+// ход кандидата; barge-in по final, если реплика ≥ BargeInMinSpeechMS).
+// Deградация: voice /stt/stream недоступен (sttStreamDown) или voice не
+// подключён (s.voice == nil) — batch-путь (энергетический VAD + pre-STT +
+// /stt, feedVADBatch); при переходе — Warn-лог + метрика (однократно).
+// Turn-taking общий для обоих путей: пока ход занят И ИИ не говорит
+// (LLM-фаза) — кадры не слушаются.
 func (s *Server) feedVAD(ws *wsSession, pcm []byte) {
 	// Ход занят, но ИИ молчит (LLM-фаза) — не слушаем (turn-taking, ADR-002).
 	if ws.busy.Load() && !ws.ttsActive.Load() {
 		return
 	}
+	if !ws.sttStreamDown.Load() {
+		if st := ws.sttStreamFor(s); st != nil {
+			st.Send(pcm)
+			return
+		}
+	}
+	s.feedVADBatch(ws, pcm)
+}
+
+// onSTTStreamEvent — событие voice /stt/stream (ADR-007):
+// "state" speech:true/false — отсчёт длительности реплики (в аудио-байтах,
+// не wall — детерминировано при burst-отправке);
+// "partial" — WS stt_partial (промежуточный текст в UI);
+// "final" — ход кандидата (barge-in — если ИИ говорит);
+// "unavailable" — деградация на batch-путь (Warn + метрика, однократно).
+func (w *wsSession) onSTTStreamEvent(s *Server, ev voicesvc.StreamEvent) {
+	switch ev.Type {
+	case "unavailable":
+		w.sttStreamDown.Store(true)
+		if w.fallbackWarned.CompareAndSwap(false, true) {
+			metrics.STTStreamFallbacks.Inc(nil)
+			s.log.Warn("stt-стрим: voice /stt/stream недоступен — деградация на batch-путь (/stt)", "session", w.id)
+		}
+	case "state":
+		// Границы речи Silero VAD (voice): barge-in во время речи — если ИИ
+		// говорит и speech-сегмент длится ≥ BargeInMinSpeechMS без тишевой
+		// границы — прерываем (тот же сценарий, что энергетический VAD-путь);
+		// длительность для final — speech_ms из final-события.
+		if ev.Speech {
+			w.sttSpeechSince.Store(time.Now().UnixNano())
+			if w.ttsActive.Load() {
+				time.AfterFunc(BargeInMinSpeechMS*time.Millisecond,
+					func() { w.streamBargeIn(s) })
+			}
+		} else {
+			w.sttSpeechSince.Store(0)
+		}
+	case "partial":
+		if ev.Text != "" {
+			s.engine.SendTo(w.id, map[string]any{"type": "stt_partial", "text": ev.Text})
+		}
+	case "final":
+		w.handleSTTStreamFinal(s, ev)
+	}
+}
+
+// streamBargeIn — barge-in во время речи (стрим-путь): сработал
+// BargeInMinSpeechMS после state=true при активном TTS и без тишевой
+// границы. Однократно на TTS-стрим (sttBarged CAS; reset в beginTTS).
+func (w *wsSession) streamBargeIn(s *Server) {
+	if !w.ttsActive.Load() || w.sttSpeechSince.Load() == 0 {
+		return
+	}
+	if !w.sttBarged.CompareAndSwap(false, true) {
+		return
+	}
+	w.stopTTS()
+	metrics.BargeInsTotal.Inc(nil)
+	s.log.Info("barge-in: кандидат прервал речь ИИ (стрим, во время речи)", "session", w.id)
+	s.engine.SendTo(w.id, map[string]any{"type": "tts_stop"})
+}
+
+// handleSTTStreamFinal — final из стримингового STT: ход кандидата.
+// Barge-in: если ИИ говорит (ttsActive) и реплика ≥ BargeInMinSpeechMS
+// (длительность — speech_ms из final, по Silero VAD на стороне voice) —
+// прерывание речи ИИ (tts_stop) до старта хода; короткая реплика — отброс
+// (защита от ложных срабатываний). Если streamBargeIn уже сработал
+// (sttBarged) — дубль метрики/tts_stop не шлём, только ход.
+func (w *wsSession) handleSTTStreamFinal(s *Server, ev voicesvc.StreamEvent) {
+	text := strings.TrimSpace(ev.Text)
+	ms := ev.SpeechMS
+	if w.ttsActive.Load() {
+		if !w.sttBarged.Load() && ms < BargeInMinSpeechMS {
+			s.log.Debug("barge-in: короткая реплика (стрим), без прерывания", "session", w.id, "ms", ms)
+			return // защита от ложных срабатываний (эхо, дыхание)
+		}
+		if w.sttBarged.CompareAndSwap(false, true) {
+			w.stopTTS()
+			metrics.BargeInsTotal.Inc(nil)
+			s.log.Info("barge-in: кандидат прервал речь ИИ", "session", w.id, "ms", ms)
+			s.engine.SendTo(w.id, map[string]any{"type": "tts_stop"})
+		}
+		if text == "" {
+			return
+		}
+		go func() {
+			// Прерванный ход отпустит busy после end-кадра (turnDone) — ждём,
+			// иначе новый ход начнётся с занятым флагом и сразу закончится.
+			for w.busy.Load() {
+				select {
+				case <-w.ctx.Done():
+					return
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+			if !w.busy.CompareAndSwap(false, true) {
+				return // на границе занята — реплика теряется (допустимо)
+			}
+			w.runStreamTurn(s, text, ev.Confidence)
+		}()
+		return
+	}
+	if w.sttBarged.Load() {
+		// Barge-in уже сработал таймером (streamBargeIn): ttsActive сброшен,
+		// прерванный ход ИИ ещё отпускает busy — ждём его (иначе CAS проигрывает
+		// и реплика теряется).
+		if text == "" {
+			return
+		}
+		go func() {
+			for w.busy.Load() {
+				select {
+				case <-w.ctx.Done():
+					return
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+			if !w.busy.CompareAndSwap(false, true) {
+				return // на границе занята — реплика теряется (допустимо)
+			}
+			w.runStreamTurn(s, text, ev.Confidence)
+		}()
+		return
+	}
+	if !w.busy.CompareAndSwap(false, true) {
+		return // на границе занят — реплика теряется (допустимо в ходовом режиме)
+	}
+	go w.runStreamTurn(s, text, ev.Confidence)
+}
+
+// runStreamTurn — ход кандидата из стримингового STT (busy уже занят;
+// сбрасывается defer'ом): валидация стадии/доверия → runCandidateTurn.
+func (w *wsSession) runStreamTurn(s *Server, text string, conf float64) {
+	defer w.busy.Store(false)
+	if text == "" {
+		return // молчание/шум — без хода
+	}
+	snap, err := s.engine.Snapshot(w.id)
+	if err != nil || snap.Stage != models.StageVoice || snap.Status != models.StatusActive {
+		return // голосовой конвейер работает только на активной voice-стадии
+	}
+	// Фильтр доверия (как в batch-пути): STT на шуме галлюцинирует с низкой
+	// уверенностью; реальные реплики — conf ≥ 0.7 (замеры), порог 0.5.
+	if conf < 0.5 {
+		s.log.Debug("stt: низкое доверие — шум, без хода", "session", w.id, "conf", conf, "text", text[:32])
+		return
+	}
+	s.log.Info("stt: реплика кандидата", "session", w.id, "chars", len(text), "conf", conf, "stream", true)
+	s.runCandidateTurn(w, text)
+}
+
+// feedVADBatch — batch-путь (fallback ADR-007 / voice без стрима): локальный
+// энергетический VAD; по завершённой реплике — конвейер (pre-STT + /stt).
+// Barge-in: пока ИИ говорит (ttsActive) — завершённая реплика длиной ≥
+// BargeInMinSpeechMS прерывает TTS (stop-канал, WS tts_stop, метрика
+// BargeInsTotal, log Info) и обрабатывается как обычный ход.
+// Pre-STT: при первой тишине после речи (vad.PreSilence) запускаем
+// распознавание на текущем буфере — оно перекрывает остаток VAD-хвоста.
+// Инвалидация при возобновлении речи (новые speech-кадры расширяют буфер →
+// preSTTBytes не совпадёт).
+func (s *Server) feedVADBatch(ws *wsSession, pcm []byte) {
 	utterance, done := ws.vad.Feed(pcm)
 	if !done {
 		// Pre-STT: предварительное распознавание при первой тишине.

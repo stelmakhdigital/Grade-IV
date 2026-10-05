@@ -34,10 +34,10 @@ type Config struct {
 // DefaultConfig — пороки по умолчанию.
 func DefaultConfig() Config {
 	return Config{
-		SampleRate:   16000,
-		EndSilenceMS: 900,
-		MinSpeechMS:  400,
-		MaxSpeechMS:  20000,
+		SampleRate:     16000,
+		EndSilenceMS:   900,
+		MinSpeechMS:    400,
+		MaxSpeechMS:    20000,
 		RMSThreshold:   100,
 		NoiseFloorGain: 3,
 		PreSilenceMS:   400,

@@ -20,6 +20,7 @@ import (
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/session"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/vad"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/voicesvc"
 	"nhooyr.io/websocket"
 )
 
@@ -102,6 +103,7 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 
 	s.readLoop(id, conn, ctx, ws)
 
+	ws.closeSTTStream() // ADR-007: останавливаем voice /stt/stream
 	s.engine.Detach(id) // FR-S7: обрыв/отключение → пауза
 	s.log.Info("ws: клиент отключился", "session", id)
 }
@@ -133,6 +135,43 @@ type wsSession struct {
 	preSTTBytes  atomic.Int64 // длина буфера на момент запуска (валидность)
 	preSTTMu     sync.Mutex
 	preSTT       *preSTTResult
+
+	// Стриминговый STT (ADR-007): voice /stt/stream — PCM-кадры → VAD/STT на
+	// стороне voice (Silero): state/partial/final. При недоступности voice
+	// (sttStreamDown) — деградация на batch-путь (энергетический VAD + /stt).
+	sttStreamMu    sync.Mutex
+	sttStream      *voicesvc.STTStream
+	sttStreamDown  atomic.Bool  // voice /stt/stream недоступен → batch-путь
+	fallbackWarned atomic.Bool  // Warn + метрика — однократно
+	sttSpeechSince atomic.Int64 // unix-nano начала текущего speech-сегмента (state=true); 0 — тишина
+	sttBarged      atomic.Bool  // barge-in уже сработал на текущем TTS-стриме (reset в beginTTS)
+}
+
+// sttStreamFor — ленивое создание стрим-клиента (voice /stt/stream).
+// nil — voice не подключён (batch-режим: VOICE_URL пуст).
+func (w *wsSession) sttStreamFor(s *Server) *voicesvc.STTStream {
+	if s.voice == nil || s.cfg.VoiceURL == "" {
+		return nil
+	}
+	w.sttStreamMu.Lock()
+	defer w.sttStreamMu.Unlock()
+	if w.sttStream == nil {
+		w.sttStream = s.voice.NewSTTStream(func(ev voicesvc.StreamEvent) {
+			w.onSTTStreamEvent(s, ev)
+		})
+	}
+	return w.sttStream
+}
+
+// closeSTTStream — остановка стрим-клиента при отключении клиента.
+func (w *wsSession) closeSTTStream() {
+	w.sttStreamMu.Lock()
+	st := w.sttStream
+	w.sttStream = nil
+	w.sttStreamMu.Unlock()
+	if st != nil {
+		st.Close()
+	}
 }
 
 func (w *wsSession) touch() { atomic.StoreInt64(&w.lastActive, time.Now().UnixNano()) }
@@ -147,6 +186,7 @@ func (w *wsSession) beginTTS() <-chan struct{} {
 	}
 	w.ttsStop = make(chan struct{})
 	w.ttsActive.Store(true)
+	w.sttBarged.Store(false)
 	return w.ttsStop
 }
 

@@ -18,19 +18,24 @@ import (
 )
 
 // mockVoice — voice-сервис для тестов: /stt (любой аудио → фиксированный текст),
-// /tts (текст → известный PCM), /health. Считает вызовы.
+// /tts (текст → известный PCM), /health, /stt/stream (WS, ADR-007: энергетический
+// VAD на rms > 1000 → state/partial/final с тем же фиксированным текстом).
+// Считает вызовы (sttCalls — и batch /stt, и стримовый final).
 type mockVoice struct {
-	sttCalls   int
-	ttsCalls   int
-	ttsTexts   []string
-	sttBytes   int
-	ttsPCMSize int
+	sttCalls     int
+	ttsCalls     int
+	ttsTexts     []string
+	sttBytes     int
+	ttsPCMSize   int
+	streamBroken bool // true: /stt/stream отвечает 500 (тест fallback на batch)
 }
 
 func (m *mockVoice) server(t *testing.T) *httptest.Server {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/api/v1/stt/stream":
+			m.streamWS(w, r)
 		case "/api/v1/stt":
 			m.sttCalls++
 			body, _ := readAllLimited(r, 1<<20)
@@ -60,6 +65,60 @@ func (m *mockVoice) server(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(ts.Close)
 	return ts
+}
+
+// streamWS — мок стримингового STT (ADR-007): бинарные PCM-кадры →
+// state/partial/final. Энергетический VAD: rms > 1000 — речь; хвост тишины
+// 1 кадр (250 мс) → конец реплики. Фиксированный текст как у batch /stt.
+func (m *mockVoice) streamWS(w http.ResponseWriter, r *http.Request) {
+	if m.streamBroken {
+		http.Error(w, "stream unavailable", http.StatusInternalServerError)
+		return
+	}
+	conn, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	send := func(v map[string]any) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		_ = conn.Write(ctx, websocket.MessageText, mustJSON(v))
+		cancel()
+	}
+	speech, partialSent, silFrames := false, false, 0
+	speechBytes := 0
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		typ, data, err := conn.Read(ctx)
+		cancel()
+		if err != nil || typ != websocket.MessageBinary {
+			return
+		}
+		isSpeech := pcm16RMS(data) > 1000
+		switch {
+		case isSpeech && !speech:
+			speech = true
+			silFrames = 0
+			speechBytes = 0
+			send(map[string]any{"type": "state", "speech": true})
+		case isSpeech && !partialSent:
+			partialSent = true
+			send(map[string]any{"type": "partial", "text": "Здравствуйте, расскажите о себе"})
+		case !isSpeech && speech:
+			if silFrames++; silFrames >= 1 { // хвост тишины 250 мс → конец
+				speech = false
+				silFrames = 0
+				m.sttCalls++
+				speechMS := speechBytes * 1000 / (2 * 16000)
+				send(map[string]any{"type": "state", "speech": false})
+				send(map[string]any{"type": "final", "text": "Здравствуйте, расскажите о себе", "confidence": 0.87, "speech_ms": speechMS})
+			}
+		}
+		if isSpeech {
+			speechBytes += len(data)
+		}
+	}
 }
 
 func readAllLimited(r *http.Request, n int64) ([]byte, error) {
@@ -297,8 +356,11 @@ func mustJSON(v any) []byte {
 // задержкой STT (100 мс) — pre-STT должен завершиться ДО финализации VAD,
 // и ходовой конвейер возьмёт его результат (не запускать STT повторно).
 // Проверка: sttCalls == 1 (только pre-STT; повторный STT в ходовом конвейере не нужен).
+// ADR-007: pre-STT живёт на batch-пути — тест принудительно деградирует на него
+// (voice /stt/stream «недоступен»), поведение batch-пути не меняется.
 func TestWSVoicePreSTT(t *testing.T) {
 	ts, token, sessionID, m, _ := newVoiceEnv(t)
+	m.streamBroken = true // batch-путь (fallback) — pre-STT проверяем там
 	conn := dialWS(t, ts, token, sessionID)
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
@@ -320,7 +382,7 @@ func TestWSVoicePreSTT(t *testing.T) {
 		}
 	}
 
-	// 3) Говорим: 4 кадра тона (1 с) + тишина (хвост 500 мс → VAD завершает).
+	// 3) Говорим: тон 4 кадра (1 с) + тишина (хвост 500 мс → VAD завершает).
 	// Pre-STT: при первой тишине (PreSilenceMS=400, кадр 250 мс) запускается
 	// распознавание; mock STT с задержкой 100 мс — успевает до финализации.
 	writePCM := func(pcm []byte) {
@@ -328,6 +390,10 @@ func TestWSVoicePreSTT(t *testing.T) {
 		_ = conn.Write(ctx, websocket.MessageBinary, pcm)
 		cancel()
 	}
+	// Запускаем стрим-клиент и даём ему деградировать на batch (реконнекты ~1.5 с).
+	writePCM(tonePCM(250, 5000))
+	writePCM(tonePCM(250, 5000))
+	time.Sleep(1600 * time.Millisecond)
 	for i := 0; i < 4; i++ {
 		writePCM(tonePCM(250, 5000))
 	}

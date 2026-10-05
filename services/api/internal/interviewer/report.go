@@ -227,10 +227,10 @@ func (i *Interviewer) GenerateReport(ctx context.Context, sessionID int64) (Repo
 	userMsg := fmt.Sprintf(
 		"Оцени кандидата (грейд %s, стек %s). Критерии и веса: %s. "+
 			"Транскрипт:\n%s\nКодовые запуски: %s\nСхема System Design: %s\n"+
-			"Ответь СТРОГО JSON без пояснений: {\"criteria\":[{\"name\":...,\"weight\":...,\"score\":1-5,\"comment\":...}]," +
+			"Ответь СТРОГО JSON без пояснений: {\"criteria\":[{\"name\":...,\"weight\":...,\"score\":1-5,\"comment\":...}],"+
 			"\"strengths\":[...],\"weaknesses\":[...],\"recommendations\":[...]} — тексты на русском.",
 		sess.Grade, sess.Stack, string(critJSON), tr, string(codeJSON), string(designJSON))
-	sys := "Ты — технический интервьюер-оценщик. Оцениваешь кандидата по критериям с весами, "+
+	sys := "Ты — технический интервьюер-оценщик. Оцениваешь кандидата по критериям с весами, " +
 		"шкала 1–5 (1 — не соответствует уровню грейда, 3 — соответствует, 5 — существенно выше)."
 	resp, err := i.llm.Chat(ctx, llm.Request{
 		Messages: []llm.Message{

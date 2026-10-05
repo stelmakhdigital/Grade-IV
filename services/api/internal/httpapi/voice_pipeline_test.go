@@ -359,3 +359,111 @@ func TestTTSStreaming(t *testing.T) {
 		t.Fatalf("первое предложение не короче полного текста: %v", sentences)
 	}
 }
+
+// TestSTTStreamPartialBeforeTranscript — стриминговый STT (ADR-007):
+// промежуточный текст (stt_partial из voice /stt/stream) приходит в UI
+// ДО финального transcript(user) — partial перекрывает распознавание.
+func TestSTTStreamPartialBeforeTranscript(t *testing.T) {
+	ts, token, sessionID, _, _ := newVoiceEnv(t)
+	conn := dialWS(t, ts, token, sessionID)
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	// Старт: stage + приветствие (ai_text).
+	msgs := wsReadMixed(t, conn, 2, 3*time.Second)
+	if msgs[0] != "text:stage/<nil>/<nil>" || !startsWith(msgs[1], "text:ai_text/") {
+		t.Fatalf("старт: %v", msgs)
+	}
+
+	// Говорим: тон 4×250 мс + тишина 3×250 мс (VAD voice завершает реплику).
+	writePCM := func(pcm []byte) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = conn.Write(ctx, websocket.MessageBinary, pcm)
+		cancel()
+	}
+	for i := 0; i < 4; i++ {
+		writePCM(tonePCM(250, 5000))
+	}
+	for i := 0; i < 3; i++ {
+		writePCM(silencePCM(250))
+	}
+
+	// Читаем до transcript(user): stt_partial с текстом должен быть раньше.
+	sawPartial, sawUser := false, false
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) && !sawUser {
+		typ, who, _, ok := bargeInReadOne(t, conn)
+		if !ok {
+			continue
+		}
+		if typ == "stt_partial" {
+			sawPartial = true
+		}
+		if typ == "transcript" && who == "user" {
+			sawUser = true
+		}
+	}
+	if !sawUser {
+		t.Fatal("нет transcript(user) от стримингового STT")
+	}
+	if !sawPartial {
+		t.Fatal("нет stt_partial до transcript(user) — partial не пришёл")
+	}
+}
+
+// TestSTTStreamFallbackToBatch — voice /stt/stream недоступен (HTTP 500):
+// конвейер деградирует на batch-путь (энергетический VAD в Go + batch /stt):
+// реплика кандидата даёт transcript(user), метрика-счётчик переключений = 1.
+func TestSTTStreamFallbackToBatch(t *testing.T) {
+	ts, token, sessionID, m, _ := newVoiceEnv(t)
+	m.streamBroken = true // /stt/stream отвечает 500 → реконнекты не удаются
+	conn := dialWS(t, ts, token, sessionID)
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	msgs := wsReadMixed(t, conn, 2, 3*time.Second)
+	if msgs[0] != "text:stage/<nil>/<nil>" || !startsWith(msgs[1], "text:ai_text/") {
+		t.Fatalf("старт: %v", msgs)
+	}
+
+	writePCM := func(pcm []byte) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = conn.Write(ctx, websocket.MessageBinary, pcm)
+		cancel()
+	}
+	// Тон 2×250 мс — запускает стрим-клиент (реконнекты ~1.5 с).
+	writePCM(tonePCM(250, 5000))
+	writePCM(tonePCM(250, 5000))
+	time.Sleep(2 * time.Second) // реконнекты 4×500 мс → "unavailable" → batch-путь
+	// Реплика для batch-VAD (локальный): тон 4×250 мс + тишина 3×250 мс (хвост 500 мс).
+	for i := 0; i < 4; i++ {
+		writePCM(tonePCM(250, 5000))
+	}
+	for i := 0; i < 3; i++ {
+		writePCM(silencePCM(250))
+	}
+
+	sawUser := false
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) && !sawUser {
+		typ, who, _, ok := bargeInReadOne(t, conn)
+		if !ok {
+			continue
+		}
+		if typ == "transcript" && who == "user" {
+			sawUser = true
+		}
+	}
+	if !sawUser {
+		t.Fatal("нет transcript(user) — fallback на batch-путь не сработал")
+	}
+	if m.sttCalls < 1 {
+		t.Fatal("batch /stt не вызывался после деградации")
+	}
+	resp, err := http.Get(ts.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("metrics: %v", err)
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if !containsLine(string(body), "grade_stt_stream_fallbacks_total 1") {
+		t.Fatal("нет метрики grade_stt_stream_fallbacks_total 1")
+	}
+}
