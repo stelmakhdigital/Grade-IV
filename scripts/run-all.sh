@@ -111,7 +111,7 @@ do_start() {
 
   echo "==> voice :8100 (модели: $VOICE_MODELS/stt, $VOICE_MODELS/tts; STT: $STT_DEVICE/$STT_COMPUTE_TYPE, $STT_MODEL)"
   if [[ ! -d "$VOICE_MODELS/stt" || ! -f "$VOICE_MODELS/tts/silero-tts-v5_ru.pt" ]]; then
-    echo "!! модели не найдены в $VOICE_MODELS — сначала: bash scripts/download-models.sh" >&2
+    echo "!! модели не найдены в $VOICE_MODELS — сначала: MODELS_DIR=$PWD/services/voice/models bash scripts/download-models.sh" >&2
   fi
   # TTS_SPEAKER: мужской голос по умолчанию (персона интервьюера — мужчина);
   # переопределить: TTS_SPEAKER=eugene|ru_01 make run-all
