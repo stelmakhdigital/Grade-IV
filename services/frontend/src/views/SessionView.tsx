@@ -93,7 +93,12 @@ export function SessionView({ id }: { id: number }) {
             </span>
             {speaking && <span className="saying">ИИ говорит — чтобы ответить, дождитесь паузы</span>}
             {mic === 'running' && <span className="listening">микрофон: включён</span>}
-            {mic !== 'running' && mic !== 'denied' && stage === 'voice' && wsState === 'open' && (
+            {mic === 'muted' && (
+              <span className="form-error" role="alert" data-testid="mic-muted">
+                Микрофон молчит — проверьте устройство, мьют и разрешения браузера.
+              </span>
+            )}
+            {mic !== 'running' && mic !== 'denied' && mic !== 'muted' && stage === 'voice' && wsState === 'open' && (
               <span className="form-error" role="alert">
                 Микрофон выключен — ИИ вас не слышит. Нажмите «Включить микрофон».
               </span>
@@ -136,12 +141,12 @@ export function SessionView({ id }: { id: number }) {
             )}
             <button
               type="button"
-              className={mic === 'running' ? 'btn danger' : 'btn primary'}
+              className={mic === 'running' || mic === 'muted' ? 'btn danger' : 'btn primary'}
               onClick={() => void toggleMic()}
               data-testid="mic-toggle"
               disabled={wsState !== 'open'}
             >
-              {mic === 'running' ? 'Выключить микрофон' : 'Включить микрофон'}
+              {mic === 'running' || mic === 'muted' ? 'Выключить микрофон' : 'Включить микрофон'}
             </button>
             {stage === 'voice' && (
               <button type="button" className="btn ghost" onClick={() => onStageAction('livecode')}>

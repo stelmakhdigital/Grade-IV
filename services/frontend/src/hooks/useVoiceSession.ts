@@ -185,7 +185,7 @@ export function useVoiceSession(id: number) {
   const toggleMic = async () => {
     const micCap = micRef.current;
     if (micCap === null) return;
-    if (mic === 'running') {
+    if (mic === 'running' || mic === 'muted') {
       micCap.stop();
       micLevelRef.current = 0;
       setMic('stopped');
@@ -209,6 +209,8 @@ export function useVoiceSession(id: number) {
         },
         onState: (s) => setMic(s),
         onError: (msg) => setError(msg),
+        // info-сообщения (fallback-захват и т.п.) — в строку статуса/ошибки.
+        onInfo: (msg) => setError(msg),
       });
     } catch {
       setMic('denied');

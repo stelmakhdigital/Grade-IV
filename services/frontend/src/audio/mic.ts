@@ -12,9 +12,68 @@ export interface MicCaptureEvents {
   onLevel?: (rms: number) => void;
   onState?: (state: MicState) => void;
   onError?: (err: string) => void;
+  /** Неблокирующее info-сообщение (напр., переход на fallback-захват). */
+  onInfo?: (msg: string) => void;
 }
 
-export type MicState = 'idle' | 'running' | 'stopped' | 'denied';
+export type MicState = 'idle' | 'running' | 'stopped' | 'denied' | 'muted';
+
+// «Молчащий» микрофон: rms чанка < SILENCE_RMS непрерывно ≥ SILENCE_MS —
+// устройство заглушено/отключено или вход на мьюте (ревью 2026-10-05: сервер
+// видел rms 2→0 в сессии 13). Детектор чистый (время передаётся аргументом) — тесты
+// без DOM.
+export const SILENCE_RMS = 0.005;
+export const SILENCE_MS = 5000;
+
+export function chunkRms(pcm: Int16Array): number {
+  let s = 0;
+  for (let i = 0; i < pcm.length; i++) {
+    const v = pcm[i] / 32768;
+    s += v * v;
+  }
+  return Math.sqrt(s / Math.max(1, pcm.length));
+}
+
+export interface SilenceEvents {
+  /** Тишина ≥ SILENCE_MS (однажды за период). */
+  onMuted: () => void;
+  /** Уровень вернулся (rms ≥ SILENCE_RMS) после «молчания». */
+  onRecover: () => void;
+}
+
+export class SilenceDetector {
+  private silentSince: number | null = null;
+  private muted = false;
+
+  constructor(private readonly ev: SilenceEvents) {}
+
+  reset(): void {
+    this.silentSince = null;
+    this.muted = false;
+  }
+
+  isMuted(): boolean {
+    return this.muted;
+  }
+
+  feed(rms: number, now: number): void {
+    if (rms >= SILENCE_RMS) {
+      this.silentSince = null;
+      if (this.muted) {
+        this.muted = false;
+        this.ev.onRecover();
+      }
+      return;
+    }
+    if (this.muted) return; // предупреждение за период — одно
+    if (this.silentSince === null) {
+      this.silentSince = now;
+    } else if (now - this.silentSince >= SILENCE_MS) {
+      this.muted = true;
+      this.ev.onMuted();
+    }
+  }
+}
 
 const WORKLET_CODE = `
 class PcmCapture {
@@ -108,9 +167,10 @@ export class MicCapture {
   private micState: MicState = 'idle';
   private noDataTimer: number | null = null;
   private spNode: ScriptProcessorNode | null = null; // резервный захват
+  private silence: SilenceDetector | null = null; // детектор «молчащего» микрофона
 
   async start(events: MicCaptureEvents): Promise<void> {
-    if (this.micState === 'running') return;
+    if (this.micState === 'running' || this.micState === 'muted') return;
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         channelCount: 1,
@@ -168,10 +228,19 @@ export class MicCapture {
     // средах процессор не расписывается). Тогда — резервный путь:
     // legacy ScriptProcessor (он работает там, где worklet не гонится).
     this.armNoDataTimeout(events);
+    // Детектор «молчащего» микрофона (rms чанков, любой путь захвата).
+    this.silence = new SilenceDetector({
+      onMuted: () => {
+        this.setState('muted', events);
+        events.onError?.('Микрофон молчит: проверьте устройство, мьют и разрешения браузера');
+      },
+      onRecover: () => this.setState('running', events),
+    });
     node.port.onmessage = (e: MessageEvent) => {
       const d = e.data;
       if (d instanceof Int16Array) {
         this.onFirstChunk();
+        this.feedSilence(d);
         events.onChunk(d);
       } else if (d && typeof d === 'object' && (d as { kind?: string }).kind === 'level') {
         events.onLevel?.((d as { rms: number }).rms);
@@ -193,6 +262,8 @@ export class MicCapture {
       window.clearTimeout(this.noDataTimer);
       this.noDataTimer = null;
     }
+    this.silence?.reset();
+    this.silence = null;
     if (this.spNode !== null) {
       this.spNode.onaudioprocess = null;
       this.spNode.disconnect();
@@ -238,6 +309,13 @@ export class MicCapture {
     }
   }
 
+  // Кормим детектор тишины (только когда микрофон «включён», включая
+  // состояние «молчит» — там ищем возвращение уровня).
+  private feedSilence(pcm: Int16Array): void {
+    if (this.micState !== 'running' && this.micState !== 'muted') return;
+    this.silence?.feed(chunkRms(pcm), Date.now());
+  }
+
   // Резервный захват (legacy ScriptProcessorNode, main thread): работает в
   // средах, где AudioWorklet не расписывается. Чанки — по каждому callback
   // (~107 мс @48 кГц → ~36 мс @16 кГц после ресемплинга — VAD не требует
@@ -271,6 +349,7 @@ export class MicCapture {
         const pcm = resampleToPcm16(input, ctx.sampleRate);
         if (pcm.length > 0) {
           this.onFirstChunk();
+          this.feedSilence(pcm);
           events.onChunk(pcm);
         }
       };
@@ -280,6 +359,10 @@ export class MicCapture {
       sp.connect(silence);
       silence.connect(ctx.destination);
       this.spNode = sp;
+      // Переход на fallback — информировать UI (не блокирующее info).
+      events.onInfo?.(
+        'Микрофон: основной путь (AudioWorklet) молчит, включён резервный захват',
+      );
       // Если и резервный путь молчит — предупреждение в UI.
       this.armNoDataTimeout(events);
     } catch {
