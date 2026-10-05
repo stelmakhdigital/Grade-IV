@@ -169,6 +169,32 @@ describe('SessionView (WP-8)', () => {
     });
   }, 10000);
 
+  it('стриминговый STT: stt_partial → интерим-строка, final фиксирует её', async () => {
+    renderSession(mockApi({ session: S_ACTIVE }));
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const fake = FakeWebSocket.instances[0];
+    await flush();
+
+    // partial: интеримный текст кандидата (обновляется на той же строке).
+    fake.deliver(JSON.stringify({ type: 'stt_partial', text: 'Расскажите' }));
+    const interim = await screen.findByText('Расскажите');
+    expect(interim).toBeInTheDocument();
+    expect(interim.closest('.line')?.className).toContain('interim');
+
+    // второй partial — та же строка (обновление, не новая строка).
+    fake.deliver(JSON.stringify({ type: 'stt_partial', text: 'Расскажите о себе' }));
+    await screen.findByText('Расскажите о себе');
+    expect(document.querySelectorAll('.line.user')).toHaveLength(1);
+
+    // final (transcript user) — интерим зафиксирован: одна строка, без interim.
+    fake.deliver(JSON.stringify({ type: 'transcript', who: 'user', text: 'Расскажите о себе.' }));
+    await screen.findByText('Расскажите о себе.');
+    const line = document.querySelector('.line.user');
+    expect(document.querySelectorAll('.line.user')).toHaveLength(1);
+    expect(line?.className).not.toContain('interim');
+    expect(line).toHaveTextContent('Расскажите о себе.');
+  }, 10000);
+
   it('микрофон без доступа к device — статус «нет доступа»', async () => {
     renderSession(mockApi({ session: S_ACTIVE }));
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));

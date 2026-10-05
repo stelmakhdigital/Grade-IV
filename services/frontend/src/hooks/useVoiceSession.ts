@@ -20,6 +20,8 @@ import { eventKindLabel, eventText } from '../labels';
 export interface Line {
   who: 'user' | 'ai' | 'system';
   text: string;
+  /** Интеримная (stt_partial) строка кандидата — обновляется до final. */
+  interim?: boolean;
 }
 
 export function useVoiceSession(id: number) {
@@ -109,10 +111,27 @@ export function useVoiceSession(id: number) {
             }
             break;
           case 'transcript':
-            setLines((prev) => [
-              ...prev.slice(-199),
-              { who: m.who === 'user' ? 'user' : 'ai', text: m.text },
-            ]);
+            setLines((prev) => {
+              const next = { who: (m.who === 'user' ? 'user' : 'ai') as Line['who'], text: m.text };
+              // final кандидата фиксирует интерим-строку (stt_partial),
+              // а не дублирует её отдельной строкой.
+              const last = prev[prev.length - 1];
+              if (m.who === 'user' && last !== undefined && last.who === 'user' && last.interim) {
+                return [...prev.slice(0, -1), next];
+              }
+              return [...prev.slice(-199), next];
+            });
+            break;
+          case 'stt_partial':
+            // Стриминговый STT (ADR-007): интеримный текст кандидата —
+            // обновляем последнюю интерим-строку (или создаём её).
+            setLines((prev) => {
+              const last = prev[prev.length - 1];
+              if (last !== undefined && last.who === 'user' && last.interim) {
+                return [...prev.slice(0, -1), { ...last, text: m.text }];
+              }
+              return [...prev.slice(-199), { who: 'user', text: m.text, interim: true }];
+            });
             break;
           case 'tts_stop':
             // barge-in: кандидат прервал речь ИИ — плеер останавливается

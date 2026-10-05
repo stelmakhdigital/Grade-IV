@@ -182,11 +182,14 @@ export function SessionView({ id }: { id: number }) {
         {lines.length === 0 && <p className="muted">Диалог появится здесь.</p>}
         <ol className="transcript-list" data-testid="lines">
           {lines.map((l, i) => (
-            <li key={i} className={`line ${l.who}`}>
+            <li key={i} className={`line ${l.who}${l.interim ? ' interim' : ''}`}>
               <div className="line-who">
                 {l.who === 'user' ? 'Кандидат' : l.who === 'ai' ? 'ИИ-интервьюер' : 'Система'}
               </div>
               <div className="line-text">{l.text}</div>
+              {l.interim && (
+                <span className="interim-dots" aria-hidden="true">распознаётся ⋯</span>
+              )}
             </li>
           ))}
         </ol>

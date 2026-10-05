@@ -463,6 +463,16 @@ p {
   white-space: pre-wrap;
 }
 
+/* Интеримный (stt_partial) текст кандидата: приглушён, точки — «распознаётся». */
+.line.interim .line-text {
+  color: #8b93a5;
+  font-style: italic;
+}
+
+.interim-dots {
+  color: #565f73;
+}
+
 /* ----------------------------------------------------- Live-Code (WP-9) */
 
 .livecode {
