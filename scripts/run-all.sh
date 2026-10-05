@@ -11,10 +11,13 @@
 #   LLM_BASE_URL  (дефолт http://192.168.1.114:8000/v1) — LLM-узел (vLLM)
 #   LLM_MODEL     (дефолт qwen3.8-27b-fp8)
 #   LLM_MOCK      (дефолт 0; 1 — без LLM-узла, эхо-интервьюер)
-#   STT_MODEL     (дефолт small)
+#   STT_MODEL     (дефолт large-v3)
+#   STT_DEVICE    (дефолт cuda; cpu — без GPU)
+#   STT_COMPUTE_TYPE (дефолт float16; int8 для CPU)
 #
-# Файлы: БД и PID/логи — в FOR_RUN/ (вне git). Модели должны быть скачаны:
-#   bash scripts/download-models.sh   (FOR_RUN/stt, FOR_RUN/tts)
+# Файлы: БД и PID/логи — в FOR_RUN/ (вне git). Модели — в services/voice/models/
+# (в gitignore): stt/ (faster-whisper), tts/ (Silero v5_ru);
+# скачивание: MODELS_DIR=$PWD/services/voice/models bash scripts/download-models.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,12 +39,23 @@ fi
 LLM_BASE_URL="${LLM_BASE_URL:-http://192.168.1.114:8000/v1}"
 LLM_MODEL="${LLM_MODEL:-qwen3.8-27b-fp8}"
 LLM_MOCK="${LLM_MOCK:-0}"
-STT_MODEL="${STT_MODEL:-small}"
+STT_MODEL="${STT_MODEL:-large-v3}"
+STT_DEVICE="${STT_DEVICE:-cuda}"
+STT_COMPUTE_TYPE="${STT_COMPUTE_TYPE:-float16}"
+VOICE_MODELS="$ROOT/services/voice/models"
 # SESSION_LIMIT_S: off — без ограничения времени сессии (dev); число — секунд;
 # пустое — лимит по грейду. Переопределяется переменной окружения.
 SESSION_LIMIT_S="${SESSION_LIMIT_S:-off}"
 VOICE_URL="http://127.0.0.1:8100"
 SANDBOX_URL="http://127.0.0.1:8200"
+# CUDA-библиотеки ctranslate2 (nvidia-cublas/cudnn/cuda_nvrtc из voice-venv, PyPI)
+VOICE_VENV="$ROOT/services/voice/.venv"
+VENV_SP="$(ls -d "$VOICE_VENV"/lib/python3.* 2>/dev/null | head -1)"
+VOICE_CUDA_LIBS=""
+for _d in cublas cuda_nvrtc cudnn; do
+  [[ -n "$VENV_SP" && -d "$VENV_SP/site-packages/nvidia/$_d/lib" ]] && VOICE_CUDA_LIBS="$VOICE_CUDA_LIBS:$VENV_SP/site-packages/nvidia/$_d/lib"
+done
+VOICE_CUDA_LIBS="${VOICE_CUDA_LIBS#:}"
 
 API_BIN="$RUN/bin/grade-api"
 SBX_BIN="$RUN/bin/grade-sbx"
@@ -95,14 +109,16 @@ do_start() {
   (cd "$ROOT" && SANDBOX_MODE=subprocess SANDBOX_WORKDIR_BASE="$RUN/sbxw" \
     "$SBX_BIN" >>"$LOGS/sandbox.log" 2>&1 & nohup "$SBX_BIN" >>"$LOGS/sandbox.log" 2>&1 & echo $! >"$PIDS/sandbox.pid")
 
-  echo "==> voice :8100 (модели: $RUN/stt, $RUN/tts)"
+  echo "==> voice :8100 (модели: $VOICE_MODELS/stt, $VOICE_MODELS/tts; STT: $STT_DEVICE/$STT_COMPUTE_TYPE, $STT_MODEL)"
   if [[ ! -d "$RUN/stt" || ! -f "$RUN/tts/silero-tts-v5_ru.pt" ]]; then
     echo "!! модели не найдены — сначала: bash scripts/download-models.sh" >&2
   fi
   # TTS_SPEAKER: мужской голос по умолчанию (персона интервьюера — мужчина);
   # переопределить: TTS_SPEAKER=eugene|ru_01 make run-all
-  (cd "$ROOT/services/voice" && STT_MODEL="$STT_MODEL" STT_DEVICE=cpu \
-    STT_DOWNLOAD_ROOT="$RUN/stt" TTS_MODEL_DIR="$RUN/tts" \
+  (cd "$ROOT/services/voice" && STT_MODEL="$STT_MODEL" STT_DEVICE="$STT_DEVICE" \
+    STT_COMPUTE_TYPE="$STT_COMPUTE_TYPE" \
+    LD_LIBRARY_PATH="$VOICE_CUDA_LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    STT_DOWNLOAD_ROOT="$VOICE_MODELS/stt" TTS_MODEL_DIR="$VOICE_MODELS/tts" \
     TTS_SPEAKER="${TTS_SPEAKER:-aidar}" \
     nohup .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8100 >>"$LOGS/voice.log" 2>&1 & \
     echo $! >"$PIDS/voice.pid")

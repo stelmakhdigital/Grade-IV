@@ -69,6 +69,7 @@
 | 29 | 2026-09-14 | WP-4: STT faster-whisper (lazy load singleton+lock, CPU int8, VAD-фильтр Silero-onnx против галлюцинаций, принимает raw PCM16 и WAV, молчание → text=""); TTS Silero v5 (официальный torch-пакет v5_ru с models.silero.ai — pypi-обёртка silero 0.5.5 оказалась устаревшей; 5 рус. спикеров; нативные 24 кГц → ресемплинг 24→16 кГц (линейная интерполяция) в контракт; `TTS_SPEAKER` с fallback + warning). `VOICE_STT_PROVIDER`/`VOICE_TTS_PROVIDER`: реальные по умолчанию, `fake` для CI. Bэклог: стриминг TTS по предложениям, GPU-конфиг, кэш моделей в docker-образ |
 | 30 | 2026-09-14 | WP-4/WP-6: окружение без pip/ensurepip — venv создаётся `python3 -m venv --without-pip` + get-pip.py; torch ставится с CPU-индекса pytorch.org/whl/cpu (иначе nvidia-* ~2GB); make install учитывает (Makefile, только voice-цель) |
 | 31 | 2026-09-14 | Голосовой конвейер (ADR-002) реализован в api: PCM-кадры → энергетический VAD (RMS-порог, тишина-хвост, мин/макс реплики) → voice /stt → движок интервьюера → voice /tts → бинарные кадры {seq,flags LE}+PCM16. Ходовой режим: turn-taking (время TTS/занятость конвейера — микрофон не слушается, barge-in вне скоупа), один параллельный голосовой ход. MVP-упрощение VAD — энергетический (без onnx в Go; точная Silero-VAD-модель — бэклог). Kонтракт кадров зафиксирован: 4-байтный заголовок LE, 250 мс, bit0 flags — конец потока. LLM-ответ и приветствие озвучиваются; сбой voice — warn-лог, текстовый режим жив |
+| 32 | 2026-10-05 | Локальный voice-контур (pipeline T-20261005080715 R1): STT — faster-whisper large-v3 на GPU (RTX 5070 Ti, cuda/float16), TTS — Silero v5 на CPU. Модели — в `services/voice/models/{stt,tts}` (gitignore; run-all.sh указывает туда по умолчанию, STT_MODEL=large-v3, STT_DEVICE=cuda, STT_COMPUTE_TYPE=float16). ctranslate2 требует внешние CUDA 12-библиотеки: `nvidia-cublas-cu12` + `nvidia-cudnn-cu12` в voice-venv (PyPI), run-all.sh собирает LD_LIBRARY_PATH из `site-packages/nvidia/*/lib`. LLM — `http://192.168.1.114:8000/v1` / `qwen3.8-27b-fp8` (defолты run-all). Замер: STT 5 с аудио = 0.2 с (GPU) vs ~2.5–3 с (CPU int8); сходство TTS→STT 0.846 (3 фразы); LLM-отчёт ~18 с |
 
 ## Ограничения
 - Общение с пользователем — на русском.
@@ -885,3 +886,28 @@
   - Известное: сервисы, запущенные из-под ИИ-агента, убиваются вместе с деревом
     процессов агента — постоянный запуск: make run-all в собственном терминале
     (или tmux). make install всё ещё требует pnpm в PATH (node_modules есть).
+- **2026-10-05** (pipeline T-20261005080715 R1) — Локальный voice-контур (задача 0 из очереди p-grade):
+  - Модели скачаны в `services/voice/models/` (gitignore): STT — faster-whisper
+    large-v3 (2.9 ГБ, HF Systran, `STT_DOWNLOAD_ROOT=…/models/stt`), TTS —
+    Silero v5_ru.pt (145 МБ, models.silero.ai, `TTS_MODEL_DIR=…/models/tts`).
+  - run-all.sh: модели по умолчанию в `services/voice/models/`, `STT_MODEL=large-v3`,
+    `STT_DEVICE=cuda`, `STT_COMPUTE_TYPE=float16`; `.env.example` обновлён.
+  - **Подводный камень №1**: ctranslate2 4.8.2 из PyPI НЕ бандлит CUDA — на GPU
+    «RuntimeError: Library libcublas.so.12 is not found». Фикс: `pip install
+    nvidia-cublas-cu12 nvidia-cudnn-cu12` в voice-venv (~1.2 ГБ) + LD_LIBRARY_PATH
+    из `site-packages/nvidia/{cublas,cuda_nvrtc,cudnn}/lib` — run-all.sh собирает
+    автоматически (поиск по glob `lib/python3.*`). CPU-ноды: не ставить, STT_DEVICE=cpu.
+  - **Подводный камень №2**: `pkill -f "uvicorn app.main:app"` убивает и свою же
+    bash-команду (паттерн в строке); stale-uvicorn на :8100 без LD_LIBRARY_PATH
+    маскирует новый процесс (порт занят → новый умирает, старый отвечает cublas-ошибками).
+  - **Подводный камень №3**: `run-all.sh start` из-под bash-инструмента агента с
+    таймаутом — таймаут убивает всю процесс-группу включая nohup-сервисы. Надёжный
+    запуск: `setsid bash scripts/run-all.sh start &` (своя сессия).
+  - Пробы (реальные): LLM-узел chat/completions 1.0 с (enable_thinking=false);
+    TTS 4.9 с аудио за 1.6 с; STT GPU large-v3 — 5 с аудио за 0.2 с (CPU было
+    2.5–3 с), тишина→""; roundtrip TTS→STT conf 0.857; latency-проба (3 фразы,
+    live-стек): сходство 0.846, первый TTS-кадр +0.03 с после транскрипта
+    (LLM TTFB <1 с); LLM-отчёт (finish→report 200) 18 с.
+  - Регресс: pytest 12 passed (fake), go vet+test (api 7 пакетов, sandbox 2),
+    tsc, vitest 59/59, vite build — зелёные. Стек 4/4 OK (run-all, setsid).
+  - Коммит: [см. git log] + roadmap (Фаза 6: локальный voice-контур).

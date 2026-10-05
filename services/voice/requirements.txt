@@ -17,3 +17,6 @@ onnxruntime>=1.20
 numpy>=1.26
 scipy>=1.13
 torch>=2.4
+# GPU (STT_DEVICE=cuda): ctranslate2 требует внешние CUDA 12-библиотеки —
+# доустановить в voice-venv: pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+# (CPU-ноды/CI: не ставить, STT_DEVICE=cpu).

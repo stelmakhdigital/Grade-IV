@@ -62,6 +62,7 @@
 
 ## Фаза 6: Operations
 - [x] Документация по эксплуатации — 2026-09-28 (9f18dfb): docs/OPERATIONS.md (VPS, бэкап, troubleshooting)
+- [ ] Локальный voice-контур (предварительная pipeline-задача): STT large-v3 на GPU (float16) + TTS Silero v5 на CPU, модели в `services/voice/models/`, api ← `VOICE_URL` + LLM (`192.168.1.114:8000/v1`, `qwen3.8-27b-fp8`), health + реальные пробы STT/TTS/LLM
 - [ ] Бэклог улучшений: full-duplex с barge-in, мультиязычие, A/B промптов
 
 ## Бэклог ML/latency

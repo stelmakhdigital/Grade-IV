@@ -50,3 +50,13 @@ data/
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
 FOR_RUN/
+
+# Артефакты агентов (pipeline/memory/скриншоты/секреты) — не коммитятся
+task.md
+.memory/
+.pi/
+memory/
+agents/
+screenshots/
+secrets/
+*.secret
