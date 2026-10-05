@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -33,6 +34,10 @@ const (
 	// прервать речь ИИ (barge-in): защита от ложных срабатываний (эхо,
 	// дыхание, покашливание). Короткие всплески VAD всё равно отбрасывает.
 	BargeInMinSpeechMS = 500
+	// TTSParallelism — число TTS-воркеров (окно pipeline-синтеза): пока
+	// предложение N отправляется в pacing, следующие TTSParallelism-1 уже
+	// синтезируются (voice /tts stateless — параллельные запросы OK, ADR-008).
+	TTSParallelism = 3
 )
 
 // runCandidateTurn — ход кандидата: событие + transcript, ответ ИИ (SSE-стрим),
@@ -78,36 +83,7 @@ func (s *Server) streamCandidateTurn(ws *wsSession, deltas <-chan string) {
 		frames = make(chan []byte, 64)
 		go func() {
 			defer close(frames)
-			silence := make([]byte, ttsChunkBytes)
-			prev := "" // предыдущее предложение (пауза перед текущим)
-			for sentence := range sentences {
-				if stopped(stop) {
-					break // barge-in: дальнейший синтез не нужен
-				}
-				if prev != "" {
-					gap := 1
-					if strings.HasSuffix(prev, "?") || strings.HasSuffix(prev, "!") {
-						gap = 2
-					}
-					for g := 0; g < gap; g++ {
-						frames <- silence
-					}
-				}
-				prev = sentence
-				pcm, err := s.voice.TTS(ws.ctx, prepareTTS(sentence))
-				if err != nil {
-					metrics.TTSErrors.Inc(nil)
-					s.log.Warn("tts: синтез предложения не удался", "session", ws.id, "err", err)
-					continue // Degrade: пропускаем (голос не критичен, текст уже есть)
-				}
-				for off := 0; off < len(pcm); off += ttsChunkBytes {
-					end := off + ttsChunkBytes
-					if end > len(pcm) {
-						end = len(pcm)
-					}
-					frames <- pcm[off:end]
-				}
-			}
+			s.produceOrderedTTS(ws, sentences, frames, stop)
 		}()
 		// Pacing параллельно LLM-стриму: кадры уходят, пока LLM ещё пишет.
 		turnDone = make(chan struct{})
@@ -151,6 +127,137 @@ func (s *Server) streamCandidateTurn(ws *wsSession, deltas <-chan string) {
 }
 
 var errEmptyStream = errors.New("LLM-стрим вернул пустой ответ")
+
+// ttsJob — предложение для TTS-синтеза. idx — порядковый номер (порядок
+// вывода), gap — число тише-кадров перед предложением (по пунктуации
+// предыдущего: 1 после «.»/«…», 2 после «?»/«!»).
+type ttsJob struct {
+	idx  int
+	gap  int
+	text string
+}
+
+// produceOrderedTTS — параллельный TTS-синтез (пул из TTSParallelism воркеров,
+// очередь #3) с сохранением порядка вывода: пока предложение N отправляется в
+// pacing, следующие TTSParallelism-1 уже синтезируются; однако кадры N (с
+// предшествующей паузой) полностью уходят в frames до кадров N+1.
+//
+// Barge-in (stop закрыт): недиспетчеризованные предложения не начинают
+// синтез, уже запущенные — доводят до конца, их результаты сливаются (без
+// утечки горутины). Ошибка TTS на предложение — skip (warn-лог), остальные
+// синтезируются.
+func (s *Server) produceOrderedTTS(ws *wsSession, sentences <-chan string, frames chan<- []byte, stop <-chan struct{}) {
+	// 1) Диспетчер: читает предложения по порядку, назначает idx/gap,
+	// диспетчеризует в пул. jobs без буфера — окно ограничено числом воркеров.
+	jobs := make(chan ttsJob)
+	go func() {
+		defer close(jobs)
+		prev := ""
+		idx := 0
+		for sentence := range sentences {
+			if stopped(stop) {
+				return // barge-in: не начинаем синтез недиспетчеризованных
+			}
+			gap := 0
+			if prev != "" {
+				gap = 1
+				if strings.HasSuffix(prev, "?") || strings.HasSuffix(prev, "!") {
+					gap = 2
+				}
+			}
+			prev = sentence
+			idx++
+			jobs <- ttsJob{idx: idx, gap: gap, text: sentence}
+		}
+	}()
+
+	// 2) Воркеры: параллельный синтез; результаты могут приходить не по порядку.
+	type result struct {
+		idx int
+		gap int
+		pcm []byte
+		err error
+	}
+	results := make(chan result, TTSParallelism)
+	var wg sync.WaitGroup
+	for i := 0; i < TTSParallelism; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				st := time.Now()
+				pcm, err := s.voice.TTS(ws.ctx, prepareTTS(j.text))
+				if err != nil {
+					metrics.TTSErrors.Inc(nil)
+					s.log.Warn("tts: не удалось синтезировать предложение", "session", ws.id, "err", err)
+				} else {
+					metrics.TTSSynth.Observe(nil, time.Since(st).Seconds())
+				}
+				results <- result{idx: j.idx, gap: j.gap, pcm: pcm, err: err}
+			}
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// 3) Записчик: собирает результаты по idx (реордер) и отправляет в frames
+	// строго по порядку. При barge-in перестаёт слать (end-кадр шлёт
+	// paceFrames), но продолжает сливать результаты.
+	nextWanted := 1
+	pending := map[int]result{}
+	bargedIn := false
+	for r := range results {
+		pending[r.idx] = r
+		for {
+			cur, ok := pending[nextWanted]
+			if !ok {
+				break
+			}
+			delete(pending, nextWanted)
+			nextWanted++
+			if bargedIn || cur.err != nil {
+				continue // barge-in — только слив; ошибка — skip (лог выше)
+			}
+			if !pushTTSJob(ws, frames, stop, cur.gap, cur.pcm) {
+				bargedIn = true
+			}
+		}
+	}
+}
+
+// pushTTSJob — кадры предложения (тише-пауза + PCM) в frames. select на stop
+// (barge-in) и ws.ctx (конец сессии): при любом из них перестаёт слать —
+// false (end-кадр шлёт paceFrames).
+func pushTTSJob(ws *wsSession, frames chan<- []byte, stop <-chan struct{}, gap int, pcm []byte) bool {
+	silence := make([]byte, ttsChunkBytes)
+	send := func(b []byte) bool {
+		select {
+		case frames <- b:
+			return true
+		case <-stop:
+			return false
+		case <-ws.ctx.Done():
+			return false
+		}
+	}
+	for g := 0; g < gap; g++ {
+		if !send(silence) {
+			return false
+		}
+	}
+	for off := 0; off < len(pcm); off += ttsChunkBytes {
+		end := off + ttsChunkBytes
+		if end > len(pcm) {
+			end = len(pcm)
+		}
+		if !send(pcm[off:end]) {
+			return false
+		}
+	}
+	return true
+}
 
 // splitDeltas — LLM-стрим → полные предложения (TTS) + полный текст (ai_text).
 // Предложение считается готовым, когда по логике splitSentences после него
