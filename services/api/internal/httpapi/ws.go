@@ -121,7 +121,12 @@ type wsSession struct {
 	nudgeCount  atomic.Int32
 	vad         *vad.Detector
 	busy        atomic.Bool // голосовой ход занят (один параллельный, turn-taking)
-	ttsActive   atomic.Bool // ИИ говорит (стрим TTS) — микрофон не слушается
+	ttsActive   atomic.Bool // ИИ говорит (стрим TTS) — gate barge-in
+	// TTS-поток (barge-in): stop-канал текущего стрима; nil — нет активного.
+	// Шлющий кадры (paceFrames/streamAIAudio) его наблюдает: closed — стрим
+	// остановлен (кандидат прервал речь ИИ).
+	ttsMu   sync.Mutex
+	ttsStop chan struct{}
 	// Pre-STT (voice_pipeline.go): предварительное распознавание при первой
 	// тишине — перекрывает VAD-хвост, экономит время STT.
 	preSTTActive atomic.Bool  // pre-STT запущен (на текущий буфер)
@@ -131,6 +136,54 @@ type wsSession struct {
 }
 
 func (w *wsSession) touch() { atomic.StoreInt64(&w.lastActive, time.Now().UnixNano()) }
+
+// beginTTS — регистрация начала TTS-стрима (заменяет текущий, если был):
+// возвращает stop-канал, который наблюдает шлющий кадры; ставит ttsActive.
+func (w *wsSession) beginTTS() <-chan struct{} {
+	w.ttsMu.Lock()
+	defer w.ttsMu.Unlock()
+	if w.ttsStop != nil {
+		close(w.ttsStop)
+	}
+	w.ttsStop = make(chan struct{})
+	w.ttsActive.Store(true)
+	return w.ttsStop
+}
+
+// endTTS — нормальное завершение TTS-стрима (после end-кадра): сбрасывает
+// ttsActive, только если стрим последний (не заменён более новым).
+func (w *wsSession) endTTS(stop <-chan struct{}) {
+	w.ttsMu.Lock()
+	defer w.ttsMu.Unlock()
+	if w.ttsStop == stop {
+		w.ttsStop = nil
+		w.ttsActive.Store(false)
+	}
+}
+
+// stopTTS — barge-in: остановка текущего TTS-стрима (stop-канал закрыт,
+// ttsActive сброшен). true — был активный стрим.
+func (w *wsSession) stopTTS() bool {
+	w.ttsMu.Lock()
+	defer w.ttsMu.Unlock()
+	if w.ttsStop == nil {
+		return false
+	}
+	close(w.ttsStop)
+	w.ttsStop = nil
+	w.ttsActive.Store(false)
+	return true
+}
+
+// stopped — закрыт ли stop-канал TTS-стрима.
+func stopped(stop <-chan struct{}) bool {
+	select {
+	case <-stop:
+		return true
+	default:
+		return false
+	}
+}
 
 // lastCandActivity — когда кандидат последний раз был активен (PCM от
 // микрофона). Nudge-отсчёт ведётся от НЕЙ, а не от любой активности:
@@ -348,7 +401,16 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage, ws *wsSession) {
 		}
 		text := strings.TrimSpace(p.Text)
 		// Конвейер хода (WP-5/ADR-002): событие + transcript → LLM → ai_text → TTS.
-		s.runCandidateTurn(ws, text)
+		// Асинхронно: ход занимает до ~3 с (LLM + TTS-pacing), readLoop должен
+		// продолжать читать PCM (barge-in: микрофон слушается, пока ИИ говорит).
+		// busy-гейт: один ход на соединение, повторные реплики отбрасываются.
+		if !ws.busy.CompareAndSwap(false, true) {
+			return // ход занят — реплика теряется (ходовой режим)
+		}
+		go func() {
+			defer ws.busy.Store(false)
+			s.runCandidateTurn(ws, text)
+		}()
 
 	default:
 		s.engine.SendTo(id, wsErr("unknown_ui_event", "неизвестное событие: "+msg.Name))

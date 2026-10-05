@@ -16,8 +16,10 @@ import (
 // движок интервьюера (LLM, SSE-стрим) → voice /tts (по предложениям, до-стриминг)
 // → бинарные кадры PCM16 по WS с pacing (не быстрее real-time).
 //
-// Ходовой режим (SRS §8): пока ИИ «говорит» (стрим TTS) или конвейер занят,
-// входящий PCM не слушается (barge-in — вне скоупа MVP).
+// Режим: turn-taking + barge-in (SRS §8): пока ход занят (LLM-фаза) — микрофон
+// не слушается; пока ИИ говорит (TTS-стрим) — микрофон слушается, и
+// завершённая VAD-реплика длиной ≥ BargeInMinSpeechMS прерывает речь ИИ
+// (stop-канал + WS tts_stop), после чего обрабатывается как обычный ход.
 // Контракт кадров S→C: 4-байтный заголовок {seq u16 LE, flags u16 LE} + PCM16
 // 16 кГц mono; flags 0x01 — последний кадр потока (новые реплики — seq заново с 0).
 
@@ -27,6 +29,10 @@ const (
 	// frameDur — pacing: один кадр = 250 мс аудио, кадры уходят не чаще
 	// одного за 250 мс (реальное время).
 	frameDur = 250 * time.Millisecond
+	// BargeInMinSpeechMS — минимальная длительность завершённой реплики, чтобы
+	// прервать речь ИИ (barge-in): защита от ложных срабатываний (эхо,
+	// дыхание, покашливание). Короткие всплески VAD всё равно отбрасывает.
+	BargeInMinSpeechMS = 500
 )
 
 // runCandidateTurn — ход кандидата: событие + transcript, ответ ИИ (SSE-стрим),
@@ -66,14 +72,18 @@ func (s *Server) streamCandidateTurn(ws *wsSession, deltas <-chan string) {
 	voiceOn := s.voice != nil
 	var turnDone chan struct{} // завершение аудио-конвейера (pacing)
 	var frames chan []byte     // PCM-кадры (≤ ttsChunkBytes) из TTS-воркера
+	var stop <-chan struct{}   // stop-канал TTS-стрима (barge-in)
 	if voiceOn {
-		ws.ttsActive.Store(true) // gate микрофона: сброс строго после end-кадра
+		stop = ws.beginTTS() // gate микрофона: сброс строго после end-кадра
 		frames = make(chan []byte, 64)
 		go func() {
 			defer close(frames)
 			silence := make([]byte, ttsChunkBytes)
 			prev := "" // предыдущее предложение (пауза перед текущим)
 			for sentence := range sentences {
+				if stopped(stop) {
+					break // barge-in: дальнейший синтез не нужен
+				}
 				if prev != "" {
 					gap := 1
 					if strings.HasSuffix(prev, "?") || strings.HasSuffix(prev, "!") {
@@ -84,8 +94,8 @@ func (s *Server) streamCandidateTurn(ws *wsSession, deltas <-chan string) {
 					}
 				}
 				prev = sentence
-				pcm, err := s.voice.TTS(ws.ctx, prepareTTS(sentence))
-				if err != nil {
+						pcm, err := s.voice.TTS(ws.ctx, prepareTTS(sentence))
+					if err != nil {
 					metrics.TTSErrors.Inc(nil)
 					s.log.Warn("tts: синтез предложения не удался", "session", ws.id, "err", err)
 					continue // Degrade: пропускаем (голос не критичен, текст уже есть)
@@ -103,8 +113,8 @@ func (s *Server) streamCandidateTurn(ws *wsSession, deltas <-chan string) {
 		turnDone = make(chan struct{})
 		go func() {
 			defer close(turnDone)
-			defer ws.ttsActive.Store(false) // строго после end-кадра
-			_, _, ended := s.paceFrames(ws, start, frames)
+			defer ws.endTTS(stop) // строго после end-кадра (или barge-in)
+			_, _, ended := s.paceFrames(ws, start, frames, stop)
 			if ended {
 				metrics.TurnStage.Observe(metrics.StageLabel("turn_end"), time.Since(start).Seconds())
 				metrics.TurnsTotal.Inc(metrics.ResultLabel("ok"))
@@ -170,65 +180,87 @@ func splitDeltas(start time.Time, deltas <-chan string, sentences chan<- string,
 
 // paceFrames — очередь кадров → WS: не быстрее одного кадра за 250 мс
 // (1 кадр = 250 мс аудио), очередь опустошается к концу стрима; end-флаг —
-// на самом последнем кадре. Возвращает время первого/последнего кадра и
-// завершён ли поток end-кадром (ctx-отмена — нет).
-func (s *Server) paceFrames(ws *wsSession, turnStart time.Time, frames chan []byte) (time.Time, time.Time, bool) {
+// только на финальном кадре (тишина 250 мс после последнего аудио). Возвращает
+// время первого/последнего кадра и завершён ли поток end-кадром (ctx-отмена — нет).
+// stop — barge-in: закрыт канал — поток завершается end-кадром немедленно
+// (новые кадры не идут).
+func (s *Server) paceFrames(ws *wsSession, turnStart time.Time, frames chan []byte, stop <-chan struct{}) (time.Time, time.Time, bool) {
 	var seq uint16
 	silence := make([]byte, ttsChunkBytes)
 	ticker := time.NewTicker(25 * time.Millisecond) // разрешение pacing-списка
 	defer ticker.Stop()
-	var hold []byte
 	var queue [][]byte     // накопленные кадры (LLM/TTS обгоняют pacing)
 	var nextSend time.Time // zero = можно отправлять сразу (первый кадр)
 	var firstAt, endAt time.Time
 	sentAny := false
-	endPending := false
+	closed := false // TTS-воркер завершил поставку кадров
 	for {
 		if ws.ctx.Err() != nil {
 			return firstAt, endAt, false
 		}
-		if len(queue) > 0 && !nextSend.After(time.Now()) {
-			hold, queue = queue[0], queue[1:]
-			sendEnd := endPending
+		if stopped(stop) {
+			// barge-in: прерываемый стрим завершаем end-кадром; PCM больше не шлём.
+			if sentAny {
+				s.sendTTSFrame(ws, seq, silence, true)
+				endAt = time.Now()
+			}
+			return firstAt, endAt, sentAny
+		}
+		now := time.Now()
+		// Финальный end-кадр: все кадры получены и отправлены (по pacing-ритму).
+		if closed && len(queue) == 0 && !nextSend.After(now) {
+			if !sentAny {
+				return firstAt, endAt, false // кадров не было (все TTS-ошибки) — stop не нужен
+			}
+			s.sendTTSFrame(ws, seq, silence, true)
+			return firstAt, now, true
+		}
+		if len(queue) > 0 && !nextSend.After(now) {
+			hold := queue[0]
+			queue = queue[1:]
 			frame := make([]byte, 0, 4+len(hold))
 			var hdr [4]byte
 			binary.LittleEndian.PutUint16(hdr[0:2], seq)
-			if sendEnd {
-				binary.LittleEndian.PutUint16(hdr[2:4], ttsFlagEnd)
-			}
 			frame = append(frame, hdr[:]...)
 			frame = append(frame, hold...)
 			s.engine.SendBinary(ws.id, frame)
 			seq++
-			now := time.Now()
 			if !sentAny {
 				firstAt = now
 				metrics.TurnStage.Observe(metrics.StageLabel("tts_first_frame"), now.Sub(turnStart).Seconds())
 			}
 			sentAny = true
-			if sendEnd {
-				endAt = now
-				return firstAt, endAt, true
-			}
-			hold = nil
 			nextSend = now.Add(frameDur)
 			continue
 		}
-		select {
-		case <-ticker.C:
-		case pcm, ok := <-frames:
-			if ok {
+		if !closed {
+			select {
+			case <-ticker.C:
+			case pcm, ok := <-frames:
+				if !ok {
+					closed = true // дальше — только pacing очереди (без чтения закрытого канала)
+					continue
+				}
 				queue = append(queue, pcm)
 				continue
 			}
-			if sentAny {
-				queue = append(queue, silence)
-				endPending = true // финальный end-кадр (тишина 250 мс)
-				continue
-			}
-			return firstAt, endAt, sentAny // кадров не было (все TTS-ошибки) — stop не нужен
+		} else {
+			<-ticker.C // очередь недополнена/ограничена pacing — ждём такта
 		}
 	}
+}
+
+// sendTTSFrame — бинарный кадр TTS {seq u16 LE, flags u16 LE}+PCM16 (ADR-001).
+func (s *Server) sendTTSFrame(ws *wsSession, seq uint16, pcm []byte, end bool) {
+	frame := make([]byte, 0, 4+len(pcm))
+	var hdr [4]byte
+	binary.LittleEndian.PutUint16(hdr[0:2], seq)
+	if end {
+		binary.LittleEndian.PutUint16(hdr[2:4], ttsFlagEnd)
+	}
+	frame = append(frame, hdr[:]...)
+	frame = append(frame, pcm...)
+	s.engine.SendBinary(ws.id, frame)
 }
 
 // streamAIAudio — TTS ответа ИИ → бинарные кадры {seq,flags}+PCM16 (через engine.SendBinary).
@@ -246,15 +278,15 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 		return
 	}
 	sentences := splitSentences(text)
-	ws.ttsActive.Store(true)
-	defer ws.ttsActive.Store(false)
+	stop := ws.beginTTS() // barge-in: стрим можно прервать кандидатом
+	defer ws.endTTS(stop)
 
 	seq := 0
 	sentAny := false                       // уходил ли хоть один кадр (для финального end-кадра)
 	silence := make([]byte, ttsChunkBytes) // 250 мс тишины
 	for i, sentence := range sentences {
-		if ws.ctx.Err() != nil {
-			return
+		if ws.ctx.Err() != nil || stopped(stop) {
+			return // barge-in: кадры больше не шлём (tts_stop уже ушёл)
 		}
 		pcm, err := s.voice.TTS(ws.ctx, prepareTTS(sentence))
 		if err != nil {
@@ -263,22 +295,17 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 			continue
 		}
 		for off := 0; off < len(pcm); off += ttsChunkBytes {
-			if ws.ctx.Err() != nil {
+			if ws.ctx.Err() != nil || stopped(stop) {
 				return
 			}
 			end := off + ttsChunkBytes
 			if end > len(pcm) {
 				end = len(pcm)
 			}
-			frame := make([]byte, 0, 4+end-off)
-			var hdr [4]byte
-			binary.LittleEndian.PutUint16(hdr[0:2], uint16(seq))
-			frame = append(frame, hdr[:]...)
-			frame = append(frame, pcm[off:end]...)
-			s.engine.SendBinary(ws.id, frame)
+				s.sendTTSFrame(ws, uint16(seq), pcm[off:end], false)
 			seq++
 			sentAny = true
-		}
+			}
 		// Пауза между предложениями (не ставим после последнего).
 		if i < len(sentences)-1 {
 			gap := 1
@@ -286,30 +313,19 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 				gap = 2
 			}
 			for g := 0; g < gap; g++ {
-				if ws.ctx.Err() != nil {
+				if ws.ctx.Err() != nil || stopped(stop) {
 					return
 				}
-				frame := make([]byte, 0, 4+len(silence))
-				var hdr [4]byte
-				binary.LittleEndian.PutUint16(hdr[0:2], uint16(seq))
-				frame = append(frame, hdr[:]...)
-				frame = append(frame, silence...)
-				s.engine.SendBinary(ws.id, frame)
+				s.sendTTSFrame(ws, uint16(seq), silence, false)
 				seq++
 			}
 		}
 	}
 	// Финальный кадр с end-флагом: чистый хвост (тишина 250 мс) и гарантия
-	// остановки плеера. Только если реплики реально озвучивались (хотя бы
-	// один кадр ушёл) — иначе потока кадров не было и stop не нужен.
-	if sentAny && ws.ctx.Err() == nil {
-		frame := make([]byte, 0, 4+len(silence))
-		var hdr [4]byte
-		binary.LittleEndian.PutUint16(hdr[0:2], uint16(seq))
-		binary.LittleEndian.PutUint16(hdr[2:4], ttsFlagEnd)
-		frame = append(frame, hdr[:]...)
-		frame = append(frame, silence...)
-		s.engine.SendBinary(ws.id, frame)
+	// остановки плеера. Только если реплики реально озвучивались и стрим не
+	// был прерван barge-in (клиент уже получил tts_stop).
+	if sentAny && ws.ctx.Err() == nil && !stopped(stop) {
+		s.sendTTSFrame(ws, uint16(seq), silence, true)
 	}
 }
 
@@ -431,13 +447,17 @@ func (s *Server) handleVoiceUtterance(ws *wsSession, pcm []byte) {
 }
 
 // feedVAD — бинарный кадр PCM из readLoop: VAD; по завершённой реплике — конвейер.
+// Turn-taking: пока ход занят И ИИ не говорит (LLM-фаза) — кадры не слушаются.
+// Barge-in: пока ИИ говорит (ttsActive) — кадры питают VAD; завершённая
+// реплика длиной ≥ BargeInMinSpeechMS прерывает TTS (stop-канал, WS tts_stop,
+// метрика BargeInsTotal, log Info) и обрабатывается как обычный ход.
 // Pre-STT: при первой тишине после речи (vad.PreSilence) запускаем распознавание
 // на текущем буфере реплики — оно перекрывает остаток VAD-хвоста и экономит
 // время STT (~0.7 с на CPU). Инвалидация при возобновлении речи (новые speech-
 // кадры расширяют буфер → preSTTBytes не совпадёт).
 func (s *Server) feedVAD(ws *wsSession, pcm []byte) {
-	// Пока ИИ говорит или ход занят — не слушаем (turn-taking, ADR-002).
-	if ws.ttsActive.Load() || ws.busy.Load() {
+	// Ход занят, но ИИ молчит (LLM-фаза) — не слушаем (turn-taking, ADR-002).
+	if ws.busy.Load() && !ws.ttsActive.Load() {
 		return
 	}
 	utterance, done := ws.vad.Feed(pcm)
@@ -464,6 +484,34 @@ func (s *Server) feedVAD(ws *wsSession, pcm []byte) {
 	}
 	// Реплика завершена: сбрасываем pre-STT-флаг (если ещё не сброшен).
 	ws.preSTTActive.Store(false)
+	if ws.ttsActive.Load() {
+		// Кандидат заговорил, пока ИИ говорит.
+		ms := int(int64(len(utterance)) * 1000 / 2 / 16000)
+		if ms < BargeInMinSpeechMS {
+			s.log.Debug("barge-in: короткая реплика, без прерывания", "session", ws.id, "ms", ms)
+			return // защита от ложных срабатываний (эхо, дыхание)
+		}
+		ws.stopTTS()
+		metrics.BargeInsTotal.Inc(nil)
+		s.log.Info("barge-in: кандидат прервал речь ИИ", "session", ws.id, "ms", ms)
+		s.engine.SendTo(ws.id, map[string]any{"type": "tts_stop"})
+		go func() {
+			// Прерванный ход отпустит busy после end-кадра (turnDone) — ждём,
+			// иначе новый ход начнётся с занятым флагом и сразу закончится.
+			for ws.busy.Load() {
+				select {
+				case <-ws.ctx.Done():
+					return
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+			if !ws.busy.CompareAndSwap(false, true) {
+				return // на границе занята — реплика теряется (допустимо)
+			}
+			s.handleVoiceUtterance(ws, utterance)
+		}()
+		return
+	}
 	if !ws.busy.CompareAndSwap(false, true) {
 		return // на границе занят — реплика теряется (допустимо в ходовом режиме)
 	}

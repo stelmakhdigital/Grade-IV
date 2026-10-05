@@ -8,6 +8,7 @@ import { resampleFloat, TARGET_RATE } from './resample';
 export class PcmPlayer {
   private ctx: AudioContext | null = null;
   private queue: Int16Array[] = [];
+  private sources: AudioBufferSourceNode[] = []; // запланированные, ещё играют
   private nextStartAt = 0; // ctx.time следующего буфера
   private playing = false;
   private speaking = false;
@@ -52,11 +53,21 @@ export class PcmPlayer {
     return this.speaking;
   }
 
-  /** Полная остановка (сброс очереди). */
+  /** Полная остановка (сброс очереди) + остановка уже запланированных
+   * источников: barge-in (tts_stop) — речь ИИ прекращается немедленно,
+   * а не после доигрывания буфера (до ~250 мс на кадр). */
   stop(): void {
     this.queue = [];
     this.playing = false;
     this.speaking = false;
+    for (const src of this.sources) {
+      try {
+        src.stop();
+      } catch {
+        // уже остановлен/не стартовал
+      }
+    }
+    this.sources = [];
     if (this.checkTimer !== null) {
       window.clearTimeout(this.checkTimer);
       this.checkTimer = null;
@@ -107,6 +118,11 @@ export class PcmPlayer {
       src.connect(ctx.destination);
       src.start(this.nextStartAt);
       this.nextStartAt += samples.length / ctx.sampleRate;
+      this.sources.push(src);
+      src.onended = () => {
+        const i = this.sources.indexOf(src);
+        if (i >= 0) this.sources.splice(i, 1);
+      };
       this.queue.shift();
     }
   }

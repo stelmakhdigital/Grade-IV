@@ -20,6 +20,7 @@ export type WsMessage =
   | { type: 'timer'; remaining_s: number }
   | { type: 'ai_text'; text: string }
   | { type: 'transcript'; who: 'user' | 'ai'; text: string }
+  | { type: 'tts_stop' }
   | { type: 'run_result'; [k: string]: unknown }
   | { type: 'report_ready'; [k: string]: unknown }
   | { type: 'error'; code: string; msg: string };

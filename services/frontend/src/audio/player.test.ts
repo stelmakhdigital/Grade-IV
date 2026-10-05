@@ -11,8 +11,11 @@ import { PcmPlayer } from './player';
 class MockSource {
   constructor(private t: () => number) {}
   startedAt: number | null = null;
+  stopped = false;
   connect() { return this; }
   start(at?: number) { this.startedAt = at ?? this.t(); }
+  stop() { this.stopped = true; }
+  onended: (() => void) | null = null;
 }
 class MockBuffer {
   constructor(public length: number, public sampleRate: number) {}
@@ -91,5 +94,28 @@ describe('PcmPlayer', () => {
     // Повторный кадр — один новый старт, старые не трогаем.
     p.playChunk(frame());
     expect(srcs.length).toBe(n1 + 1);
+  });
+
+  it('stop() останавливает запланированные источники (barge-in) и не ломает следующий стрим', () => {
+    const p = new PcmPlayer();
+    const srcs: MockSource[] = [];
+    const origCreate = ctx.createBufferSource.bind(ctx);
+    ctx.createBufferSource = () => {
+      const s = origCreate();
+      srcs.push(s as unknown as MockSource);
+      return s;
+    };
+    p.playChunk(frame());
+    p.playChunk(frame());
+    expect(srcs.length).toBe(2);
+    // barge-in: все запланированные кадры обрываются.
+    p.stop();
+    expect(srcs.every((s) => s.stopped)).toBe(true);
+    expect(p.isSpeaking()).toBe(false);
+    // Следующая реплика ИИ (новый стрим) воспроизводится заново.
+    p.playChunk(frame());
+    expect(srcs.length).toBe(3);
+    expect(srcs[2].startedAt).not.toBeNull();
+    expect(srcs[2].stopped).toBe(false);
   });
 });

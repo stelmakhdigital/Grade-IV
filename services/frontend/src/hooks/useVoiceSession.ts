@@ -114,6 +114,12 @@ export function useVoiceSession(id: number) {
               { who: m.who === 'user' ? 'user' : 'ai', text: m.text },
             ]);
             break;
+          case 'tts_stop':
+            // barge-in: кандидат прервал речь ИИ — плеер останавливается
+            // немедленно (включая запланированные кадры), очередь сбрасывается.
+            player.stop();
+            setSpeaking(false);
+            break;
           case 'error':
             if (m.code === 'session_aborted') {
               setError('Сессия прервана.');
@@ -192,10 +198,10 @@ export function useVoiceSession(id: number) {
       playerRef.current?.resume();
       await micCap.start({
         onChunk: (pcm) => {
-          // Эхо-подавление (бэклог AEC, упрощение MVP): пока ИИ говорит
-          // (плеер воспроизводит TTS-буфер) — микрофон не шлём (иначе
-          // динамик → микрофон → VAD «речь кандидата»).
-          if (playerRef.current?.isSpeaking()) return;
+          // PCM шлём всегда (и во время речи ИИ): серверный VAD ведёт
+          // barge-in (SRS §8) — короткое «эхо»/всплеск отбрасывается,
+          // завершённая реплика ≥ 500 мс прерывает TTS. Эхо-подавление —
+          // echoCancellation в getUserMedia (mic.ts).
           wsRef.current?.sendPcm(pcm);
         },
         onLevel: (rms) => {
