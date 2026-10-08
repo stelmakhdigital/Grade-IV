@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createElement } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +15,50 @@ vi.mock('@excalidraw/excalidraw', () => ({
       'data-theme': props.theme ?? 'light',
     }),
 }));
+
+// useVoiceSession: по умолчанию — реальный хук (все остальные сценарии);
+// в тестах mic-dbg подменяем возвращаемое значение (в jsdom реальный
+// захват микрофона/Web Audio нет, получить micDbg.chunks > 0 нельзя).
+const hookMock = vi.hoisted(() => ({
+  fake: null as null | Record<string, unknown>,
+}));
+vi.mock('../hooks/useVoiceSession', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../hooks/useVoiceSession')>();
+  return {
+    ...actual,
+    useVoiceSession: (id: number) =>
+      hookMock.fake === null ? actual.useVoiceSession(id) : hookMock.fake,
+  };
+});
+
+/** Фиктивное возвращаемое useVoiceSession для сценариев mic-dbg. */
+function fakeVoiceSession(micDbg: Record<string, unknown> | null): Record<string, unknown> {
+  return {
+    session: S_ACTIVE,
+    loadError: null,
+    lines: [],
+    stage: 'voice',
+    runReview: '',
+    designReview: '',
+    task: null,
+    remainingS: 2990,
+    lastAiText: '',
+    mic: 'running',
+    micDbg,
+    speaking: false,
+    wsState: 'open',
+    error: null,
+    micLevelRef: { current: 0 },
+    live: true,
+    paused: false,
+    pauseBusy: false,
+    toggleMic: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    onStageAction: vi.fn(),
+    onFinish: vi.fn(),
+  };
+}
 
 /** Минимальный fake WebSocket (совместим с SessionWS). */
 class FakeWebSocket {
@@ -129,6 +173,7 @@ beforeEach(() => {
   localStorage.clear();
   setToken('tok');
   FakeWebSocket.instances = [];
+  hookMock.fake = null;
 });
 
 describe('SessionView (WP-8)', () => {
@@ -361,5 +406,61 @@ describe('SessionView (WP-8)', () => {
       name: 'stage_action',
       payload: { stage: 'livecode' },
     });
+  }, 10000);
+
+  it('mic-dbg (dev): строка статистики рендерится при micDbg.chunks > 0', async () => {
+    vi.stubGlobal('fetch', mockApi());
+    hookMock.fake = fakeVoiceSession({
+      path: 'worklet',
+      ctxState: 'running',
+      rate: 16000,
+      chunks: 10,
+      medGapMs: 250,
+      maxRms: 0.5,
+    });
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    const dbg = await screen.findByText(/мик\[worklet\]/);
+    expect(dbg.className).toContain('mic-dbg');
+    expect(dbg).toHaveTextContent('чанков 10');
+    expect(dbg).toHaveTextContent('шаг 250 мс');
+    expect(dbg).toHaveTextContent('max rms 0.5');
+    expect(dbg).toHaveTextContent('ctx running');
+  }, 10000);
+
+  it('mic-dbg (dev): строки нет при chunks = 0 или micDbg = null', async () => {
+    vi.stubGlobal('fetch', mockApi());
+
+    // chunks = 0 — блок не рендерится
+    hookMock.fake = fakeVoiceSession({
+      path: 'worklet',
+      ctxState: 'running',
+      rate: 16000,
+      chunks: 0,
+      medGapMs: 0,
+      maxRms: 0,
+    });
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    // voice-panel отрендерился (микрофон «включён»), но строки диагностики нет
+    expect(await screen.findByText('микрофон: включён')).toBeInTheDocument();
+    expect(document.querySelector('.mic-dbg')).toBeNull();
+    cleanup();
+
+    // micDbg = null — тоже нет
+    hookMock.fake = fakeVoiceSession(null);
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    expect(await screen.findByText('микрофон: включён')).toBeInTheDocument();
+    expect(document.querySelector('.mic-dbg')).toBeNull();
   }, 10000);
 });
