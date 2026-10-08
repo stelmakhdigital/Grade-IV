@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
@@ -34,6 +35,11 @@ type Server struct {
 	interviewer *interviewer.Interviewer
 	voice       *voicesvc.Client
 	log         *slog.Logger
+
+	// wsSessions — живые WS-соединения по ID сессии (1 сессия — 1 соединение):
+	// pause во время активного хода останавливает TTS-стрим (FR-S7).
+	wsMu       sync.Mutex
+	wsSessions map[int64]*wsSession
 }
 
 // New собирает сервер (LLM-провайдер по конфигу: реальный клиент или мок, LLM_MOCK).
@@ -72,6 +78,7 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		interviewer: interviewer,
 		voice:       voice,
 		log:         log,
+		wsSessions:  make(map[int64]*wsSession),
 	}
 }
 

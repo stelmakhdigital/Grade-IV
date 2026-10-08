@@ -45,9 +45,10 @@ const (
 // Вызывается из readLoop (текстовый utterance) и из goroutine голосового STT.
 func (s *Server) runCandidateTurn(ws *wsSession, text string) {
 	ctx := ws.ctx
-	sess, err := s.sessions.Get(ctx, ws.id)
-	if err != nil || sess.Status != models.StatusActive {
-		return // сессия завершилась во время хода
+	// Статус — из движка (in-memory: ставится атомарно с паузой, DB-статус может
+	// отставать на момент записи): paused/завершённая сессия не начинает ход (FR-S7).
+	if snap, err := s.engine.Snapshot(ws.id); err != nil || snap.Status != models.StatusActive {
+		return // сессия не активна (пауза/завершение) — ход не обрабатывается
 	}
 	if _, err := s.eventData(ctx, ws.id, "user_utterance", map[string]any{"text": text}); err == nil {
 		s.engine.SendTo(ws.id, map[string]any{"type": "transcript", "who": "user", "text": text})
@@ -564,6 +565,12 @@ func (s *Server) handleVoiceUtterance(ws *wsSession, pcm []byte) {
 // Turn-taking общий для обоих путей: пока ход занят И ИИ не говорит
 // (LLM-фаза) — кадры не слушаются.
 func (s *Server) feedVAD(ws *wsSession, pcm []byte) {
+	// Пауза/завершение: голос кандидата не обрабатывается (FR-S7) — кадры не
+	// слушаем (VAD не накапливает, STT-стрим не получает: нет ходов «из паузы»
+	// и после возобновления).
+	if snap, err := s.engine.Snapshot(ws.id); err != nil || snap.Status != models.StatusActive {
+		return
+	}
 	// Ход занят, но ИИ молчит (LLM-фаза) — не слушаем (turn-taking, ADR-002).
 	if ws.busy.Load() && !ws.ttsActive.Load() {
 		return

@@ -128,7 +128,9 @@ func (s *Server) handleSessionAction(w http.ResponseWriter, r *http.Request) {
 	)
 	switch r.PathValue("action") {
 	case "pause":
-		snap, err = s.engine.Pause(id)
+		if snap, err = s.engine.Pause(id); err == nil {
+			s.stopTTSOnPause(id) // FR-S7: пауза останавливает активный TTS-стрим хода ИИ
+		}
 	case "resume":
 		snap, err = s.engine.Resume(id)
 	case "finish":
@@ -139,6 +141,12 @@ func (s *Server) handleSessionAction(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.writeSessionEngineError(w, err)
+		return
+	}
+	// Пауза дольше порога: Resume сам прервал сессию (pause_timeout, aborted) —
+	// возобновлять нечего, это конфликт (409 invalid_state).
+	if r.PathValue("action") == "resume" && snap.Status == models.StatusAborted {
+		writeError(w, http.StatusConflict, "invalid_state", "пауза дольше порога — сессия прервана")
 		return
 	}
 	if r.PathValue("action") == "finish" {
