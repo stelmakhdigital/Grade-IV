@@ -129,12 +129,24 @@ func (s *Server) handleSessionAction(w http.ResponseWriter, r *http.Request) {
 	switch r.PathValue("action") {
 	case "pause":
 		if snap, err = s.engine.Pause(id); err == nil {
-			s.stopTTSOnPause(id) // FR-S7: пауза останавливает активный TTS-стрим хода ИИ
+			// FR-S7 (раунд 2): пауза — session-level стоп TTS (флаг + stop-канал
+			// активного стрима + WS tts_stop; гонка «пауза в LLM-фазе» закрыта).
+			s.stopTTSOnAction(id, "pause")
 		}
 	case "resume":
 		snap, err = s.engine.Resume(id)
+		if err == nil {
+			// FR-S7 (раунд 2): возобновление сбрасывает session-level стоп TTS —
+			// иначе последующие стримы (приветствие/ходы) умрут мгновенно.
+			s.wsSessionFor(id).resetSessionStopped()
+		}
 	case "finish":
 		snap, err = s.engine.Finish(id)
+		if err == nil {
+			// FR-S7 (раунд 2): завершение во время активного TTS-стрима — стоп
+			// аналогично pause (end-кадр + WS tts_stop); лог — отдельно (finish).
+			s.stopTTSOnAction(id, "finish")
+		}
 	default:
 		writeError(w, http.StatusNotFound, "not_found", "неизвестное действие")
 		return
