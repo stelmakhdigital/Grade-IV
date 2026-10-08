@@ -106,6 +106,7 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 	s.readLoop(id, conn, ctx, ws)
 
 	ws.closeSTTStream() // ADR-007: останавливаем voice /stt/stream
+	ws.closeVADStream() // ADR-002 (2026-10-09): voice /vad/stream
 	s.engine.Detach(id) // FR-S7: обрыв/отключение → пауза
 	s.log.Info("ws: клиент отключился", "session", id)
 }
@@ -150,10 +151,18 @@ type wsSession struct {
 	// (sttStreamDown) — деградация на batch-путь (энергетический VAD + /stt).
 	sttStreamMu    sync.Mutex
 	sttStream      *voicesvc.STTStream
-	sttStreamDown  atomic.Bool  // voice /stt/stream недоступен → batch-путь
+	sttStreamDown  atomic.Bool  // voice /stt/stream недоступен → следующий уровень
 	fallbackWarned atomic.Bool  // Warn + метрика — однократно
 	sttSpeechSince atomic.Int64 // unix-nano начала текущего speech-сегмента (state=true); 0 — тишина
 	sttBarged      atomic.Bool  // barge-in уже сработал на текущем TTS-стриме (reset в beginTTS)
+
+	// Silero VAD-стрим (ADR-002, поправка 2026-10-09): voice /vad/stream —
+	// 2-й уровень цепочки деградации (/stt/stream → /vad/stream → energy VAD).
+	vadStreamMu       sync.Mutex
+	vadStream         *voicesvc.VADStream
+	vadStreamDown     atomic.Bool // voice /vad/stream недоступен → energy-путь
+	vadFallbackWarned atomic.Bool // Warn + метрика — однократно
+	sileroSpeech      atomic.Bool // кандидат говорит по Silero-пути (speech_start…utterance)
 }
 
 // sttStreamFor — ленивое создание стрим-клиента (voice /stt/stream).
@@ -181,6 +190,41 @@ func (w *wsSession) closeSTTStream() {
 	if st != nil {
 		st.Close()
 	}
+}
+
+// closeVADStream — остановка VAD-стрим-клиента при отключении клиента.
+func (w *wsSession) closeVADStream() {
+	w.vadStreamMu.Lock()
+	vs := w.vadStream
+	w.vadStream = nil
+	w.vadStreamMu.Unlock()
+	if vs != nil {
+		vs.Close()
+	}
+}
+
+// vadStreamFor — ленивое создание VAD-стрим-клиента (voice /vad/stream).
+// nil — voice не подключён (energy-режим: VOICE_URL пуст).
+func (w *wsSession) vadStreamFor(s *Server) *voicesvc.VADStream {
+	if s.voice == nil || s.cfg.VoiceURL == "" {
+		return nil
+	}
+	w.vadStreamMu.Lock()
+	defer w.vadStreamMu.Unlock()
+	if w.vadStream == nil {
+		w.vadStream = s.voice.NewVADStream(func(ev voicesvc.VADEvent) {
+			w.onVADStreamEvent(s, ev)
+		})
+	}
+	return w.vadStream
+}
+
+// isSpeaking — кандидат говорит (едино по всем путям): energy VAD (batch
+// last-resort) или Silero-путь (voice /stt/stream, /vad/stream). Nudge не
+// шлём, пока кандидат говорит (см. nudgeLoop). mic-dbg NoiseFloor — только
+// energy-путь; в Silero-пути будет 0/устаревший — допустимо (debug).
+func (w *wsSession) isSpeaking() bool {
+	return w.vad.InSpeech() || w.sileroSpeech.Load()
 }
 
 func (w *wsSession) touch() { atomic.StoreInt64(&w.lastActive, time.Now().UnixNano()) }
@@ -346,8 +390,8 @@ func (s *Server) nudgeLoop(ws *wsSession, ctx context.Context) {
 		if err != nil || snap.Status != models.StatusActive || snap.Stage != models.StageVoice {
 			continue
 		}
-		if ws.busy.Load() || ws.ttsActive.Load() {
-			continue // ход/речь ИИ в процессе — nudge не нужен
+		if ws.busy.Load() || ws.ttsActive.Load() || ws.isSpeaking() {
+			continue // ход/речь ИИ/речь кандидата (в т.ч. Silero-путь) — nudge не нужен
 		}
 		silent := ws.silentS()
 		if silent < s.cfg.SilenceNudgeS {

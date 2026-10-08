@@ -221,6 +221,8 @@ func bargeInReadOne(t *testing.T, conn *websocket.Conn) (typ, who string, fr wsT
 func TestBargeIn_InterruptsTTS(t *testing.T) {
 	ts, _, _, conn, firstSeq := bargeInEnv(t)
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	// Базовая barge-in-метрика (счётчик моносотный: другие тесты могли уже сработать).
+	baseBarge := metricValue(metricsBody(t, ts.URL), "grade_barge_ins_total")
 
 	writePCM := func(pcm []byte) {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -310,14 +312,10 @@ func TestBargeIn_InterruptsTTS(t *testing.T) {
 		t.Fatalf("первый кадр нового TTS-стрима seq=%d (want 0 — seq заново с 0)", newSeq)
 	}
 
-	// (3) метрика barge-in.
-	resp, err := http.Get(ts.URL + "/metrics")
-	if err != nil {
-		t.Fatalf("metrics: %v", err)
-	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if got := string(body); !containsLine(got, "grade_barge_ins_total 1") {
-		t.Fatalf("метрика barge-in: ожидается строка 'grade_barge_ins_total 1' в /metrics")
+	// (3) метрика barge-in: ровно +1 к базовой (счётчик моносотный).
+	body := metricsBody(t, ts.URL)
+	if v := metricValue(body, "grade_barge_ins_total"); v != baseBarge+1 {
+		t.Fatalf("метрика barge-in: %d (want %d = базовая + 1)", v, baseBarge+1)
 	}
 }
 
@@ -826,8 +824,9 @@ func TestSTTStreamFallbackToBatch(t *testing.T) {
 		t.Fatalf("metrics: %v", err)
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if !containsLine(string(body), "grade_stt_stream_fallbacks_total 1") {
-		t.Fatal("нет метрики grade_stt_stream_fallbacks_total 1")
+	// Метрика моносотная (другие тесты уже могли деградировать) — порог ≥ 1.
+	if !metricAtLeast(string(body), "grade_stt_stream_fallbacks_total", 1) {
+		t.Fatal("нет метрики grade_stt_stream_fallbacks_total ≥ 1")
 	}
 }
 

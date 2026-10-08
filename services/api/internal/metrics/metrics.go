@@ -168,6 +168,9 @@ var (
 	// STTStreamFallbacks — деградации стримингового STT на batch-путь
 	// (voice /stt/stream недоступен; ADR-007).
 	STTStreamFallbacks = NewCounter("grade_stt_stream_fallbacks_total", "деградаций стримингового STT на batch-путь")
+	// VADStreamFallbacks — деградации Silero VAD-стрима на energy-путь
+	// (voice /vad/stream недоступен; ADR-002, поправка 2026-10-09).
+	VADStreamFallbacks = NewCounter("grade_vad_stream_fallbacks_total", "деградаций Silero VAD-стрима на energy-путь")
 	// TTSSynth — длительность (с) TTS-синтеза одного предложения: pipeline
 	// параллельного синтеза (очередь #3); обсерв на каждое завершённое предложение.
 	TTSSynth = NewHistogram("grade_ai_tts_synth_seconds", "длительность (с) TTS-синтеза одного предложения")
@@ -181,7 +184,7 @@ func ResultLabel(result string) Labels { return Labels{"result": result} }
 
 type texter interface{ text() string }
 
-var all = []texter{TurnStage, TurnsTotal, LLMStreamErrors, TTSErrors, BargeInsTotal, STTStreamFallbacks, TTSSynth}
+var all = []texter{TurnStage, TurnsTotal, LLMStreamErrors, TTSErrors, BargeInsTotal, STTStreamFallbacks, VADStreamFallbacks, TTSSynth}
 
 // Handler — GET /metrics (Prometheus text format).
 func Handler(w http.ResponseWriter, _ *http.Request) {

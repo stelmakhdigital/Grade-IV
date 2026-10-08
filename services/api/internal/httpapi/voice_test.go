@@ -29,7 +29,8 @@ type mockVoice struct {
 	ttsTexts     []string
 	sttBytes     int
 	ttsPCMSize   int
-	streamBroken bool // true: /stt/stream отвечает 500 (тест fallback на batch)
+	streamBroken bool // true: /stt/stream отвечает 500 (тест fallback на нижние уровни)
+	vadStreamBroken bool // true: /vad/stream отвечает 500 (тест fallback на energy-путь)
 	// Тест параллельного TTS: искусственная задержка синтеза и амплитуда
 	// на предложение (маркер предложения в PCM для проверки порядка вывода).
 	ttsDelay  time.Duration
@@ -43,6 +44,8 @@ func (m *mockVoice) server(t *testing.T) *httptest.Server {
 		switch r.URL.Path {
 		case "/api/v1/stt/stream":
 			m.streamWS(w, r)
+		case "/api/v1/vad/stream":
+			m.vadWS(w, r)
 		case "/api/v1/stt":
 			m.sttCalls++
 			body, _ := readAllLimited(r, 1<<20)
@@ -158,6 +161,56 @@ func (m *mockVoice) streamWS(w http.ResponseWriter, r *http.Request) {
 		}
 		if isSpeech {
 			speechBytes += len(data)
+		}
+	}
+}
+
+// vadWS — мок Silero VAD-стрима (ADR-002, поправка 2026-10-09): бинарные
+// PCM-кадры → state-события (без STT/final — распознавание в api: pre-STT +
+// batch /stt). Энергетический детект: rms > 1000 — речь; тишина 2 кадра
+// (500 мс ≥ pre_silence 400) → pre_silence; 3 кадра (750 мс ≥ end 600) → end.
+func (m *mockVoice) vadWS(w http.ResponseWriter, r *http.Request) {
+	if m.vadStreamBroken {
+		http.Error(w, "vad stream unavailable", http.StatusInternalServerError)
+		return
+	}
+	conn, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	send := func(v map[string]any) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		_ = conn.Write(ctx, websocket.MessageText, mustJSON(v))
+		cancel()
+	}
+	speech, preSent, silFrames := false, false, 0
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		typ, data, err := conn.Read(ctx)
+		cancel()
+		if err != nil || typ != websocket.MessageBinary {
+			return
+		}
+		isSpeech := pcm16RMS(data) > 1000
+		switch {
+		case isSpeech && !speech:
+			speech = true
+			silFrames = 0
+			send(map[string]any{"type": "state", "speech": true})
+		case !isSpeech && speech:
+			silFrames++
+			if silFrames == 2 && !preSent {
+				preSent = true
+				send(map[string]any{"type": "state", "speech": true, "pre_silence": true})
+			}
+			if silFrames >= 3 { // хвост тишины 750 мс (≥ 600) → конец
+				speech = false
+				silFrames = 0
+				preSent = false
+				send(map[string]any{"type": "state", "speech": false})
+			}
 		}
 	}
 }
