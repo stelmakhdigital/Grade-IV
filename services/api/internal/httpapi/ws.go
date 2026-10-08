@@ -219,10 +219,9 @@ func (w *wsSession) vadStreamFor(s *Server) *voicesvc.VADStream {
 	return w.vadStream
 }
 
-// isSpeaking — кандидат говорит (едино по всем путям): energy VAD (batch
-// last-resort) или Silero-путь (voice /stt/stream, /vad/stream). Nudge не
-// шлём, пока кандидат говорит (см. nudgeLoop). mic-dbg NoiseFloor — только
-// energy-путь; в Silero-пути будет 0/устаревший — допустимо (debug).
+// isSpeaking — кандидат говорит по batch-путям (energy VAD last-resort или
+// Silero VAD /vad/stream). Nudge не шлём, пока кандидат говорит (см. nudgeLoop).
+// Стриминговый путь /stt/stream отслеживается отдельно (sttSpeechSince).
 func (w *wsSession) isSpeaking() bool {
 	return w.vad.InSpeech() || w.sileroSpeech.Load()
 }
