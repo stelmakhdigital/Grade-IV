@@ -68,7 +68,7 @@ type wsTTSFrame struct {
 // (до end-кадра), текстовая реплика (ход ИИ с pacing) и первые 2 кадра
 // ответа (ttsActive=true). Возвращает первый seq ответа (каждый поток реплики —
 // seq заново с 0, ADR-001).
-func bargeInEnv(t *testing.T) (ts *httptest.Server, conn *websocket.Conn, firstSeq int) {
+func bargeInEnv(t *testing.T) (ts *httptest.Server, token string, sessionID int64, conn *websocket.Conn, firstSeq int) {
 	t.Helper()
 	tsServer, token, sessionID, m, _ := newVoiceEnv(t)
 	m.ttsPCMSize = 96000 // 3 с аудио = 12 pacing-кадров хода ИИ
@@ -116,7 +116,7 @@ func bargeInEnv(t *testing.T) (ts *httptest.Server, conn *websocket.Conn, firstS
 	if bins < 2 {
 		t.Fatal("TTS-кадры ответа ИИ не пришли (pacing не стартовал)")
 	}
-	return tsServer, conn, firstSeq
+	return tsServer, token, sessionID, conn, firstSeq
 }
 
 // bargeInReadOne — одно WS-сообщение: текст (type/who) или бинарный кадр TTS.
@@ -146,7 +146,7 @@ func bargeInReadOne(t *testing.T, conn *websocket.Conn) (typ, who string, fr wsT
 // (2) реплика кандидата дала transcript/новый ход (новый TTS-стрим, seq с 0);
 // (3) метрика grade_barge_ins_total = 1.
 func TestBargeIn_InterruptsTTS(t *testing.T) {
-	ts, conn, firstSeq := bargeInEnv(t)
+	ts, _, _, conn, firstSeq := bargeInEnv(t)
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	writePCM := func(pcm []byte) {
@@ -252,7 +252,7 @@ func TestBargeIn_InterruptsTTS(t *testing.T) {
 // время TTS прерывание НЕ вызывает: стрим доигрывается до естественного конца
 // (end-кадр на последнем seq), tts_stop нет, нового хода нет.
 func TestBargeIn_ShortUtteranceDoesNotInterrupt(t *testing.T) {
-	_, conn, firstSeq := bargeInEnv(t)
+	_, _, _, conn, firstSeq := bargeInEnv(t)
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
 	writePCM := func(pcm []byte) {
