@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .providers import SAMPLE_RATE, FakeSTT, FakeTTS
-from .stt_stream import build_vad, register_stt_stream
+from .stt_stream import build_vad, register_stt_stream, register_vad_stream
 
 logger = logging.getLogger("voice")
 
@@ -79,6 +79,9 @@ def build_app(stt=None, tts=None, vad=None) -> FastAPI:
     # Стриминговый STT (ADR-007): WS /api/v1/stt/stream — PCM-кадры →
     # state/partial/final (Silero VAD, partial каждые ~500 мс).
     register_stt_stream(app, stt, vad)
+    # VAD-стрим без STT (ADR-002, поправка 2026-10-09): WS /api/v1/vad/stream —
+    # state-события Silero VAD для batch-пути (pre-STT + batch /stt в api).
+    register_vad_stream(app, vad)
 
     @app.post("/api/v1/stt")
     async def stt_endpoint(

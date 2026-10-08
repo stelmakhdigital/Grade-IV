@@ -123,6 +123,13 @@ func (c *Client) NewSTTStream(onEvent func(StreamEvent)) *STTStream {
 	return NewSTTStream(c.baseURL, onEvent)
 }
 
+// NewVADStream — WS-клиент Silero VAD-стрима voice /api/v1/vad/stream
+// (ADR-002, поправка 2026-10-09): PCM-кадры → state-события речи (onEvent);
+// недоступность voice — событие "unavailable" (деградация на energy-путь).
+func (c *Client) NewVADStream(onEvent func(VADEvent)) *VADStream {
+	return NewVADStream(c.baseURL, onEvent)
+}
+
 // Healthy — GET /api/v1/health (health-check).
 func (c *Client) Healthy(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)

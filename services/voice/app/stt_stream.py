@@ -33,15 +33,18 @@ logger = logging.getLogger("grade-voice.stream")
 VAD_THRESHOLD = 0.5          # порог «речь»: prob ≥ 0.5
 VAD_MIN_SILENCE_MS = 600     # тишина ≥ 600 мс после речи → конец реплики (final)
 VAD_MIN_SPEECH_MS = 250      # речь короче 250 мс → всплеск, без final
+VAD_PRE_SILENCE_MS = 400     # тишина ≥ 400 мс в речи (но < min_silence) → pre_end
+                             # (сигнал pre-STT для batch-пути, ADR-002 2026-10-09)
 PARTIAL_INTERVAL_S = 0.5     # partial не чаще раза в 500 мс
 WINDOW = 512                 # окно Silero, сэмплы @ 16 кГц (32 мс)
 PREROLL_SAMPLES = 1600       # pre-roll перед стартом слова (100 мс)
 ENERGY_RMS = 0.005           # энергетический VAD: rms-порог (≈ -46 дБFS)
 
 __all__ = [
-    "VAD_THRESHOLD", "VAD_MIN_SILENCE_MS", "VAD_MIN_SPEECH_MS",
+    "VAD_THRESHOLD", "VAD_MIN_SILENCE_MS", "VAD_MIN_SPEECH_MS", "VAD_PRE_SILENCE_MS",
     "PARTIAL_INTERVAL_S", "WINDOW", "PREROLL_SAMPLES", "ENERGY_RMS",
-    "SileroVAD", "EnergyVAD", "StreamVAD", "build_vad", "register_stt_stream",
+    "SileroVAD", "EnergyVAD", "StreamVAD", "build_vad",
+    "register_stt_stream", "register_vad_stream",
 ]
 
 
@@ -128,14 +131,23 @@ class StreamVAD:
     """Инкрементальная VAD-машина: 512-сэмпловые окна → события речи.
 
     События: ``("start", abs_start)`` / ``("end", abs_start, abs_end)`` —
-    позиции в сэмплах всего потока соединения.
+    позиции в сэмплах всего потока соединения; опционально ``("pre_end",)`` —
+    предварительная тишина (см. ``pre_silence_ms``), один раз за реплику.
     """
 
-    def __init__(self, vad, preroll_samples: int = PREROLL_SAMPLES) -> None:
+    def __init__(self, vad, preroll_samples: int = PREROLL_SAMPLES,
+                 pre_silence_ms: int | None = None) -> None:
         self._vad = vad
         self._min_silence = vad.min_silence_ms * SAMPLE_RATE // 1000
         self._min_speech = vad.min_speech_ms * SAMPLE_RATE // 1000
         self._preroll = preroll_samples
+        # Pre-silence (batch-путь, ADR-002 2026-10-09): None — выключено
+        # (поведение /stt/stream без изменений); иначе — событие pre_end,
+        # когда тишина после речи ≥ pre_silence_ms (но ещё < min_silence_ms).
+        self._pre_silence = (
+            pre_silence_ms * SAMPLE_RATE // 1000 if pre_silence_ms is not None else None
+        )
+        self._pre_emitted = False
         self._rest = np.zeros(0, dtype=np.float32)
         self._total = 0  # сэмплы, обработанные окнами
         self._in_speech = False
@@ -152,6 +164,7 @@ class StreamVAD:
             if not self._in_speech:
                 if p >= self._vad.threshold:
                     self._in_speech = True
+                    self._pre_emitted = False  # pre_end — раз за реплику
                     self._start = max(0, pos - self._preroll)
                     events.append(("start", self._start, 0))
             else:
@@ -160,10 +173,16 @@ class StreamVAD:
                 else:
                     if self._silence_since == 0:
                         self._silence_since = pos
-                    if pos - self._silence_since >= self._min_silence:
+                    gap = pos - self._silence_since
+                    if (self._pre_silence is not None and not self._pre_emitted
+                            and self._pre_silence <= gap < self._min_silence):
+                        self._pre_emitted = True
+                        events.append(("pre_end", self._start, 0))
+                    if gap >= self._min_silence:
                         end = self._silence_since
                         self._in_speech = False
                         self._silence_since = 0
+                        self._pre_emitted = False
                         if end - self._start >= self._min_speech:
                             events.append(("end", self._start, end))
         self._rest = x[nwin * WINDOW:]
@@ -238,3 +257,37 @@ def register_stt_stream(app, stt: STTProvider, vad) -> None:
                     cell["t"] = time.monotonic()
                     snap = bytes(buf)
                     asyncio.get_running_loop().create_task(_do_partial(stt, ws, snap, cell))
+
+
+# --- WS-эндпоинт VAD-стрима (без STT) ---------------------------------------
+
+
+def register_vad_stream(app, vad) -> None:
+    """Регистрирует WS /api/v1/vad/stream (ADR-002, поправка 2026-10-09, вариант 2).
+
+    Batch-путь голосового конвейера: Silero VAD в voice вместо энергетического
+    VAD в Go (CGO_ENABLED=0). Клиент шлёт бинарные кадры PCM16 16 кГц mono
+    (любая длина, ~250 мс); сервер шлёт JSON-события состояния (без STT и
+    partial — распознавание остаётся в api: pre-STT на pre_silence +
+    batch /stt на utterance):
+    - start        → ``{"type":"state","speech":true}``
+    - pre_end      → ``{"type":"state","speech":true,"pre_silence":true}``
+                     (тишина ≥ VAD_PRE_SILENCE_MS, раз за реплику — сигнал pre-STT);
+    - end          → ``{"type":"state","speech":false}`` (тишина ≥ VAD_MIN_SILENCE_MS).
+    """
+
+    @app.websocket("/api/v1/vad/stream")
+    async def vad_stream_endpoint(ws: WebSocket) -> None:
+        await ws.accept()
+        engine = StreamVAD(vad.clone(), pre_silence_ms=VAD_PRE_SILENCE_MS)
+        async for msg in ws.iter_bytes():
+            if len(msg) < 2 or len(msg) % 2:
+                continue
+            samples = np.frombuffer(msg, dtype=np.int16).astype(np.float32) / 32768
+            for kind, _a, _b in engine.feed(samples):
+                if kind == "start":
+                    await _send(ws, {"type": "state", "speech": True})
+                elif kind == "pre_end":
+                    await _send(ws, {"type": "state", "speech": True, "pre_silence": True})
+                elif kind == "end":
+                    await _send(ws, {"type": "state", "speech": False})
