@@ -52,7 +52,7 @@ data/
 FOR_RUN/
 
 # Артефакты агентов (pipeline/memory/скриншоты/секреты) — не коммитятся
-task.md
+task*.md
 memory*
 agents.md
 worker_roles.md
