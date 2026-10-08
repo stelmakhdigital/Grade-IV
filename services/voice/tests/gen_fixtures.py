@@ -3,8 +3,9 @@
 Формат: PCM16 mono 16 кГц, 3 с (96 000 байт). Детерминированно (numpy seed 42),
 идемпотентно: повторный запуск пересоздаёт идентичные файлы.
 
-- speech_honest.pcm — реальная речь нормальной громкости (FOR_RUN/utterance-3s.pcm,
-  как есть — без усиления).
+- speech_honest.pcm — реальная речь нормальной громкости (96 000 байт = 3 с).
+  Источник: сама закоммиченная фикстура (регенерация самодостаточна, FOR_RUN не
+  нужен); при первом генерировании (фикстуры нет) — FOR_RUN/utterance-3s.pcm.
 - speech_quiet.pcm  — та же речь, амплитуда × 0.3 (тихая речь).
 - noise.pcm         — розовый шум, амплитуда ~0.08 (фон).
 - breathing.pcm     — шум 100–150 Гц (нижняя часть полосы 100–300 Гц) с огибающей
@@ -34,10 +35,19 @@ def to_pcm(x: np.ndarray) -> bytes:
     return (x * 32767).astype(np.int16).tobytes()
 
 
-def read_speech() -> np.ndarray:
-    """Реальная речь: FOR_RUN/utterance-3s.pcm (96 000 байт = 3 с), как есть."""
-    raw = np.frombuffer(SRC_SPEECH.read_bytes(), dtype=np.int16).astype(np.float32) / 32768
-    return raw[: SR * DUR_S]
+def get_speech_pcm() -> bytes:
+    """Реальная речь (raw int16, 3 с): сначала из закоммиченной фикстуры
+    (регенерация самодостаточна, FOR_RUN не требуется), при первом
+    генерировании — из FOR_RUN/utterance-3s.pcm. Без перекодировки —
+    speech_honest.pcm остаётся побайтово идентичным источнику (идемпотентно)."""
+    if OUT.joinpath("speech_honest.pcm").exists():
+        return OUT.joinpath("speech_honest.pcm").read_bytes()[: SR * DUR_S * 2]
+    if SRC_SPEECH.exists():
+        return SRC_SPEECH.read_bytes()[: SR * DUR_S * 2]
+    raise FileNotFoundError(
+        "speech_honest.pcm отсутствует и FOR_RUN/utterance-3s.pcm недоступен — "
+        "реальную речь сгенерировать нельзя; закоммичьте fixtures/speech_honest.pcm"
+    )
 
 
 def lowpass(x: np.ndarray, cutoff: float) -> np.ndarray:
@@ -73,8 +83,9 @@ def main() -> None:
     rng = np.random.default_rng(42)
     n = SR * DUR_S
 
-    speech = read_speech()
-    (OUT / "speech_honest.pcm").write_bytes(to_pcm(speech))
+    speech_pcm = get_speech_pcm()
+    (OUT / "speech_honest.pcm").write_bytes(speech_pcm)
+    speech = np.frombuffer(speech_pcm, dtype=np.int16).astype(np.float32) / 32768
     (OUT / "speech_quiet.pcm").write_bytes(to_pcm(speech * 0.3))
 
     noise = pink_noise(n, rng)
