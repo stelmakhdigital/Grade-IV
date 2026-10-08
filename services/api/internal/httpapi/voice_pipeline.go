@@ -156,8 +156,8 @@ func (s *Server) produceOrderedTTS(ws *wsSession, sentences <-chan string, frame
 		prev := ""
 		idx := 0
 		for sentence := range sentences {
-			if stopped(stop) {
-				return // barge-in: не начинаем синтез недиспетчеризованных
+			if stopped(stop) || ws.sessStopped.Load() {
+				return // barge-in / pause-finish: не начинаем синтез недиспетчеризованных
 			}
 			gap := 0
 			if prev != "" {
@@ -229,8 +229,8 @@ func (s *Server) produceOrderedTTS(ws *wsSession, sentences <-chan string, frame
 }
 
 // pushTTSJob — кадры предложения (тише-пауза + PCM) в frames. select на stop
-// (barge-in) и ws.ctx (конец сессии): при любом из них перестаёт слать —
-// false (end-кадр шлёт paceFrames).
+// (barge-in), sessStopped (pause/finish, FR-S7) и ws.ctx (конец сессии): при
+// любом из них перестаёт слать — false (end-кадр шлёт paceFrames).
 func pushTTSJob(ws *wsSession, frames chan<- []byte, stop <-chan struct{}, gap int, pcm []byte) bool {
 	silence := make([]byte, ttsChunkBytes)
 	send := func(b []byte) bool {
@@ -244,11 +244,17 @@ func pushTTSJob(ws *wsSession, frames chan<- []byte, stop <-chan struct{}, gap i
 		}
 	}
 	for g := 0; g < gap; g++ {
+		if ws.sessStopped.Load() {
+			return false
+		}
 		if !send(silence) {
 			return false
 		}
 	}
 	for off := 0; off < len(pcm); off += ttsChunkBytes {
+		if ws.sessStopped.Load() {
+			return false
+		}
 		end := off + ttsChunkBytes
 		if end > len(pcm) {
 			end = len(pcm)
@@ -306,8 +312,10 @@ func (s *Server) paceFrames(ws *wsSession, turnStart time.Time, frames chan []by
 		if ws.ctx.Err() != nil {
 			return firstAt, endAt, false
 		}
-		if stopped(stop) {
-			// barge-in: прерываемый стрим завершаем end-кадром; PCM больше не шлём.
+		if stopped(stop) || ws.sessStopped.Load() {
+			// barge-in / pause-finish (FR-S7): прерываемый стрим завершаем
+			// end-кадром (если кадры уже уходили); PCM больше не шлём (tts_stop
+			// клиенту отправлен в stopTTSOnAction).
 			if sentAny {
 				s.sendTTSFrame(ws, seq, silence, true)
 				endAt = time.Now()
@@ -385,16 +393,20 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 	if s.voice == nil || strings.TrimSpace(text) == "" {
 		return
 	}
-	sentences := splitSentences(text)
 	stop := ws.beginTTS() // barge-in: стрим можно прервать кандидатом
 	defer ws.endTTS(stop)
+
+	// Гейт по кадру: barge-in / pause-finish (FR-S7: sessStopped) / конец сессии.
+	audioOK := func() bool { return ws.ctx.Err() == nil && !stopped(stop) && !ws.sessStopped.Load() }
+
+	sentences := splitSentences(text)
 
 	seq := 0
 	sentAny := false                       // уходил ли хоть один кадр (для финального end-кадра)
 	silence := make([]byte, ttsChunkBytes) // 250 мс тишины
 	for i, sentence := range sentences {
-		if ws.ctx.Err() != nil || stopped(stop) {
-			return // barge-in: кадры больше не шлём (tts_stop уже ушёл)
+		if !audioOK() {
+			return // barge-in / pause-finish: кадры больше не шлём (tts_stop уже ушёл)
 		}
 		pcm, err := s.voice.TTS(ws.ctx, prepareTTS(sentence))
 		if err != nil {
@@ -403,7 +415,7 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 			continue
 		}
 		for off := 0; off < len(pcm); off += ttsChunkBytes {
-			if ws.ctx.Err() != nil || stopped(stop) {
+			if !audioOK() {
 				return
 			}
 			end := off + ttsChunkBytes
@@ -421,7 +433,7 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 				gap = 2
 			}
 			for g := 0; g < gap; g++ {
-				if ws.ctx.Err() != nil || stopped(stop) {
+				if !audioOK() {
 					return
 				}
 				s.sendTTSFrame(ws, uint16(seq), silence, false)
@@ -431,8 +443,8 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 	}
 	// Финальный кадр с end-флагом: чистый хвост (тишина 250 мс) и гарантия
 	// остановки плеера. Только если реплики реально озвучивались и стрим не
-	// был прерван barge-in (клиент уже получил tts_stop).
-	if sentAny && ws.ctx.Err() == nil && !stopped(stop) {
+	// был прерван barge-in/pause-finish (клиент уже получил tts_stop).
+	if sentAny && ws.ctx.Err() == nil && !stopped(stop) && !ws.sessStopped.Load() {
 		s.sendTTSFrame(ws, uint16(seq), silence, true)
 	}
 }

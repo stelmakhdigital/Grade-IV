@@ -131,6 +131,13 @@ type wsSession struct {
 	// остановлен (кандидат прервал речь ИИ).
 	ttsMu   sync.Mutex
 	ttsStop chan struct{}
+	// sessStopped — session-level стоп TTS (FR-S7, раунд 2): ставится при
+	// pause/finish, сбрасывается при resume. Все точки, отправляющие TTS-кадры
+	// (paceFrames/streamAIAudio/pushTTSJob/диспетчер/beginTTS), его проверяют:
+	// после установки новые кадры не уходят, текущий стрим завершается end-кадром
+	// (если кадры уже уходили) + WS tts_stop. Закрывает гонку «пауза в LLM-фазе»:
+	// beginTTS при флаге возвращает УЖЕ ЗАКРЫТЫЙ канал — стрим не стартует.
+	sessStopped atomic.Bool // pause/finish: TTS-кадры не шлём (сброс — resume)
 	// Pre-STT (voice_pipeline.go): предварительное распознавание при первой
 	// тишине — перекрывает VAD-хвост, экономит время STT.
 	preSTTActive atomic.Bool  // pre-STT запущен (на текущий буфер)
@@ -192,26 +199,59 @@ func (s *Server) wsUnregister(id int64) {
 	s.wsMu.Unlock()
 }
 
-// stopTTSOnPause — pause во время активного TTS-стрима: barge-in-подобная остановка
-// (stop-канал: paceFrames/streamAIAudio завершают поток end-кадром и перестают
-// шлють PCM, воркеры синтеза не начинают недиспетчеризованные предложения) +
-// WS tts_stop (клиент останавливает воспроизведение).
-func (s *Server) stopTTSOnPause(id int64) {
+// stopTTSOnAction — pause/finish (FR-S7, раунд 2): session-level стоп TTS.
+// (1) ставит sessStopped — все шлющие TTS-кадры (paceFrames/streamAIAudio/
+// pushTTSJob/диспетчер/beginTTS) его проверяют: новые кадры не уходят, beginTTS
+// вернёт уже закрытый канал (гонка «пауза в LLM-фазе» закрыта);
+// (2) останавливает активный стрим barge-in-подобно (stop-канал: стрим
+// завершается end-кадром, воркеры синтеза не начинают недиспетчеризованные
+// предложения);
+// (3) WS tts_stop (клиент останавливает воспроизведение) — всегда, даже если
+// активного стрима нет (TTS ещё не начался, но ход уже прошёл статус-гард).
+// Вызывается после успешного engine.Pause/Finish; при resume флаг сбрасывается.
+func (s *Server) stopTTSOnAction(id int64, action string) {
 	s.wsMu.Lock()
 	ws := s.wsSessions[id]
 	s.wsMu.Unlock()
-	if ws == nil || !ws.stopTTS() {
+	if ws == nil {
 		return
 	}
-	s.log.Info("pause: активный TTS-стрим остановлен", "session", id)
+	ws.sessStopped.Store(true)
+	wasActive := ws.stopTTS()
+	s.log.Info(action+": session-level стоп TTS установлен", "session", id, "active_stream", wasActive)
 	s.engine.SendTo(id, map[string]any{"type": "tts_stop"})
+}
+
+// wsSessionFor — живое WS-соединение сессии из реестра (nil — не подключено).
+func (s *Server) wsSessionFor(id int64) *wsSession {
+	s.wsMu.Lock()
+	ws := s.wsSessions[id]
+	s.wsMu.Unlock()
+	return ws
+}
+
+// resetSessionStopped — resume (FR-S7, раунд 2): сброс session-level стопа TTS.
+// nil-безопасно (клиент не подключён — нового соединения будет своё wsSession).
+func (w *wsSession) resetSessionStopped() {
+	if w != nil {
+		w.sessStopped.Store(false)
+	}
 }
 
 // beginTTS — регистрация начала TTS-стрима (заменяет текущий, если был):
 // возвращает stop-канал, который наблюдает шлющий кадры; ставит ttsActive.
+// Session-level стоп (sessStopped, pause/finish): возвращает УЖЕ ЗАКРЫТЫЙ
+// канал и стрим НЕ регистрирует — кадров не будет (гонка «пауза в LLM-фазе»):
+// paceFrames/streamAIAudio видят closed-stop сразу и уходят без кадров
+// (tts_stop клиенту уже отправлен в stopTTSOnAction).
 func (w *wsSession) beginTTS() <-chan struct{} {
 	w.ttsMu.Lock()
 	defer w.ttsMu.Unlock()
+	if w.sessStopped.Load() {
+		c := make(chan struct{})
+		close(c)
+		return c
+	}
 	if w.ttsStop != nil {
 		close(w.ttsStop)
 	}

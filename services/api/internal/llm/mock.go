@@ -5,14 +5,25 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // MockProvider — детерминированный провайдер для dev без LLM-узла и CI (ADR-005).
 // Отвечает эхо-шаблоном; все запросы логируются (тесты проверяют промпты).
 type MockProvider struct {
-	mu      sync.Mutex
-	calls   []Request
-	respond func(req Request) (string, error) // подмена в тестах
+	mu             sync.Mutex
+	calls          []Request
+	respond        func(req Request) (string, error) // подмена в тестах
+	streamReqDelay time.Duration                     // тесты: задержка ChatStream (LLM-фаза)
+}
+
+// SetStreamReqDelay — искусственная задержка ChatStream ДО возврата канала
+// (тесты: моделирование LLM-фазы — медленный запрос до первого байта; окно,
+// в котором ход прошёл статус-гард, но TTS ещё не начался).
+func (m *MockProvider) SetStreamReqDelay(d time.Duration) {
+	m.mu.Lock()
+	m.streamReqDelay = d
+	m.mu.Unlock()
 }
 
 // NewMockProvider — провайдер по умолчанию (эхо-ответ).
@@ -52,8 +63,19 @@ func (m *MockProvider) Chat(_ context.Context, req Request) (Response, error) {
 	return Response{Content: fmt.Sprintf("[mock-интервьюер] принял реплику: %s", last)}, nil
 }
 
-// ChatStream — стриминг поверх Chat: весь ответ одной фразой в канал.
+// ChatStream — стриминг поверх Chat: весь ответ одной фразой в канал
+// (SetStreamReqDelay: искусственная задержка запроса до первого байта — тесты LLM-фазы).
 func (m *MockProvider) ChatStream(ctx context.Context, req Request) (<-chan string, error) {
+	m.mu.Lock()
+	delay := m.streamReqDelay
+	m.mu.Unlock()
+	if delay > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
 	resp, err := m.Chat(ctx, req)
 	if err != nil {
 		return nil, err
