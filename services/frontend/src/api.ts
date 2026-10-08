@@ -171,6 +171,16 @@ export function listEvents(id: number): Promise<SessionEvent[]> {
   return request<SessionEvent[]>(`/sessions/${id}/events`, { auth: true });
 }
 
+/** Пауза сессии (POST /sessions/{id}/pause, FR-S7): тарификация останавливается. */
+export function pauseSession(id: number): Promise<Session> {
+  return request<Session>(`/sessions/${id}/pause`, { method: 'POST', auth: true });
+}
+
+/** Возобновление сессии с паузы (POST /sessions/{id}/resume, FR-S7). */
+export function resumeSession(id: number): Promise<Session> {
+  return request<Session>(`/sessions/${id}/resume`, { method: 'POST', auth: true });
+}
+
 /** Live-Code: запуск тестов решения (POST /sessions/{id}/runs, §4.4). */
 export function runTests(
   id: number,

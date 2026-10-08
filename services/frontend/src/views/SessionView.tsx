@@ -31,7 +31,11 @@ export function SessionView({ id }: { id: number }) {
     error,
     micLevelRef,
     live,
+    paused,
+    pauseBusy,
     toggleMic,
+    pause,
+    resume,
     onStageAction,
     onFinish,
   } = useVoiceSession(id);
@@ -64,7 +68,7 @@ export function SessionView({ id }: { id: number }) {
             Интервью: {session.grade} / {session.stack}
           </h1>
           <p className="muted small">
-            {user?.email} · <span className={`status ${session.status}`}>{statusLabel(session.status)}</span>
+            {user?.email} · <span className={`status ${paused ? 'paused' : session.status}`}>{statusLabel(paused ? 'paused' : session.status)}</span>
             {live && remainingS !== null && (
               <span data-testid="timer"> · осталось {formatClock(remainingS)}</span>
             )}
@@ -74,6 +78,28 @@ export function SessionView({ id }: { id: number }) {
           </p>
         </div>
         <div className="head-actions">
+          {live && !paused && (
+            <button
+              type="button"
+              className="btn ghost small"
+              onClick={() => void pause()}
+              data-testid="pause-btn"
+              disabled={pauseBusy}
+            >
+              Пауза
+            </button>
+          )}
+          {live && paused && (
+            <button
+              type="button"
+              className="btn primary small"
+              onClick={() => void resume()}
+              data-testid="resume-btn"
+              disabled={pauseBusy}
+            >
+              Продолжить
+            </button>
+          )}
           {live && (
             <button type="button" className="btn ghost small" onClick={onFinish}>
               Завершить интервью
@@ -82,6 +108,13 @@ export function SessionView({ id }: { id: number }) {
           <a className="btn ghost small" href="#/">В кабинет</a>
         </div>
       </header>
+
+      {live && paused && (
+        <div className="card notice" role="status" data-testid="paused-banner">
+          <strong>Сессия на паузе</strong> — время не тарифицируется.
+          Нажмите «Продолжить», чтобы вернуться к интервью.
+        </div>
+      )}
 
       {live && (
         <section className="card voice-panel" aria-label="Голосовая сессия">
@@ -99,7 +132,7 @@ export function SessionView({ id }: { id: number }) {
                 Микрофон молчит — проверьте устройство, мьют и разрешения браузера.
               </span>
             )}
-            {mic !== 'running' && mic !== 'denied' && mic !== 'muted' && stage === 'voice' && wsState === 'open' && (
+            {mic !== 'running' && mic !== 'denied' && mic !== 'muted' && stage === 'voice' && wsState === 'open' && !paused && (
               <span className="form-error" role="alert">
                 Микрофон выключен — ИИ вас не слышит. Нажмите «Включить микрофон».
               </span>
@@ -150,7 +183,7 @@ export function SessionView({ id }: { id: number }) {
               className={mic === 'running' || mic === 'muted' ? 'btn danger' : 'btn primary'}
               onClick={() => void toggleMic()}
               data-testid="mic-toggle"
-              disabled={wsState !== 'open'}
+              disabled={wsState !== 'open' || paused}
             >
               {mic === 'running' || mic === 'muted' ? 'Выключить микрофон' : 'Включить микрофон'}
             </button>
