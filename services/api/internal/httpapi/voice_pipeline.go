@@ -38,6 +38,11 @@ const (
 	// предложение N отправляется в pacing, следующие TTSParallelism-1 уже
 	// синтезируются (voice /tts stateless — параллельные запросы OK, ADR-008).
 	TTSParallelism = 3
+	// MIN_CLAUSE_CHARS — минимальная длина части (байты) для клиуз-дробления
+	// (клиуза-уровневая диспетчизация TTS, T-20261008185701): части короче
+	// порога не дробятся по «,»/«;»/«:»/«—» — короткие предложения уходят
+	// целиком, длинные — клиузами (ранний запуск TTS до конца предложения).
+	MIN_CLAUSE_CHARS = 48
 )
 
 // runCandidateTurn — ход кандидата: событие + transcript, ответ ИИ (SSE-стрим),
@@ -159,13 +164,7 @@ func (s *Server) produceOrderedTTS(ws *wsSession, sentences <-chan string, frame
 			if stopped(stop) || ws.sessStopped.Load() {
 				return // barge-in / pause-finish: не начинаем синтез недиспетчеризованных
 			}
-			gap := 0
-			if prev != "" {
-				gap = 1
-				if strings.HasSuffix(prev, "?") || strings.HasSuffix(prev, "!") {
-					gap = 2
-				}
-			}
+			gap := ttsGap(prev) // «?/!» → 2, «.»/«...» → 1, «,»/«;»/«:»/«—» → 0
 			prev = sentence
 			idx++
 			jobs <- ttsJob{idx: idx, gap: gap, text: sentence}
@@ -266,9 +265,11 @@ func pushTTSJob(ws *wsSession, frames chan<- []byte, stop <-chan struct{}, gap i
 	return true
 }
 
-// splitDeltas — LLM-стрим → полные предложения (TTS) + полный текст (ai_text).
-// Предложение считается готовым, когда по логике splitSentences после него
-// начинается новое; остаток — по завершении стрима.
+// splitDeltas — LLM-стрим → готовые части для TTS + полный текст (ai_text).
+// Клиуза-уровневая диспетчизация (T-20261008185701): часть считается готовой,
+// когда по логике splitForTTS после неё начинается новая (предложение или
+// клиуза длинного предложения, ≥ MIN_CLAUSE_CHARS); остаток — по завершении
+// стрима.
 func splitDeltas(start time.Time, deltas <-chan string, sentences chan<- string, fullText chan<- string) {
 	var full, pending string
 	for d := range deltas {
@@ -277,13 +278,11 @@ func splitDeltas(start time.Time, deltas <-chan string, sentences chan<- string,
 		}
 		full += d
 		pending += d
-		parts := splitSentences(pending)
-		if len(parts) > 1 {
-			for _, p := range parts[:len(parts)-1] {
-				sentences <- p
-			}
-			pending = parts[len(parts)-1]
+		parts, tail := splitForTTSStreaming(pending)
+		for _, p := range parts {
+			sentences <- p
 		}
+		pending = tail // открытый хвост (raw: пробелы не теряются)
 	}
 	if p := strings.TrimSpace(pending); p != "" {
 		sentences <- p
@@ -426,12 +425,11 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 			seq++
 			sentAny = true
 		}
-		// Пауза между предложениями (не ставим после последнего).
+		// Пауза между частями (не ставим после последнего): «?/!» → 2 (500 мс),
+		// «.»/«...» → 1 (250 мс), «,»/«;»/«:»/«—» → 0 (клиузы одной фразы
+		// играют подряд, T-20261008185701).
 		if i < len(sentences)-1 {
-			gap := 1
-			if strings.HasSuffix(sentence, "?") || strings.HasSuffix(sentence, "!") {
-				gap = 2
-			}
+			gap := ttsGap(sentence)
 			for g := 0; g < gap; g++ {
 				if !audioOK() {
 					return
@@ -454,9 +452,21 @@ func (s *Server) streamAIAudio(ws *wsSession, text string) {
 // (лат/кирл) или в конце текста — русские аббревиатуры («т.д.», «т.п.») с
 // малой буквой не дробят; многоточие «...» — разрыв.
 func splitSentences(text string) []string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil
+	parts, tail := splitSentencesTail(text)
+	if p := strings.TrimSpace(tail); p != "" {
+		parts = append(parts, p)
+	}
+	return parts
+}
+
+// splitSentencesTail — то же, что splitSentences, но возвращает также ОТКРЫТЫЙ
+// хвост — текст после последней границы БЕЗ обрезки (raw). splitDeltas
+// приписывает к нему токены: обрезка (TrimSpace) съела бы хвостовые/начальные
+// пробелы и склеила слова («Отвечу» + «коротко » → «Отвечукоротко»), поэтому
+// сканирование идёт по raw-тексту.
+func splitSentencesTail(text string) ([]string, string) {
+	if strings.TrimSpace(text) == "" {
+		return nil, text // только пробелы — хвост как есть (токены припишутся)
 	}
 	var parts []string
 	start := 0
@@ -491,8 +501,128 @@ func splitSentences(text string) []string {
 			flush(i + 1)
 		}
 	}
-	flush(len(text))
+	return parts, text[start:]
+}
+
+// splitForTTS — разбивка на части для TTS-диспетчизации: предложения
+// (splitSentences) + дополнительно клиузы длинных частей (≥ MIN_CLAUSE_CHARS)
+// по границам «,» «;» «:» «—» (клиуза-уровневая диспетчизация, T-20261008185701).
+// Граница остаётся в конце клиузы; завершитель предложения — в последнем
+// клиузе. Короткие предложения не дробятся. Семантика splitSentences
+// сохранена (она используется отдельно — greeting/streamAIAudio, тесты).
+func splitForTTS(text string) []string {
+	parts, tail := splitForTTSStreaming(text)
+	if p := strings.TrimSpace(tail); p != "" {
+		parts = append(parts, p)
+	}
 	return parts
+}
+
+// splitForTTSStreaming — text → ЗАКРЫТЫЕ части для TTS + открытый хвост (raw,
+// без обрезки — см. splitSentencesTail). Все предложения в sents закрыты
+// (дробим в клиузы); открытый хвост (tailSent) — тоже дробим, но последняя
+// открытая клиуза остаётся хвостом. splitDeltas: закрытые части → канал,
+// хвост — остаётся pending (накопление до следующих границ).
+func splitForTTSStreaming(text string) ([]string, string) {
+	sents, tailSent := splitSentencesTail(text)
+	var parts []string
+	for _, s := range sents {
+		cl, tail := splitClausesWithTail(s)
+		// Завершитель предложения не является границей клиуз — последний
+		// клиуз закрытого предложения добирается из хвоста.
+		if p := strings.TrimSpace(tail); p != "" {
+			cl = append(cl, p)
+		}
+		if len(cl) == 0 {
+			cl = []string{s} // границ не было — предложение целиком
+		}
+		parts = append(parts, cl...)
+	}
+	cl, tail := splitClausesWithTail(tailSent)
+	parts = append(parts, cl...)
+	return parts, tail
+}
+
+// splitClauses — делит часть (предложение или открытую последнюю) на клиузы
+// по «,» «;» «:» «—», если длина ≥ MIN_CLAUSE_CHARS. Граница — в конце клиузы;
+// «:» внутри чисел («12:30») не дробит. Часть без границ — как есть (одна часть).
+func splitClauses(part string) []string {
+	out, tail := splitClausesWithTail(part)
+	if p := strings.TrimSpace(tail); p != "" {
+		out = append(out, p)
+	}
+	return out
+}
+
+// splitClausesWithTail — то же, что splitClauses, но возвращает закрытые
+// клиузы (без последней открытой) + открытый хвост (raw, без обрезки).
+func splitClausesWithTail(part string) ([]string, string) {
+	if part == "" {
+		return nil, ""
+	}
+	if len(part) < MIN_CLAUSE_CHARS {
+		return nil, part
+	}
+	var out []string
+	start := 0
+	for i := 0; i < len(part); i++ {
+		r, size := utf8.DecodeRuneInString(part[i:])
+		isColon := false
+		if r == ':' {
+			// «12:30» не дробим: «:» между цифрами — часть числа.
+			digitBefore := i > 0 && part[i-1] >= '0' && part[i-1] <= '9'
+			digitAfter := i+size < len(part) && part[i+size] >= '0' && part[i+size] <= '9'
+			isColon = !(digitBefore && digitAfter)
+		}
+		if r == ',' || r == ';' || r == '—' || isColon {
+			c := strings.TrimSpace(part[start : i+size])
+			switch {
+			case c == "":
+				start = i + size // фрагмент из одних пробелов — сбрасываем
+			case !hasWordChar(c):
+				// клиуза без букв (одна граница, «—»): в TTS не идёт,
+				// граница остаётся в начале следующего фрагмента
+				start = i
+			default:
+				out = append(out, c)
+				start = i + size
+			}
+		}
+	}
+	return out, part[start:]
+}
+
+// hasWordChar — есть ли в s хотя бы одна буква/цифра (кирл/лат/цифры):
+// фрагмент только из знаков препинания (например, одно «—») не отправляется
+// в TTS отдельной частью.
+func hasWordChar(s string) bool {
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			(r >= 0x0400 && r <= 0x04FF) {
+			return true
+		}
+	}
+	return false
+}
+
+// ttsGap — число тише-кадров (250 мс) перед частью TTS по завершайющему знаку
+// ПРЕДЫДУЩЕЙ части (клиуза-уровневая диспетчизация, T-20261008185701):
+// «?/!» → 2 (500 мс), «.»/«...» → 1 (250 мс), «,»/«;»/«:»/«—» → 0
+// (клиузы одной фразы играют подряд, без тише-кадров).
+func ttsGap(prev string) int {
+	if prev == "" {
+		return 0
+	}
+	switch {
+	case strings.HasSuffix(prev, "?"), strings.HasSuffix(prev, "!"):
+		return 2
+	case strings.HasSuffix(prev, "."):
+		return 1
+	case strings.HasSuffix(prev, ","), strings.HasSuffix(prev, ";"),
+		strings.HasSuffix(prev, ":"), strings.HasSuffix(prev, "—"):
+		return 0
+	}
+	return 1 // без завершителя (хвост оборванного стрима) — консервативно
 }
 
 // isUpperNext — следующий после индекса i символ — заглавная (лат/кирл).
