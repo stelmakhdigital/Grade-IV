@@ -91,6 +91,8 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 	vadCfg.PreSilenceMS = s.cfg.VADPreSilenceMS
 	ws := &wsSession{id: id, ctx: ctx, vad: vad.New(vadCfg)}
 	ws.touch()
+	s.wsRegister(id, ws) // реестр: pause остановит активный TTS-стрим (FR-S7)
+	defer s.wsUnregister(id)
 
 	// Первая реплика ИИ: кандидат ещё не говорил и ИИ не приветствовал (ai_utterance).
 	// session_created/события движка в списке — есть всегда, поэтому смотрим транскрипт.
@@ -175,6 +177,35 @@ func (w *wsSession) closeSTTStream() {
 }
 
 func (w *wsSession) touch() { atomic.StoreInt64(&w.lastActive, time.Now().UnixNano()) }
+
+// wsRegister — регистрация живого WS-соединения в реестре Server (1 сессия — 1 соединение).
+func (s *Server) wsRegister(id int64, ws *wsSession) {
+	s.wsMu.Lock()
+	s.wsSessions[id] = ws
+	s.wsMu.Unlock()
+}
+
+// wsUnregister — снятие WS-соединения из реестра.
+func (s *Server) wsUnregister(id int64) {
+	s.wsMu.Lock()
+	delete(s.wsSessions, id)
+	s.wsMu.Unlock()
+}
+
+// stopTTSOnPause — pause во время активного TTS-стрима: barge-in-подобная остановка
+// (stop-канал: paceFrames/streamAIAudio завершают поток end-кадром и перестают
+// шлють PCM, воркеры синтеза не начинают недиспетчеризованные предложения) +
+// WS tts_stop (клиент останавливает воспроизведение).
+func (s *Server) stopTTSOnPause(id int64) {
+	s.wsMu.Lock()
+	ws := s.wsSessions[id]
+	s.wsMu.Unlock()
+	if ws == nil || !ws.stopTTS() {
+		return
+	}
+	s.log.Info("pause: активный TTS-стрим остановлен", "session", id)
+	s.engine.SendTo(id, map[string]any{"type": "tts_stop"})
+}
 
 // beginTTS — регистрация начала TTS-стрима (заменяет текущий, если был):
 // возвращает stop-канал, который наблюдает шлющий кадры; ставит ttsActive.
@@ -440,6 +471,10 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage, ws *wsSession) {
 			return
 		}
 		text := strings.TrimSpace(p.Text)
+		// Пауза/завершение: реплики не обрабатываются (FR-S7) — тихо, как при busy-гейте.
+		if snap, err := s.engine.Snapshot(id); err != nil || snap.Status != models.StatusActive {
+			return
+		}
 		// Конвейер хода (WP-5/ADR-002): событие + transcript → LLM → ai_text → TTS.
 		// Асинхронно: ход занимает до ~3 с (LLM + TTS-pacing), readLoop должен
 		// продолжать читать PCM (barge-in: микрофон слушается, пока ИИ говорит).
