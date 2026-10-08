@@ -6,7 +6,9 @@ import {
   listSessions,
   login,
   me,
+  pauseSession,
   register,
+  resumeSession,
   runTests,
   setToken,
   getToken,
@@ -88,6 +90,44 @@ describe('api-клиент (WP-7)', () => {
     fetchMock.mockResolvedValue(jsonResponse(200, [{ seq: 1, kind: 'finished' }]));
     await listEvents(7);
     expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/sessions/7/events');
+  });
+
+  it('pauseSession/resumeSession: POST /sessions/{id}/pause|resume, DTO и Bearer', async () => {
+    setToken('tok123');
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { id: 7, status: 'paused', paused_at: '2026-09-14T10:05:00Z' }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const s = await pauseSession(7);
+    expect(s.status).toBe('paused');
+    const [pauseUrl, pauseOpts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(pauseUrl).toBe('/api/v1/sessions/7/pause');
+    expect(pauseOpts.method).toBe('POST');
+    expect((pauseOpts.headers as Record<string, string>)['Authorization']).toBe('Bearer tok123');
+
+    fetchMock.mockResolvedValue(jsonResponse(200, { id: 7, status: 'active' }));
+    const r = await resumeSession(7);
+    expect(r.status).toBe('active');
+    const [resumeUrl, resumeOpts] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(resumeUrl).toBe('/api/v1/sessions/7/resume');
+    expect(resumeOpts.method).toBe('POST');
+  });
+
+  it('pauseSession: код из тела -> ApiError (статус + code + msg)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(409, { code: 'invalid_state', msg: 'сессия не активна' })),
+    );
+    const err = await pauseSession(7).catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(409);
+    expect(err.code).toBe('invalid_state');
+    expect(err.message).toBe('сессия не активна');
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fail')));
+    const netErr = await resumeSession(7).catch((e) => e);
+    expect(netErr).toBeInstanceOf(ApiError);
+    expect(netErr.code).toBe('network');
   });
 
   it('runTests: POST /sessions/{id}/runs {files, action, task_id}', async () => {

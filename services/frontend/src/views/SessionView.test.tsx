@@ -88,15 +88,27 @@ const EVENTS = [
   { seq: 3, ts: '2026-09-14T10:01:10Z', kind: 'ai_utterance', data: { text: 'Расскажите о себе' } },
 ];
 
-function mockApi(opts: { session?: unknown; events?: unknown; report?: unknown } = {}) {
-  return vi.fn(async (url: string) => {
+/** fetch-мок с доступным .mock.calls (для ассертов POST-вызовов). */
+type FetchMock = {
+  (url: string, init?: RequestInit): Promise<Response>;
+  mock: { calls: unknown[][] };
+};
+
+function mockApi(opts: { session?: unknown; events?: unknown; report?: unknown } = {}): FetchMock {
+  return vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/auth/me')) return json(200, ME);
+    if (init?.method === 'POST' && url.endsWith('/sessions/9/pause')) {
+      return json(200, { ...(opts.session ?? S_ACTIVE), status: 'paused', paused_at: '2026-09-14T10:10:00Z' });
+    }
+    if (init?.method === 'POST' && url.endsWith('/sessions/9/resume')) {
+      return json(200, opts.session ?? S_ACTIVE);
+    }
     if (url.endsWith('/sessions/9')) return json(200, opts.session ?? S_ACTIVE);
     if (url.includes('/events')) return json(200, opts.events ?? EVENTS);
     if (url.includes('/report')) return json(200, opts.report ?? REPORT_MIN);
     if (url.includes('/sessions')) return json(200, []);
     return json(404, {});
-  }) as unknown as typeof fetch;
+  }) as unknown as FetchMock;
 }
 
 function renderSession(fetchMock: unknown) {
@@ -279,6 +291,63 @@ describe('SessionView (WP-8)', () => {
       'Схема: хорошо учтён кэш',
     );
   }, 15000);
+
+  it('пауза (FR-S7): активная сессия — «Пауза», клик → POST /pause + баннер + «Продолжить»', async () => {
+    const fetchMock = mockApi();
+    renderSession(fetchMock);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const fake = FakeWebSocket.instances[0];
+    await flush();
+
+    // до паузы: баннера нет, есть кнопка «Пауза» и нет «Продолжить»
+    expect(screen.queryByTestId('paused-banner')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Продолжить' })).toBeNull();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Пауза' }));
+
+    // вызов pauseSession: POST /api/v1/sessions/9/pause
+    await waitFor(() => {
+      const call = (fetchMock.mock.calls as unknown[][]).find((c) =>
+        String(c[0]).endsWith('/sessions/9/pause'),
+      );
+      expect(call).toBeDefined();
+      expect((call?.[1] as RequestInit).method).toBe('POST');
+    });
+
+    // paused-состояние: баннер, «Продолжить», статуса «пауза» в шапке
+    const banner = await screen.findByTestId('paused-banner');
+    expect(banner).toHaveTextContent('время не тарифицируется');
+    expect(await screen.findByRole('button', { name: 'Продолжить' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Пауза' })).toBeNull());
+    expect(await screen.findByText('пауза')).toBeInTheDocument();
+    // WS не переподключался (один и тот же инстанс), таймер жив
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    fake.deliver(JSON.stringify({ type: 'timer', remaining_s: 2900 }));
+    expect(await screen.findByTestId('timer')).toHaveTextContent('48:20');
+
+    // «Продолжить» → POST /resume, пауза снята
+    await user.click(screen.getByRole('button', { name: 'Продолжить' }));
+    await waitFor(() => {
+      const call = (fetchMock.mock.calls as unknown[][]).find((c) =>
+        String(c[0]).endsWith('/sessions/9/resume'),
+      );
+      expect(call).toBeDefined();
+      expect((call?.[1] as RequestInit).method).toBe('POST');
+    });
+    await waitFor(() => expect(screen.queryByTestId('paused-banner')).toBeNull());
+    expect(await screen.findByRole('button', { name: 'Пауза' })).toBeInTheDocument();
+  }, 10000);
+
+  it('пауза (FR-S7): перезагрузка страницы на paused-сессии — баннер и «Продолжить»', async () => {
+    const S_PAUSED = { ...S_ACTIVE, status: 'paused', paused_at: '2026-09-14T10:10:00Z' };
+    renderSession(mockApi({ session: S_PAUSED }));
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    expect(await screen.findByTestId('paused-banner')).toHaveTextContent('время не тарифицируется');
+    expect(screen.getByRole('button', { name: 'Продолжить' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Пауза' })).toBeNull();
+    // микрофон на паузе не включается: кнопка «Включить микрофон» недоступна
+    expect(screen.getByTestId('mic-toggle')).toBeDisabled();
+  }, 10000);
 
   it('stage_action: «К Live-Code» шлёт ui-событие', async () => {
     renderSession(mockApi({ session: S_ACTIVE }));
