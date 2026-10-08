@@ -18,6 +18,7 @@ import (
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/voicesvc"
 	"nhooyr.io/websocket"
 )
 
@@ -154,7 +155,9 @@ func consumeGreeting(t *testing.T, conn *websocket.Conn) {
 	t.Fatal("TTS-приветствие не завершено end-кадром")
 }
 
-// pauseSession — HTTP-pause + чтение timer-сообщения (движок шлёт его при паузе).
+// pauseSession — HTTP-pause + чтение сообщений паузы: timer (движок шлёт его при
+// паузе) и tts_stop (раунд 2: session-level стоп TTS — теперь всегда; порядок
+// сообщений не гарантирован, ждём оба).
 func pauseSession(t *testing.T, ts *httptest.Server, token string, id int64, conn *websocket.Conn) {
 	t.Helper()
 	code, m := postSessionAction(t, ts, token, id, "pause")
@@ -164,9 +167,22 @@ func pauseSession(t *testing.T, ts *httptest.Server, token string, id int64, con
 	if m["status"] != "paused" {
 		t.Fatalf("pause: status = %v, want paused", m["status"])
 	}
-	typ, _, _, ok := bargeInReadOne(t, conn)
-	if !ok || typ != "timer" {
-		t.Fatalf("ожидался timer-кадр после pause, получено: %s (ok=%v)", typ, ok)
+	var sawTimer, sawTTSStop bool
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && !(sawTimer && sawTTSStop) {
+		typ, _, _, ok := bargeInReadOne(t, conn)
+		if !ok {
+			continue
+		}
+		switch typ {
+		case "timer":
+			sawTimer = true
+		case "tts_stop":
+			sawTTSStop = true
+		}
+	}
+	if !sawTimer || !sawTTSStop {
+		t.Fatalf("после pause: timer=%v tts_stop=%v", sawTimer, sawTTSStop)
 	}
 }
 
@@ -180,25 +196,17 @@ func TestSessionPauseStopsActiveTTSStream(t *testing.T) {
 	// Пауза (HTTP), пока TTS-стрим хода ИИ идёт (первые 2 кадра прочитаны в прологе).
 	pauseSession(t, ts, token, sessionID, conn)
 
-	// (1) tts_stop + end-кадр прерванного стрима.
-	sawTTSStop, sawEnd := false, false
+	// (1) tts_stop подтверждён в pauseSession; ждём end-кадр прерванного стрима.
+	sawEnd := false
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) && !(sawTTSStop && sawEnd) {
+	for time.Now().Before(deadline) && !sawEnd {
 		typ, _, fr, ok := bargeInReadOne(t, conn)
 		if !ok {
 			continue
 		}
-		switch typ {
-		case "tts_stop":
-			sawTTSStop = true
-		case "bin":
-			if fr.end {
-				sawEnd = true
-			}
+		if typ == "bin" && fr.end {
+			sawEnd = true
 		}
-	}
-	if !sawTTSStop {
-		t.Fatal("нет WS-сообщения tts_stop после pause")
 	}
 	if !sawEnd {
 		t.Fatal("прерванный TTS-поток не завершён end-кадром")
@@ -217,6 +225,149 @@ func TestSessionPauseStopsActiveTTSStream(t *testing.T) {
 		}
 		if typ == websocket.MessageBinary {
 			t.Fatalf("PCM-кадр после end-кадра прерванного стрима (len=%d) — поток не остановлен", len(data))
+		}
+	}
+}
+
+// TestSessionPauseDuringLLMPhase — R2: гонка окна. Ход начался (статус-гард
+// прошёл), LLM ещё стримит, TTS ещё не начался (beginTTS не достигнут) — pause.
+// Ожидание: клиент получает WS tts_stop и НИ ОДНОГО TTS-кадра хода (beginTTS при
+// флаге sessStopped возвращает уже закрытый канал — стрим не стартует).
+func TestSessionPauseDuringLLMPhase(t *testing.T) {
+	e := newInterviewEnv(t)
+	// LLM: медленный запрос до первого байта (2 с) — детерминированное окно
+	// «LLM-фазы»: ход прошёл статус-гард, но beginTTS ещё не достигнут.
+	e.mock.SetResponder(func(llm.Request) (string, error) {
+		return "Первое предложение ответа. Второе предложение ответа. Третье предложение ответа.", nil
+	})
+	e.mock.SetStreamReqDelay(2 * time.Second)
+
+	m := &mockVoice{ttsPCMSize: 96000} // 3 с аудио на предложение (если бы TTS стартовал)
+	e.srv.cfg.VoiceURL = m.server(t).URL
+	e.srv.voice = voicesvc.NewClient(e.srv.cfg.VoiceURL)
+
+	conn := dialWS(t, e.ts, e.token, e.session)
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	// Приветствие (не-стриминг Chat — быстрое): stage + ai_text + TTS до end-кадра.
+	msgs := wsReadMixed(t, conn, 2, 3*time.Second)
+	if msgs[0] != "text:stage/<nil>/<nil>" || !startsWith(msgs[1], "text:ai_text/") {
+		t.Fatalf("старт: %v", msgs)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, _, fr, ok := bargeInReadOne(t, conn)
+		if !ok {
+			continue
+		}
+		if typ == "bin" && fr.end {
+			break
+		}
+	}
+
+	// Реплика кандидата → ход (LLM-стрим ~2–4 с; TTS пока не начался).
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	_ = conn.Write(ctx, websocket.MessageText, mustJSON(
+		map[string]any{"type": "ui", "name": "utterance", "payload": map[string]string{"text": "Привет"}}))
+	cancel()
+
+	// Ждём transcript(user) (ход прошёл статус-гард, LLM-фаза началась),
+	// затем паузу ДО старта TTS (LLM ещё стримит — окно 300 мс << 2 с).
+	var sawUserTranscript bool
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && !sawUserTranscript {
+		typ, who, _, ok := bargeInReadOne(t, conn)
+		if !ok {
+			continue
+		}
+		if typ == "transcript" && who == "user" {
+			sawUserTranscript = true
+		}
+	}
+	if !sawUserTranscript {
+		t.Fatal("нет transcript(user) — ход не стартовал")
+	}
+	time.Sleep(400 * time.Millisecond) // LLM-фаза (первый токен мгновенно, ответ ~2 с)
+
+	pauseSession(t, e.ts, e.token, e.session, conn) // tts_stop подтверждён в хелпере
+
+	// TTS-кадров хода НЕ должно быть (окно 4 с: LLM-запрос 2 с + beginTTS с
+	// уже закрытым каналом; приветствие уже дошло до end-кадра).
+	deadline = time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		typ, _, _, ok := bargeInReadOne(t, conn)
+		if !ok {
+			continue
+		}
+		if typ == "bin" {
+			t.Fatal("TTS-кадр после паузы в LLM-фазе — стрим начался, гонка не закрыта")
+		}
+	}
+	// Остаток LLM-стрима: transcript(ai)/ai_text могут дойти (текст), кадров TTS — нет.
+	idleEnd := time.Now().Add(2 * time.Second)
+	for time.Now().Before(idleEnd) {
+		c, c2 := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		typ, data, err := conn.Read(c)
+		c2()
+		if err != nil {
+			break
+		}
+		if typ == websocket.MessageBinary {
+			t.Fatalf("PCM-кадр TTS хода после паузы в LLM-фазе (len=%d)", len(data))
+		}
+	}
+}
+
+// TestSessionFinishDuringTTSStream — R3: finish во время активного TTS-стрима:
+// WS tts_stop + end-кадр прерванного стрима, после end-кадра PCM-кадров нет.
+func TestSessionFinishDuringTTSStream(t *testing.T) {
+	ts, token, sessionID, conn, _ := bargeInEnv(t)
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	// Finish (HTTP), пока TTS-стрим хода ИИ идёт (первые 2 кадра прочитаны в прологе).
+	code, m := postSessionAction(t, ts, token, sessionID, "finish")
+	if code != http.StatusOK {
+		t.Fatalf("finish: %d (%v)", code, m)
+	}
+	if m["status"] != "finished" {
+		t.Fatalf("finish: status = %v, want finished", m["status"])
+	}
+
+	// tts_stop + end-кадр прерванного стрима.
+	sawTTSStop, sawEnd := false, false
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) && !(sawTTSStop && sawEnd) {
+		typ, _, fr, ok := bargeInReadOne(t, conn)
+		if !ok {
+			continue
+		}
+		switch typ {
+		case "tts_stop":
+			sawTTSStop = true
+		case "bin":
+			if fr.end {
+				sawEnd = true
+			}
+		}
+	}
+	if !sawTTSStop {
+		t.Fatal("нет WS tts_stop после finish")
+	}
+	if !sawEnd {
+		t.Fatal("прерванный TTS-поток не завершён end-кадром")
+	}
+
+	// После end-кадра PCM-кадров нет (воркеры/paceFrames остановлены флагом).
+	idleEnd := time.Now().Add(1500 * time.Millisecond)
+	for time.Now().Before(idleEnd) {
+		c, c2 := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		typ, data, err := conn.Read(c)
+		c2()
+		if err != nil {
+			break // тишина — соединение оборвано таймаутом, тест завершён
+		}
+		if typ == websocket.MessageBinary {
+			t.Fatalf("PCM-кадр после end-кадра прерванного finish-стрима (len=%d)", len(data))
 		}
 	}
 }
