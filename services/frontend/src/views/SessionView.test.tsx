@@ -409,6 +409,7 @@ describe('SessionView (WP-8)', () => {
   }, 10000);
 
   it('mic-dbg (dev): строка статистики рендерится при micDbg.chunks > 0', async () => {
+    vi.stubEnv('VITE_MIC_DEBUG', 'true');
     vi.stubGlobal('fetch', mockApi());
     hookMock.fake = fakeVoiceSession({
       path: 'worklet',
@@ -429,9 +430,11 @@ describe('SessionView (WP-8)', () => {
     expect(dbg).toHaveTextContent('шаг 250 мс');
     expect(dbg).toHaveTextContent('max rms 0.5');
     expect(dbg).toHaveTextContent('ctx running');
+    vi.unstubAllEnvs();
   }, 10000);
 
   it('mic-dbg (dev): строки нет при chunks = 0 или micDbg = null', async () => {
+    vi.stubEnv('VITE_MIC_DEBUG', 'true');
     vi.stubGlobal('fetch', mockApi());
 
     // chunks = 0 — блок не рендерится
@@ -455,6 +458,26 @@ describe('SessionView (WP-8)', () => {
 
     // micDbg = null — тоже нет
     hookMock.fake = fakeVoiceSession(null);
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    expect(await screen.findByText('микрофон: включён')).toBeInTheDocument();
+    expect(document.querySelector('.mic-dbg')).toBeNull();
+    vi.unstubAllEnvs();
+  }, 10000);
+
+  it('mic-dbg (dev): без VITE_MIC_DEBUG строки нет даже при chunks > 0', async () => {
+    vi.stubGlobal('fetch', mockApi());
+    hookMock.fake = fakeVoiceSession({
+      path: 'worklet',
+      ctxState: 'running',
+      rate: 16000,
+      chunks: 10,
+      medGapMs: 250,
+      maxRms: 0.5,
+    });
     render(
       <AuthProvider>
         <SessionView id={9} />

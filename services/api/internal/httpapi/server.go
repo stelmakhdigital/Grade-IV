@@ -89,8 +89,12 @@ func (s *Server) Engine() *session.Engine { return s.engine }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
-	mux.HandleFunc("POST /debug/mic-report", s.handleDebugMicReport)
-	mux.HandleFunc("OPTIONS /debug/mic-report", s.handleDebugMicReport)
+	// Dev-эндпоинты диагностики — только при явном ENABLE_DEBUG=1 (в prod — 404,
+	// без аутентификации наружу не выставляем).
+	if s.cfg.DebugEndpoints {
+		mux.HandleFunc("POST /debug/mic-report", s.handleDebugMicReport)
+		mux.HandleFunc("OPTIONS /debug/mic-report", s.handleDebugMicReport)
+	}
 	mux.HandleFunc("GET /metrics", metrics.Handler)
 	mux.HandleFunc("POST /api/v1/auth/register", s.handleRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)

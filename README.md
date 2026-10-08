@@ -85,6 +85,11 @@ make stop-all       # остановить всё
 - **время сессии**: по умолчанию в dev-запуске — без ограничения
   (`SESSION_LIMIT_S=off`); вернуть лимит по грейду — `SESSION_LIMIT_S= make run-all`
   (пустое значение) или свой: `SESSION_LIMIT_S=7200 make run-all` (2 часа, в секундах)
+- **диагностика микрофона** (когда «ИИ не слышит»): `ENABLE_DEBUG=1` (дефолт run-all)
+  включает `POST /debug/mic-report` (приём отчётов из `audio-debug.html` и live-отчётов
+  захвата), `VITE_MIC_DEBUG=1 make run-frontend` — live-отчёты каждые 10 с + строка
+  `мик[worklet|fallback]: чанки · шаг · max rms · ctx` в UI сессии. В prod оба флага
+  держать выключенными (эндпоинт без аутентификации — dev-only).
 
 Логи и PID — в `FOR_RUN/logs/`, `FOR_RUN/pids/`; БД — `FOR_RUN/run.db`.
 

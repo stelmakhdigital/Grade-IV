@@ -53,43 +53,20 @@ FOR_RUN/
 
 # Артефакты агентов (pipeline/memory/скриншоты/секреты) — не коммитятся
 task.md
+memory*
+agents.md
+worker_roles.md
+worker_prompt_addition.md
 .memory/
 .pi/
 memory/
 agents/
 screenshots/
-secrets/
-*.secret
-
-
-# Agent working files
-memory*
-memmory*
-task.md
-agents.md
-worker_roles.md
-worker_prompt_addition.md
-
-# Agent screenshots and reports
-screenshots/
-*.png
-*.jpg
-*.jpeg
-*.webp
 agent-reports/
-
-# Secrets and credentials
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-*.crt
 secrets/
 credentials/
-
-# Logs and temporary files
-*.log
+*.secret
+*.crt
 *.tmp
 *.temp
 .tmp/

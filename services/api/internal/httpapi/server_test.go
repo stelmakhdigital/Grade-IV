@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
@@ -156,5 +158,59 @@ func TestRegisterLoginMe(t *testing.T) {
 	}
 	if m["minutes_remaining_s"] != float64(3600) {
 		t.Fatalf("me: minutes = %v, want 3600", m["minutes_remaining_s"])
+	}
+}
+
+// TestDebugMicReportFlag: /debug/mic-report регистрируется ТОЛЬКО при
+// ENABLE_DEBUG (cfg.DebugEndpoints): по умолчанию 404, с флагом — 204 + файл.
+func TestDebugMicReportFlag(t *testing.T) {
+	// По умолчанию (флаг не задан) — эндпоинт отсутствует.
+	tsDefault := newTestEnv(t)
+	resp, err := http.Post(tsDefault.URL+"/debug/mic-report", "application/json", bytes.NewBufferString(`{"x":1}`))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("без флага: хочу 404, получил %d", resp.StatusCode)
+	}
+
+	// С флагом — эндпоинт жив, файл пишется в FOR_RUN/debug/ (относительно cwd).
+	cfg := &config.Config{
+		Addr:           ":0",
+		DatabaseURL:    "sqlite://:memory:",
+		JWTSecret:      "test-secret",
+		JWTExpiryHours: 1,
+		MinutesFreeS:   3600,
+		DebugEndpoints: true,
+	}
+	database, dialect, err := db.Open(cfg.DatabaseURL)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(context.Background(), database, dialect); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	srv := NewWithLLM(cfg, database, dialect, slog.New(slog.DiscardHandler), llm.NewMockProvider())
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	code, _ := doJSON(t, "POST", ts.URL+"/debug/mic-report", map[string]any{"kind": "test"}, map[string]string{"Origin": "http://localhost:5173"})
+	if code != http.StatusNoContent {
+		t.Fatalf("с флагом: хочу 204, получил %d", code)
+	}
+	entries, err := os.ReadDir(filepath.Join(tmp, "FOR_RUN", "debug"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("ожидаю 1 файл в FOR_RUN/debug, err=%v n=%d", err, len(entries))
 	}
 }

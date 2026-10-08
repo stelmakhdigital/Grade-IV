@@ -31,6 +31,7 @@ type Config struct {
 	LogLevel          string // уровень логов (LOG_LEVEL)
 	SilenceNudgeS     int    // тишина > порога → nudge от ИИ, с (SILENCE_NUDGE_S)
 	LLMMock           bool   // LLM-мок вместо реального эндпоинта (LLM_MOCK=1; dev/CI, ADR-005)
+	DebugEndpoints    bool   // dev-эндпоинты (/debug/*) — только явное включение (ENABLE_DEBUG=1; дефолт OFF)
 	LLMEnableThinking bool   // vLLM chat_template_kwargs.enable_thinking (LLM_ENABLE_THINKING, дефолт false — SLO голосового контура)
 	VADEndSilenceMS   int    // конец реплики по тишине, мс (VAD_END_SILENCE_MS, ADR-002)
 	VADRMSThreshold   int    // абсолютный мин. порог RMS int16 (VAD_RMS_THRESHOLD); фактический — адаптивный (3×шумовой пол)
@@ -73,6 +74,7 @@ func Load() (*Config, error) {
 		LogLevel:          getEnv("LOG_LEVEL", "info"),
 		SilenceNudgeS:     getEnvInt("SILENCE_NUDGE_S", 8),
 		LLMMock:           getEnv("LLM_MOCK", "") == "1",
+		DebugEndpoints:    getEnv("ENABLE_DEBUG", "") == "1",
 		LLMEnableThinking: getEnv("LLM_ENABLE_THINKING", "") == "true",
 		VADEndSilenceMS:   getEnvInt("VAD_END_SILENCE_MS", 900),
 		VADRMSThreshold:   getEnvInt("VAD_RMS_THRESHOLD", 100),

@@ -124,10 +124,11 @@ do_start() {
     echo $! >"$PIDS/voice.pid")
 
   echo "==> api :8000 (LLM_MOCK=$LLM_MOCK LLM=$LLM_BASE_URL/$LLM_MODEL)"
-  (cd "$ROOT" && DATABASE_URL="sqlite://$DB" \
+  (cd "$ROOT" && DATABASE_URL="sqlite://FOR_RUN/run.db" \
     JWT_SECRET="${JWT_SECRET:-grade-run-secret}" MINUTES_FREE_S=3600 \
     SESSION_LIMIT_S="$SESSION_LIMIT_S" \
     LLM_MOCK="$LLM_MOCK" LLM_BASE_URL="$LLM_BASE_URL" LLM_MODEL="$LLM_MODEL" \
+    ENABLE_DEBUG="${ENABLE_DEBUG:-1}" \
     VOICE_URL="$VOICE_URL" SANDBOX_URL="$SANDBOX_URL" ADDR=:8000 \
     nohup "$API_BIN" >>"$LOGS/api.log" 2>&1 & echo $! >"$PIDS/api.pid")
 

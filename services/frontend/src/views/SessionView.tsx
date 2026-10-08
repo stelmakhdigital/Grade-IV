@@ -7,6 +7,7 @@
 import { useAuth } from '../auth';
 import { MicVisualizer, type MicEqMode } from './MicVisualizer';
 import { useVoiceSession } from '../hooks/useVoiceSession';
+import { micDebugEnabled } from '../audio/mic';
 import { statusLabel, stageLabel } from '../labels';
 import { LiveCodePanel } from './livecode/LiveCodePanel';
 import { DesignPanel } from './design/DesignPanel';
@@ -137,7 +138,7 @@ export function SessionView({ id }: { id: number }) {
                 Микрофон выключен — ИИ вас не слышит. Нажмите «Включить микрофон».
               </span>
             )}
-            {micDbg !== null && micDbg.chunks > 0 && (
+            {micDebugEnabled() && micDbg !== null && micDbg.chunks > 0 && (
               <span className="mic-dbg" title="Диагностика захвата: путь, частота чанков, уровень">
                 мик[{micDbg.path}]: чанков {micDbg.chunks} · шаг {micDbg.medGapMs} мс · max rms {micDbg.maxRms} · ctx {micDbg.ctxState}
               </span>

@@ -159,6 +159,13 @@ class PcmCapture {
 registerProcessor('pcm-capture', PcmCapture);
 `;
 
+// Dev-режим диагностики микрофона: live-отчёты на /debug/mic-report каждые 10 с.
+// Включение: VITE_MIC_DEBUG=1 (vite env) — в production-сборке выключено.
+// Функция (не константа): значение читается при вызове — тесты стабятся через vi.stubEnv.
+export function micDebugEnabled(): boolean {
+  return (import.meta.env.VITE_MIC_DEBUG ?? '') === 'true';
+}
+
 export interface MicDebugInfo {
   path: 'worklet' | 'fallback';
   ctxState: AudioContextState | null;
@@ -378,6 +385,7 @@ export class MicCapture {
 
   /** Dev: раз в 10 с — снапшот захвата на /debug/mic-report (тихо, не критичен). */
   private startDebugReporter(): void {
+    if (!micDebugEnabled()) return;
     if (this.dbgTimer !== null) return;
     this.dbgTimer = window.setInterval(() => {
       const info = this.debugInfo();
