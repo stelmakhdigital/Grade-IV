@@ -8,6 +8,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getSession,
   listEvents,
+  pauseSession,
+  resumeSession,
   type Session,
   type SessionEvent,
 } from '../api';
@@ -40,14 +42,21 @@ export function useVoiceSession(id: number) {
   const [wsState, setWsState] = useState<'connecting' | 'open' | 'closed' | 'error'>('connecting');
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Пауза (FR-S7): uiPaused — локальное состояние после клика; если страница
+  // перезагружена на paused-сессии, статус приходит из REST (session.status).
+  const [uiPaused, setUiPaused] = useState(false);
+  const [pauseBusy, setPauseBusy] = useState(false);
 
   const wsRef = useRef<SessionWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);
   const micLevelRef = useRef(0); // RMS с worklet (эквалайзер)
   const playerRef = useRef<PcmPlayer | null>(null);
   const stageRef = useRef<string>('voice');
+  // Микрофон был включён до паузы — при «Продолжить» пытаемся вернуть захват.
+  const micBeforePauseRef = useRef(false);
 
   const live = session !== null && (session.status === 'active' || session.status === 'paused');
+  const paused = uiPaused || session?.status === 'paused';
 
   // Загрузка метаданных (+ история для завершённых).
   useEffect(() => {
@@ -175,9 +184,11 @@ export function useVoiceSession(id: number) {
     const speakingTimer = window.setInterval(() => {
       setSpeaking(player.isSpeaking());
     }, 300);
-    // Живая диагностика микрофона (dev): снапшот захвата на экран.
+    // Живая диагностика микрофона (dev): снапшот захвата на экран
+    // (только пока захват активен — после паузы/выключения не мигаем).
     const dbgTimer = window.setInterval(() => {
-      setMicDbg(micCap.debugInfo());
+      const st = micCap.state;
+      setMicDbg(st === 'running' || st === 'muted' ? micCap.debugInfo() : null);
     }, 1500);
 
     async function refreshStatus() {
@@ -207,6 +218,33 @@ export function useVoiceSession(id: number) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session === null ? 'none' : session.status, id, pushLine]);
 
+  // Старт захвата микрофона (общий путь: кнопка «Включить микрофон» и
+  // автоматический возврат после «Продолжить» — оба из user-gesture).
+  const startMic = async () => {
+    const micCap = micRef.current;
+    if (micCap === null) return;
+    // Клик — user-gesture: разрешаем браузеру вернуть аудио-контекст
+    // плеера в running (иначе TTS может молчать, а флаг «ИИ говорит»
+    // висеть — см. player.resume()).
+    playerRef.current?.resume();
+    await micCap.start({
+      onChunk: (pcm) => {
+        // PCM шлём всегда (и во время речи ИИ): серверный VAD ведёт
+        // barge-in (SRS §8) — короткое «эхо»/всплеск отбрасывается,
+        // завершённая реплика ≥ 500 мс прерывает TTS. Эхо-подавление —
+        // echoCancellation в getUserMedia (mic.ts).
+        wsRef.current?.sendPcm(pcm);
+      },
+      onLevel: (rms) => {
+        micLevelRef.current = rms;
+      },
+      onState: (s) => setMic(s),
+      onError: (msg) => setError(msg),
+      // info-сообщения (fallback-захват и т.п.) — в строку статуса/ошибки.
+      onInfo: (msg) => setError(msg),
+    });
+  };
+
   const toggleMic = async () => {
     const micCap = micRef.current;
     if (micCap === null) return;
@@ -218,29 +256,66 @@ export function useVoiceSession(id: number) {
       return;
     }
     try {
-      // Клик — user-gesture: разрешаем браузеру вернуть аудио-контекст
-      // плеера в running (иначе TTS может молчать, а флаг «ИИ говорит»
-      // висеть — см. player.resume()).
-      playerRef.current?.resume();
-      await micCap.start({
-        onChunk: (pcm) => {
-          // PCM шлём всегда (и во время речи ИИ): серверный VAD ведёт
-          // barge-in (SRS §8) — короткое «эхо»/всплеск отбрасывается,
-          // завершённая реплика ≥ 500 мс прерывает TTS. Эхо-подавление —
-          // echoCancellation в getUserMedia (mic.ts).
-          wsRef.current?.sendPcm(pcm);
-        },
-        onLevel: (rms) => {
-          micLevelRef.current = rms;
-        },
-        onState: (s) => setMic(s),
-        onError: (msg) => setError(msg),
-        // info-сообщения (fallback-захват и т.п.) — в строку статуса/ошибки.
-        onInfo: (msg) => setError(msg),
-      });
+      await startMic();
     } catch {
       setMic('denied');
       setError('Нет доступа к микрофону — разрешите в браузере.');
+    }
+  };
+
+  // Пауза сессии (FR-S7): тарификация останавливается на сервере.
+  // Локально: микрофон (остановка отправки PCM), TTS-плеер (stop),
+  // paused-состояние UI. session.status НЕ меняем — смена статуса
+  // перезапустила бы WS-эффект (переподключение), а WS на паузе живёт.
+  const pause = async () => {
+    if (session === null || session.status !== 'active' || paused || pauseBusy) return;
+    setPauseBusy(true);
+    try {
+      micBeforePauseRef.current = mic === 'running' || mic === 'muted';
+      micRef.current?.stop();
+      micLevelRef.current = 0;
+      setMic('stopped');
+      setMicDbg(null);
+      playerRef.current?.stop();
+      setSpeaking(false);
+      await pauseSession(id);
+      setUiPaused(true);
+    } catch (e) {
+      setError(apiErrorMessage(e));
+    } finally {
+      setPauseBusy(false);
+    }
+  };
+
+  // Возобновление (FR-S7): сервер снимает паузу; UI — в active. Если
+  // микрофон был включён до паузы — возвращаем захват (клик — user-gesture,
+  // autoplay OK); ошибка старта не ломает сессию — сообщение + кнопка.
+  const resume = async () => {
+    if (session === null || !paused || pauseBusy) return;
+    setPauseBusy(true);
+    try {
+      try {
+        playerRef.current?.resume();
+      } catch {
+        // Аудио-контекст может быть недоступен — не критично: плеер
+        // восстановит контекст на первом TTS-кадре (в jsdom нет AudioContext).
+      }
+      await resumeSession(id);
+      setUiPaused(false);
+      if (micBeforePauseRef.current) {
+        micBeforePauseRef.current = false;
+        try {
+          await startMic();
+        } catch {
+          // onError из MicCapture уже показал причину — просто не вешаем
+          // флаг «включён», кандидат нажмёт «Включить микрофон» сам.
+          setMic('stopped');
+        }
+      }
+    } catch (e) {
+      setError(apiErrorMessage(e));
+    } finally {
+      setPauseBusy(false);
     }
   };
 
@@ -269,7 +344,11 @@ export function useVoiceSession(id: number) {
     error,
     micLevelRef,
     live,
+    paused,
+    pauseBusy,
     toggleMic,
+    pause,
+    resume,
     onStageAction,
     onFinish,
   };
