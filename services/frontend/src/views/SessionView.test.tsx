@@ -31,8 +31,11 @@ vi.mock('../hooks/useVoiceSession', async (importOriginal) => {
   };
 });
 
-/** Фиктивное возвращаемое useVoiceSession для сценариев mic-dbg. */
-function fakeVoiceSession(micDbg: Record<string, unknown> | null): Record<string, unknown> {
+/** Фиктивное возвращаемое useVoiceSession для сценариев mic-dbg/мьюта. */
+function fakeVoiceSession(
+  micDbg: Record<string, unknown> | null,
+  opts: { mic?: string; error?: string | null } = {},
+): Record<string, unknown> {
   return {
     session: S_ACTIVE,
     loadError: null,
@@ -43,11 +46,11 @@ function fakeVoiceSession(micDbg: Record<string, unknown> | null): Record<string
     task: null,
     remainingS: 2990,
     lastAiText: '',
-    mic: 'running',
+    mic: opts.mic ?? 'running',
     micDbg,
     speaking: false,
     wsState: 'open',
-    error: null,
+    error: opts.error ?? null,
     micLevelRef: { current: 0 },
     live: true,
     paused: false,
@@ -485,5 +488,45 @@ describe('SessionView (WP-8)', () => {
     );
     expect(await screen.findByText('микрофон: включён')).toBeInTheDocument();
     expect(document.querySelector('.mic-dbg')).toBeNull();
+  }, 10000);
+
+  it('muted + error с /audio-debug.html — кликабельные ссылки (самодиагностика)', async () => {
+    vi.stubGlobal('fetch', mockApi());
+    hookMock.fake = fakeVoiceSession(null, {
+      mic: 'muted',
+      error:
+        'Микрофон молчит: проверьте устройство, мьют и разрешения браузера. ' +
+        'Диагностика: откройте /audio-debug.html и проверьте уровень сигнала с микрофона.',
+    });
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    // строка ошибки: путь /audio-debug.html — тег <a> с href
+    const link = await screen.findByTestId('debug-link');
+    expect(link.tagName).toBe('A');
+    expect(link).toHaveAttribute('href', '/audio-debug.html');
+    expect(link).toHaveTextContent('/audio-debug.html');
+    // muted-баннер тоже ссылается на диагностику
+    const mutedLink = screen.getByTestId('debug-link-mic-muted');
+    expect(mutedLink.tagName).toBe('A');
+    expect(mutedLink).toHaveAttribute('href', '/audio-debug.html');
+  }, 10000);
+
+  it('error без /audio-debug.html — рендерится обычным текстом, ссылки нет', async () => {
+    vi.stubGlobal('fetch', mockApi());
+    hookMock.fake = fakeVoiceSession(null, {
+      mic: 'denied',
+      error: 'Нет доступа к микрофону — разрешите в браузере.',
+    });
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    expect(await screen.findByText('Нет доступа к микрофону — разрешите в браузере.')).toBeInTheDocument();
+    expect(screen.queryByTestId('debug-link')).toBeNull();
+    expect(screen.queryByTestId('debug-link-mic-muted')).toBeNull();
   }, 10000);
 });
