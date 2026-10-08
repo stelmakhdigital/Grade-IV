@@ -99,6 +99,15 @@ func (m *mockVoice) TTSStarts() []time.Time {
 	return out
 }
 
+// TTSTexts — тексты каждого /tts-вызова по порядку (тесты: клиуза-диспетчизация).
+func (m *mockVoice) TTSTexts() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, len(m.ttsTexts))
+	copy(out, m.ttsTexts)
+	return out
+}
+
 // streamWS — мок стримингового STT (ADR-007): бинарные PCM-кадры →
 // state/partial/final. Энергетический VAD: rms > 1000 — речь; хвост тишины
 // 1 кадр (250 мс) → конец реплики. Фиксированный текст как у batch /stt.

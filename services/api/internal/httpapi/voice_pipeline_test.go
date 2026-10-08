@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,78 @@ func TestSplitSentences(t *testing.T) {
 		got := splitSentences(c.in)
 		if len(got) != c.want {
 			t.Errorf("splitSentences(%q) = %v (len %d), want len %d", c.in, got, len(got), c.want)
+		}
+	}
+}
+
+// TestSplitForTTS — клиуза-уровневая разбивка (T-20261008185701):
+// короткая часть (< MIN_CLAUSE_CHARS) — без дробления; длинная — клиузы
+// по «,» «;» «:» «—» (граница — в конце клиузы, завершитель — в последнем);
+// «:» внутри числа («12:30») не дробит; пустые/пробельные — без артефактов.
+func TestSplitForTTS(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"Привет, как дела?", []string{"Привет, как дела?"}},    // 37 байт < 48 — без дробления (часть как есть)
+		{"Привет! Как дела?", []string{"Привет!", "Как дела?"}}, // короткие предложения — как splitSentences
+		{
+			"Думаю, что главным в любом реальном проекте всегда является чёткая архитектура. Так что?",
+			[]string{"Думаю,", "что главным в любом реальном проекте всегда является чёткая архитектура.", "Так что?"},
+		}, // «,» — граница клиуз; завершитель «.» — в последнем клиузе
+		{
+			"Один: два; три, четыре — пять и шесть. Конец.",
+			[]string{"Один:", "два;", "три,", "четыре —", "пять и шесть.", "Конец."},
+		}, // «:» «;» «,» «—» — границы клиуз; «12:30» не дробится
+		{
+			"Первое; второе; третье; четвертое; пятое. Шестое: седьмое: восьмое: девятое.",
+			[]string{"Первое;", "второе;", "третье;", "четвертое;", "пятое.", "Шестое:", "седьмое:", "восьмое:", "девятое."},
+		}, // несколько клиуз в каждом предложении
+		{
+			"Встреча в 12:30, обсудим архитектуру микросервисов и деплой.",
+			[]string{"Встреча в 12:30,", "обсудим архитектуру микросервисов и деплой."},
+		}, // «:» в числе — не граница, «,» — граница
+		{"   ", nil}, // только пробелы
+		{"", nil},
+		{"Одно предложение", []string{"Одно предложение"}},
+	}
+	for _, c := range cases {
+		got := splitForTTS(c.in)
+		if len(got) != len(c.want) {
+			t.Errorf("splitForTTS(%q) = %v (len %d), want len %d: %v", c.in, got, len(got), len(c.want), c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("splitForTTS(%q)[%d] = %q, want %q", c.in, i, got[i], c.want[i])
+				break
+			}
+		}
+	}
+}
+
+// TestTTSGap — правило пауз по завершайющему знаку ПРЕДЫДУЩЕЙ части
+// (T-20261008185701): «?/!» → 2 (500 мс), «.»/«...» → 1 (250 мс),
+// «,»/«;»/«:»/«—» → 0 (клиузы одной фразы играют подряд).
+func TestTTSGap(t *testing.T) {
+	cases := []struct {
+		prev string
+		want int
+	}{
+		{"", 0},
+		{"Привет?", 2},
+		{"Привет!", 2},
+		{"Привет.", 1},
+		{"Привет...", 1},
+		{"Думаю, что главное,", 0},
+		{"Один;", 0},
+		{"Время:", 0},
+		{"Раз —", 0},
+		{"без завершителя", 1},
+	}
+	for _, c := range cases {
+		if got := ttsGap(c.prev); got != c.want {
+			t.Errorf("ttsGap(%q) = %d, want %d", c.prev, got, c.want)
 		}
 	}
 }
@@ -268,8 +341,15 @@ func TestBargeIn_ShortUtteranceDoesNotInterrupt(t *testing.T) {
 		writePCM(silencePCM(250))
 	}
 
-	// Стрим ИИ доигрывается до конца: end-флаг на последнем кадре потока
-	// (firstSeq+12: 12 аудио + end-тишина), tts_stop не наблюдался.
+	// Стрим ИИ доигрывается до конца: end-флаг на последнем кадре потока.
+	// Клиуза-диспетчизация (T-20261008185701) дробит мок-ответ (71 байт ≥ 48)
+	// на клиузы («…принял реплику:» / «Привет») — число кадров = число частей × 12
+	// (96000 байт = 12 pacing-кадров на часть); tts_stop не наблюдался.
+	mockReply := "[mock-интервьюер] принял реплику: Привет"
+	wantEnd := firstSeq + len(splitForTTS(mockReply))*12
+	if len(splitForTTS(mockReply)) != 2 {
+		t.Fatalf("сценарий: части мок-ответа = %d, want 2 (тест построен на этом)", len(splitForTTS(mockReply)))
+	}
 	sawTTSStop := false
 	endSeq := -1
 	seqs := []int{}
@@ -292,8 +372,8 @@ func TestBargeIn_ShortUtteranceDoesNotInterrupt(t *testing.T) {
 	if sawTTSStop {
 		t.Fatal("короткий burst (< 500 мс) вызвал tts_stop — barge-in сработал ложно")
 	}
-	if endSeq != firstSeq+12 {
-		t.Fatalf("end-кадр на seq=%d (want %d — стрим доигран полностью), seqs=%v", endSeq, firstSeq+12, seqs)
+	if endSeq != wantEnd {
+		t.Fatalf("end-кадр на seq=%d (want %d — стрим доигран полностью), seqs=%v", endSeq, wantEnd, seqs)
 	}
 	// Новый ход не был запущен: нет transcript(user) в ближайших сообщениях.
 	deadline = time.Now().Add(2 * time.Second)
@@ -484,6 +564,163 @@ func TestTTSParallelSynthesis(t *testing.T) {
 			gap, m.ttsDelay)
 	}
 	t.Logf("перекрытие синтеза: s2-s1=%v (delay=%v); маркеры=%v", gap, m.ttsDelay, markers)
+}
+
+// TestClauseDispatchEarlyTTS — ключевой поведенческий тест клиуза-уровневой
+// диспетчизации (T-20261008185701): мок-LLM стримит фиксированный сценарий с
+// управляемой задержкой на токен (100 мс/токен). Сценарий: короткое
+// предложение 1 (39 байт, «.») + предложение 2, у которого первый клиуз
+// (123 байта ≥ MIN_CLAUSE_CHARS=48) заканчивается «,» через ~17 токенов, а
+// всё предложение — через ~27 токенов. Ассерты: (а) TTS получил первый клиуз
+// (текст оканчивается «,») ДО завершения LLM-стрима; (б) между кадрами клиуз
+// одной фразы тише-кадров нет (gap=0); (в) после «.»-предложения тише-пауза 1
+// (250 мс) сохранена. Маркеры частей — амплитуда PCM мок-TTS.
+func TestClauseDispatchEarlyTTS(t *testing.T) {
+	s1 := "Отвечу коротко и по делу."                                       // 39 байт < 48 — без дробления
+	c1 := "Как я уже говорил на прошлых собеседованиях и в своих проектах," // 123 байта ≥ 48
+	c2 := "так вот,"
+	c3 := "— главное это чёткая и продуманная архитектура." // завершитель — в последнем клиузе
+	if len(c1) < MIN_CLAUSE_CHARS {
+		t.Fatalf("сценарий: первый клиуз %d байт < MIN_CLAUSE_CHARS=%d — тест некорректен", len(c1), MIN_CLAUSE_CHARS)
+	}
+
+	ts, token, sessionID, m, e := newVoiceEnv(t)
+	e.mock.SetResponder(func(req llm.Request) (string, error) {
+		return s1 + " " + c1 + " " + c2 + " " + c3, nil
+	})
+	// Амплитудные маркеры: s1 = 5000, клиуз1 = 1000, клиуз2 = 2000, клиуз3 = 3000;
+	// тише-кадры = 0 (амплитуды не пересекаются).
+	m.ttsAmp = map[string]int{s1: 5000, c1: 1000, c2: 2000, c3: 3000}
+	m.ttsPCMSize = 16000 // 2 pacing-кадра на часть
+
+	conn := dialWS(t, ts, token, sessionID)
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	// Приветствие (ответ LLM тот же, tokenDelay=0 — одним токеном): до end-кадра.
+	msgs := wsReadMixed(t, conn, 2, 3*time.Second)
+	if msgs[0] != "text:stage/<nil>/<nil>" || !startsWith(msgs[1], "text:ai_text/") {
+		t.Fatalf("старт: %v", msgs)
+	}
+	greetEnd := false
+	gd := time.Now().Add(15 * time.Second)
+	for !greetEnd && time.Now().Before(gd) {
+		rctx, rcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		mt, data, rerr := conn.Read(rctx)
+		rcancel()
+		if rerr != nil || mt != websocket.MessageBinary || len(data) < 4 {
+			continue
+		}
+		if binary.LittleEndian.Uint16(data[2:4])&0x01 != 0 {
+			greetEnd = true
+		}
+	}
+	if !greetEnd {
+		t.Fatal("TTS-приветствие не завершено end-кадром")
+	}
+	base := len(m.TTSStarts())
+
+	// Медленный LLM: 100 мс между токенами → стрим идёт ~2.7 с. НЕ сбрасываем:
+	// мок-LLM пересоздаётся на тест, гонки с ChatStream нет.
+	e.mock.SetTokenDelay(100 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	_ = conn.Write(ctx, websocket.MessageText, mustJSON(
+		map[string]any{"type": "ui", "name": "utterance", "payload": map[string]string{"text": "расскажи"}}))
+	cancel()
+
+	// Кадры хода ИИ до end-кадра: амплитудные маркеры.
+	var markers []int
+	sawEnd := false
+	dl := time.Now().Add(30 * time.Second)
+	for !sawEnd && time.Now().Before(dl) {
+		rctx, rcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		mt, data, rerr := conn.Read(rctx)
+		rcancel()
+		if rerr != nil || mt != websocket.MessageBinary || len(data) < 8 {
+			continue
+		}
+		if binary.LittleEndian.Uint16(data[2:4])&0x01 != 0 {
+			sawEnd = true
+		}
+		markers = append(markers, pcmPeak(data[4:]))
+	}
+	if !sawEnd {
+		t.Fatalf("TTS end-кадр хода ИИ не пришёл (markers=%v)", markers)
+	}
+
+	// (а) TTS получил текст, оканчивающийся «,» (первый клиуз предложения 2,
+	// ≥ MIN_CLAUSE_CHARS), ДО завершения LLM-стрима.
+	texts := m.TTSTexts()
+	starts := m.TTSStarts()
+	if len(texts) <= base {
+		t.Fatalf("TTS-вызовов хода нет (texts=%d base=%d)", len(texts), base)
+	}
+	firstClauseCall := -1
+	for i := base; i < len(texts); i++ {
+		if strings.HasSuffix(texts[i], ",") {
+			firstClauseCall = i
+			break
+		}
+	}
+	if firstClauseCall < 0 {
+		t.Fatalf("(а) TTS не получил текст, оканчивающийся «,» (первый клиуз: %v)", texts[base:])
+	}
+	if texts[firstClauseCall] != c1 {
+		t.Errorf("(а) текст клиуза = %q, want %q", texts[firstClauseCall], c1)
+	}
+	streamEnd := e.mock.StreamEnd()
+	if !streamEnd.After(starts[firstClauseCall]) {
+		t.Errorf("(а) TTS-вызов клиуза (%v) не предшествовал концу LLM-стрима (%v) — ранняя диспетчизация не сработала",
+			starts[firstClauseCall], streamEnd)
+	}
+	t.Logf("(а) TTS-вызов клиуза: %v, конец LLM-стрима: %v (запас %v, вызов %d/%d хода)",
+		starts[firstClauseCall], streamEnd, streamEnd.Sub(starts[firstClauseCall]), firstClauseCall-base+1, len(texts)-base)
+
+	// (б)+(в) по кадрам: s1 (amp 5000) — тише (gap=1) — клиуз1 (amp 1000) —
+	// клиуз2 (amp 2000) — клиуз3 (amp 3000, без тиши между клиузами, gap=0) —
+	// финальный тише-кадр (end).
+	lastS1, firstC1, lastC1, firstC2, lastC2, firstC3 := -1, -1, -1, -1, -1, -1
+	for i, pk := range markers {
+		switch {
+		case pk >= 4000: // s1
+			lastS1 = i
+		case pk >= 2500: // c3
+			if firstC3 < 0 {
+				firstC3 = i
+			}
+		case pk >= 1500: // c2
+			if firstC2 < 0 {
+				firstC2 = i
+			}
+			lastC2 = i
+		case pk >= 500: // c1
+			if firstC1 < 0 {
+				firstC1 = i
+			}
+			lastC1 = i
+		}
+	}
+	if lastS1 < 0 || firstC1 < 0 || firstC2 < 0 || firstC3 < 0 {
+		t.Fatalf("маркеры не собраны (lastS1=%d firstC1=%d firstC2=%d firstC3=%d markers=%v)",
+			lastS1, firstC1, firstC2, firstC3, markers)
+	}
+	// (в) после «.»-предложения тише-пауза 1 (один тише-кадр 250 мс) сохранена.
+	for i := lastS1 + 1; i < firstC1; i++ {
+		if markers[i] >= 500 {
+			t.Errorf("(в) нет тише-паузы после «.»: кадр %d (%d) в разрыве, markers=%v", i, markers[i], markers)
+			break
+		}
+	}
+	if n := firstC1 - lastS1 - 1; n != 1 {
+		t.Errorf("(в) кадров тишины после «.» = %d, want 1 (250 мс), markers=%v", n, markers)
+	}
+	// (б) между клиузами одной фразы тише-кадров нет (gap=0: кадры клиуз подряд).
+	if firstC2 != lastC1+1 {
+		t.Errorf("(б) разрыв между клиузом 1 и клиузом 2: %d кадр(ов) (want 0), markers=%v", firstC2-lastC1-1, markers)
+	}
+	if firstC3 != lastC2+1 {
+		t.Errorf("(б) разрыв между клиузом 2 и клиузом 3: %d кадр(ов) (want 0), markers=%v", firstC3-lastC2-1, markers)
+	}
+	t.Logf("маркеры хода ИИ: %v", markers)
 }
 
 // TestSTTStreamPartialBeforeTranscript — стриминговый STT (ADR-007):
