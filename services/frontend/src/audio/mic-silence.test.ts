@@ -174,7 +174,10 @@ describe('MicCapture: fallback и «молчащий» микрофон', () => 
       vi.advanceTimersByTime(100);
     }
     expect(states).toContain('muted');
-    expect(errors).toContain('Микрофон молчит: проверьте устройство, мьют и разрешения браузера');
+    expect(errors).toContain(
+      'Микрофон молчит: проверьте устройство, мьют и разрешения браузера. ' +
+        'Диагностика: откройте /audio-debug.html и проверьте уровень сигнала с микрофона.',
+    );
     // повторных предупреждений за период нет
     expect(errors.filter((e) => e.startsWith('Микрофон молчит')).length).toBe(1);
 

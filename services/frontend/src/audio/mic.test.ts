@@ -3,8 +3,8 @@
  * noiseSuppression (barge-in: микрофон слушается и во время речи ИИ —
  * эхо динамика→микрофон подавляется браузером, см. ADR-002/SRS §8).
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { MicCapture } from './mic';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { MicCapture, MAX_REINIT, SILENCE_MS, type MicCaptureEvents } from './mic';
 
 /** Доступ к приватным полям/методам MicCapture (dev-диагностика). */
 type MicInternal = {
@@ -134,5 +134,182 @@ describe('MicCapture.debugInfo / feedSilence (dev-диагностика)', () =
     const cap = new MicCapture();
     internal(cap).dbgGaps = [400, 100, 300, 200]; // отсортировано [100,200,300,400]
     expect(cap.debugInfo().medGapMs).toBe(300); // idx floor(4/2)=2
+  });
+});
+
+// --- цепочка надёжности захвата: worklet → fallback → полная reinit (T-20261008175905)
+
+describe('MicCapture: цепочка надёжности (worklet → fallback → reinit)', () => {
+  class FakeWorkletNode {
+    static instances: FakeWorkletNode[] = [];
+    port: { onmessage: ((e: { data: unknown }) => void) | null } = { onmessage: null };
+    connect = vi.fn();
+    disconnect = vi.fn();
+    constructor() {
+      FakeWorkletNode.instances.push(this);
+    }
+    /** Симуляция доставки чанка PCM16 из worklet. */
+    sendChunk(pcm: Int16Array): void {
+      this.port.onmessage?.({ data: pcm });
+    }
+  }
+
+  class FakeSPNode {
+    onaudioprocess: ((e: unknown) => void) | null = null;
+    connect = vi.fn();
+    disconnect = vi.fn();
+  }
+
+  class FakeCtx {
+    static createdSP: FakeSPNode[] = [];
+    sampleRate = 48000;
+    state = 'running';
+    audioWorklet = { addModule: vi.fn(async () => undefined) };
+    destination = {};
+    createMediaStreamSource = () => ({ connect: vi.fn() });
+    createGain = () => ({ gain: { value: 1 }, connect: vi.fn() });
+    createScriptProcessor = () => {
+      const n = new FakeSPNode();
+      FakeCtx.createdSP.push(n);
+      return n;
+    };
+    close = vi.fn(async () => undefined);
+  }
+
+  interface Harness {
+    mic: MicCapture;
+    getUserMedia: ReturnType<typeof vi.fn>;
+    info: string[];
+    errors: string[];
+    states: string[];
+  }
+
+  /**
+   * Старт захвата в fake-среде (jsdom): getUserMedia — управляемый,
+   * AudioContext/AudioWorklet — моки. gum(calls) — что вернуть на N-ном вызове
+   * (брось исключение, чтобы симулировать отказ доступа).
+   */
+  async function beginMic(gum?: (calls: number) => unknown): Promise<Harness> {
+    FakeWorkletNode.instances = [];
+    FakeCtx.createdSP = [];
+    const info: string[] = [];
+    const errors: string[] = [];
+    const states: string[] = [];
+    const stream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
+    let calls = 0;
+    const getUserMedia = vi.fn(async () => {
+      calls++;
+      // gum возвращает значение (undefined → дефолтный стрим) или бросает (отказ).
+      return gum ? (gum(calls) ?? stream) : stream;
+    });
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+    vi.stubGlobal('AudioContext', FakeCtx);
+    vi.stubGlobal('AudioWorkletNode', class extends FakeWorkletNode {});
+    // jsdom не знает createObjectURL (worklet-модуль в Blob-URL).
+    (URL as unknown as { createObjectURL: (b: Blob) => string }).createObjectURL = () => 'blob:fake';
+    const mic = new MicCapture();
+    const events: MicCaptureEvents = {
+      onChunk: () => {},
+      onInfo: (m) => info.push(m),
+      onError: (e) => errors.push(e),
+      onState: (s) => states.push(s),
+    };
+    await mic.start(events);
+    return { mic, getUserMedia, info, errors, states };
+  }
+
+  const advance = (ms: number) => vi.advanceTimersByTimeAsync(ms);
+  /** Дождаться завершения асинхронной цепочки reinit (микрозадачи). */
+  const flush = async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('worklet молчит 3 с → fallback (ScriptProcessor) + info', async () => {
+    const h = await beginMic();
+    expect(h.mic.debugInfo().path).toBe('worklet');
+    await advance(3000);
+    expect(FakeCtx.createdSP).toHaveLength(1);
+    expect(h.mic.debugInfo().path).toBe('fallback');
+    expect(h.info).toEqual(['Микрофон: основной путь (AudioWorklet) молчит, включён резервный захват']);
+    expect(h.errors).toEqual([]); // info — не ошибка
+  });
+
+  it('fallback молчит 3 с → полная повторная инициализация: getUserMedia заново, running, onInfo с попыткой', async () => {
+    const h = await beginMic();
+    await advance(3000); // worklet молчит → fallback
+    expect(h.mic.debugInfo().path).toBe('fallback');
+    await advance(3000); // fallback молчит → reinit #1
+    await flush();
+    expect(h.getUserMedia).toHaveBeenCalledTimes(2);
+    expect(FakeWorkletNode.instances).toHaveLength(2); // новый worklet-путь
+    expect(h.mic.state).toBe('running');
+    expect(h.mic.debugInfo().path).toBe('worklet');
+    expect(h.info).toContain('Микрофон: резервный путь молчит — повторяю инициализацию (попытка 1)');
+    expect(h.errors).toEqual([]);
+  });
+
+  it(`${MAX_REINIT} пересозданий подряд → финальный onError со ссылкой на audio-debug.html`, async () => {
+    const h = await beginMic();
+    // 6 тишинных окон по 3 с: worklet→fallback, →reinit#1, worklet→fallback,
+    // →reinit#2, worklet→fallback, → лимит исчерпан.
+    for (let i = 0; i < 2 * (MAX_REINIT + 1); i++) {
+      await advance(3000);
+      await flush();
+    }
+    expect(h.getUserMedia).toHaveBeenCalledTimes(1 + MAX_REINIT);
+    expect(h.info.filter((m) => m.includes('повторяю инициализацию'))).toHaveLength(MAX_REINIT);
+    expect(h.errors.at(-1)).toContain('/audio-debug.html');
+    expect(h.errors.at(-1)).toContain('повторные инициализации не помогли');
+  });
+
+  it('ретрай с отклонённым getUserMedia → state "denied" + onError', async () => {
+    const h = await beginMic((calls) => {
+      if (calls >= 2) throw new Error('NotAllowedError');
+      return undefined;
+    });
+    expect(h.mic.state).toBe('running');
+    await advance(3000); // → fallback
+    await advance(3000); // → reinit #1: getUserMedia отклонён
+    await flush();
+    expect(h.mic.state).toBe('denied');
+    expect(h.states.at(-1)).toBe('denied');
+    expect(h.errors.at(-1)).toContain('Нет доступа к микрофону');
+  });
+
+  it('первый чанок после ретрая — счётчик сброшен, повторных пересозданий нет', async () => {
+    const h = await beginMic();
+    await advance(3000); // → fallback
+    await advance(3000); // → reinit #1
+    await flush();
+    expect(h.getUserMedia).toHaveBeenCalledTimes(2);
+    // первый чанок с нового worklet-пути
+    FakeWorkletNode.instances.at(-1)!.sendChunk(new Int16Array(4000).fill(1000));
+    expect(h.mic.state).toBe('running');
+    // дальнейшие 6 тишинных окон — пересозданий нет (таймер снят, счётчик 0)
+    await advance(3000 * 6);
+    await flush();
+    expect(h.getUserMedia).toHaveBeenCalledTimes(2);
+    expect(h.errors).toEqual([]);
+  });
+
+  it('muted: onError содержит инструкцию и ссылку на audio-debug.html', async () => {
+    const h = await beginMic();
+    const silence = (h.mic as unknown as { silence: { feed(rms: number, now: number): void } | null }).silence;
+    expect(silence).not.toBeNull();
+    silence!.feed(0, 100_000);
+    silence!.feed(0, 100_000 + SILENCE_MS); // тишина ≥ SILENCE_MS → onMuted
+    expect(h.mic.state).toBe('muted');
+    expect(h.states.at(-1)).toBe('muted');
+    expect(h.errors.at(-1)).toContain('/audio-debug.html');
+    expect(h.errors.at(-1)).toContain('Микрофон молчит');
   });
 });

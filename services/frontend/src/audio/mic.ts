@@ -24,6 +24,12 @@ export type MicState = 'idle' | 'running' | 'stopped' | 'denied' | 'muted';
 // без DOM.
 export const SILENCE_RMS = 0.005;
 export const SILENCE_MS = 5000;
+// Цепочка надёжности захвата (инцидент 2026-10-08): 3 с без чанков —
+// следующий шаг: worklet → fallback (ScriptProcessor) → полная повторная
+// инициализация (getUserMedia заново → снова worklet). Не более MAX_REINIT
+// полных пересозданий подряд; счётчик сбрасывается первым чанком любого пути.
+export const MAX_REINIT = 2;
+export const NO_DATA_MS = 3000;
 
 export function chunkRms(pcm: Int16Array): number {
   let s = 0;
@@ -191,22 +197,51 @@ export class MicCapture {
   private dbgLastTs = 0;
   private dbgTimer: number | null = null;
   private pathRef: 'worklet' | 'fallback' = 'worklet';
+  private events: MicCaptureEvents | null = null; // живые события (для reinit)
+  private reinitCount = 0; // полных пересозданий подряд (сброс — первый чанок)
+  private reiniting = false; // защита от дубля пересоздания
 
   async start(events: MicCaptureEvents): Promise<void> {
     if (this.micState === 'running' || this.micState === 'muted') return;
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        // 16 кГц — желательно, но браузер может вернуть системную частоту;
-        // ресэмплинг в worklet работает в обоих случаях.
-        sampleRate: TARGET_RATE,
-        // Базовая эхо-защита (barge-in): микрофон слушается и во время речи
-        // ИИ (серверный VAD отделяет голос кандидата) — подавляем эхо
-        // динамика→микрофон на уровне браузера.
-        echoCancellation: true,
-        noiseSuppression: true,
-      },
-    });
+    this.events = events;
+    if (import.meta.env.DEV) {
+      // Dev-инструмент (скриншоты/ручная диагностика): доступ к инстансу
+      // захвата из консоли — window.__gradeMic. В prod-сборке отсутствует.
+      (window as unknown as Record<string, unknown>).__gradeMic = this;
+    }
+    await this.initCapture();
+  }
+
+  // Полная инициализация захвата: getUserMedia → AudioContext → AudioWorklet.
+  // Используется и при первом старте, и при повторной инициализации.
+  private async initCapture(): Promise<void> {
+    const events = this.events;
+    if (events === null) return;
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          // 16 кГц — желательно, но браузер может вернуть системную частоту;
+          // ресэмплинг в worklet работает в обоих случаях.
+          sampleRate: TARGET_RATE,
+          // Базовая эхо-защита (barge-in): микрофон слушается и во время речи
+          // ИИ (серверный VAD отделяет голос кандидата) — подавляем эхо
+          // динамика→микрофон на уровне браузера.
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+    } catch (err) {
+      // Нет доступа (включая повторные попытки): state 'denied' + конкретика.
+      this.setState('denied', events);
+      events.onError?.(
+        'Нет доступа к микрофону: браузер отклонил запрос. Разрешите доступ в ' +
+          'настройках браузера (значок замка/микрофона рядом с адресом) или ' +
+          'откройте диагностику /audio-debug.html.',
+      );
+      throw err;
+    }
     this.stream = stream;
     const Ctx = window.AudioContext ?? (window as any).webkitAudioContext;
     let ctx: AudioContext;
@@ -249,13 +284,17 @@ export class MicCapture {
     });
     // Диагностика: 3 с без чанков — AudioWorklet молчит (в некоторых
     // средах процессор не расписывается). Тогда — резервный путь:
-    // legacy ScriptProcessor (он работает там, где worklet не гонится).
-    this.armNoDataTimeout(events);
+    // legacy ScriptProcessor (он работает там, где worklet не гонится);
+    // если и он молчит — полная повторная инициализация (см. reinitCapture).
+    this.armNoDataTimeout();
     // Детектор «молчащего» микрофона (rms чанков, любой путь захвата).
     this.silence = new SilenceDetector({
       onMuted: () => {
         this.setState('muted', events);
-        events.onError?.('Микрофон молчит: проверьте устройство, мьют и разрешения браузера');
+        events.onError?.(
+          'Микрофон молчит: проверьте устройство, мьют и разрешения браузера. ' +
+            'Диагностика: откройте /audio-debug.html и проверьте уровень сигнала с микрофона.',
+        );
       },
       onRecover: () => this.setState('running', events),
     });
@@ -283,6 +322,13 @@ export class MicCapture {
 
   stop(): void {
     if (this.micState === 'idle') return;
+    this.disposeCapture();
+    this.setState('stopped');
+  }
+
+  // Освобождение ресурсов захвата (tracks, контекст, ноды, таймеры) без
+  // смены состояния — общая часть stop() и повторной инициализации.
+  private disposeCapture(): void {
     if (this.noDataTimer !== null) {
       window.clearTimeout(this.noDataTimer);
       this.noDataTimer = null;
@@ -304,22 +350,23 @@ export class MicCapture {
     this.stream = null;
     void this.ctx?.close();
     this.ctx = null;
-    this.setState('stopped');
   }
 
   get state(): MicState {
     return this.micState;
   }
 
-  // 3 с без аудио-чанков: либо переключаемся на резервный захват
-  // (ScriptProcessor), либо (если он уже активен) — предупреждение.
-  private armNoDataTimeout(events: MicCaptureEvents): void {
+  // NO_DATA_MS без аудио-чанков: следующий шаг цепочки надёжности —
+  // резервный захват (ScriptProcessor) или полная повторная инициализация
+  // (если fallback уже активен и лимит MAX_REINIT не исчерпан).
+  private armNoDataTimeout(): void {
     if (this.noDataTimer !== null) {
       window.clearTimeout(this.noDataTimer);
     }
     this.noDataTimer = window.setTimeout(() => {
       this.noDataTimer = null;
-      if (this.micState !== 'running') return;
+      const events = this.events;
+      if (events === null || this.micState !== 'running') return;
       // Диагностика: почему путь молчит (состояние контекста, устройство).
       const track = typeof this.stream?.getAudioTracks === 'function'
         ? this.stream.getAudioTracks()[0]
@@ -334,20 +381,51 @@ export class MicCapture {
       });
       if (this.spNode === null) {
         this.switchToScriptProcessor(events);
-      } else {
+      } else if (this.reinitCount >= MAX_REINIT) {
+        // Лимит повторных инициализаций исчерпан — финальная ошибка
+        // с конкретной инструкцией (диагностика — audio-debug.html).
         events.onError?.(
-          'Микрофон включён, но аудио-данные не приходят — проверьте устройство и разрешения браузера.',
+          'Микрофон включён, но аудио-данные не приходят: повторные инициализации ' +
+            'не помогли. Проверьте устройство, мьют и разрешения браузера; ' +
+            'диагностика — /audio-debug.html.',
         );
+      } else {
+        this.reinitCapture(events);
       }
-    }, 3000);
+    }, NO_DATA_MS);
   }
 
-  // Первый чанок от любого пути — снимаем таймер диагностики.
+  // Первый чанок от любого пути — снимаем таймер диагностики и сбрасываем
+  // счётчик пересозданий (данные идут — цепочка сработала).
   private onFirstChunk(): void {
     if (this.noDataTimer !== null) {
       window.clearTimeout(this.noDataTimer);
       this.noDataTimer = null;
     }
+    this.reinitCount = 0;
+  }
+
+  // Полная повторная инициализация: worklet и fallback молчали —
+  // останавливаем tracks/контекст и повторяем getUserMedia → worklet-путь.
+  // UI узнаёт об этом через onInfo (сессия не блокируется); ошибка доступа
+  // обрабатывается в initCapture (state 'denied' + onError).
+  private reinitCapture(events: MicCaptureEvents): void {
+    if (this.reiniting) return;
+    this.reiniting = true;
+    this.reinitCount++;
+    events.onInfo?.(
+      `Микрофон: резервный путь молчит — повторяю инициализацию (попытка ${this.reinitCount})`,
+    );
+    this.disposeCapture();
+    void (async () => {
+      try {
+        await this.initCapture();
+      } catch {
+        // getUserMedia отклонён: state 'denied' + onError уже сообщены в initCapture.
+      } finally {
+        this.reiniting = false;
+      }
+    })();
   }
 
   // Кормим детектор тишины (только когда микрофон «включён», включая
@@ -453,8 +531,8 @@ export class MicCapture {
       events.onInfo?.(
         'Микрофон: основной путь (AudioWorklet) молчит, включён резервный захват',
       );
-      // Если и резервный путь молчит — предупреждение в UI.
-      this.armNoDataTimeout(events);
+      // Если и резервный путь молчит — повторная инициализация (см. armNoDataTimeout).
+      this.armNoDataTimeout();
     } catch {
       events.onError?.(
         'Микрофон не работает: ни AudioWorklet, ни резервный захват не дали данных. Обновите браузер (Chrome/Edge).',
