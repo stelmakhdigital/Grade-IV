@@ -65,6 +65,7 @@
 - [x] Локальный voice-контур (предварительная pipeline-задача) — 2026-10-05 (67e1694): STT large-v3 GPU (cuda/float16, 0.2 с/5 с аудио) + TTS Silero v5 CPU, модели в `services/voice/models/`, LLM `qwen3.8-27b-fp8`; живые пробы STT/TTS/LLM зелёные (roundtrip conf 0.857, сходство 0.846, отчёт 18 с)
 - [x] Full-duplex с barge-in (a3bfc11): VAD слушает кандидата во время речи ИИ, порог 500 мс (BargeInMinSpeechMS), WS tts_stop, player.stop(), браузерный AEC, метрика grade_barge_ins_total; live-замер подтверждён
 - [x] Диагностика «молчащего» микрофона (881eaae): rms чанков < 0.005 ≥ 5 с → UI-предупреждение «Микрофон молчит» + состояние muted; fallback-переход (AudioWorklet→ScriptProcessor) — info-сообщение в UI; live-проверка: мьютный вход → warning ~5–8 с, рабочий вход (реальное аудио) → ложных предупреждений нет, речь распознаётся (conf 0.845/0.93)
+- [x] Пауза/возобновление сессии — полный контур (pipeline T-20261008154023 R1, 2026-10-08; merge fed3c4a/26419c4/5e2a31c): backend — pause останавливает активный TTS-стрим (tts_stop + end-кадр, реестр WS-соединений), ходы берут статус из движка (гонка закрыта), paused-сессия не обрабатывает реплики (текст + голос), resume после порога — 409+aborted; frontend — кнопки «Пауза»/«Продолжить» + баннер, mic/player стоп до REST, автовозврат мика после resume; docs — актуализация README/OPERATIONS/DEPLOYMENT/TEST_PLAN/.env.example + секция FR-S7; тесты: session_pause_test.go (5), vitest 73; скриншоты screenshots/session-pause/
 - [ ] Бэклог улучшений: мультиязычие, A/B промптов
 
 ## Бэклог ML/latency
