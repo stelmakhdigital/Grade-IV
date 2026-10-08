@@ -135,6 +135,12 @@ p {
   margin: 8px 0;
 }
 
+/* Ссылка на диагностику микрофона внутри строки ошибки/мьюта. */
+.debug-link {
+  color: #7aa2f7;
+  text-decoration: underline;
+}
+
 .form-warn {
   color: #e5c07b;
   font-size: 13px;

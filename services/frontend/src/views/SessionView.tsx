@@ -130,7 +130,9 @@ export function SessionView({ id }: { id: number }) {
             {mic === 'running' && <span className="listening">микрофон: включён</span>}
             {mic === 'muted' && (
               <span className="form-error" role="alert" data-testid="mic-muted">
-                Микрофон молчит — проверьте устройство, мьют и разрешения браузера.
+                Микрофон молчит — проверьте устройство, мьют и разрешения браузера.{' '}
+                <a className="debug-link" href="/audio-debug.html" target="_blank" rel="noreferrer" data-testid="debug-link-mic-muted">/audio-debug.html</a>{' '}
+                — диагностика микрофона.
               </span>
             )}
             {mic !== 'running' && mic !== 'denied' && mic !== 'muted' && stage === 'voice' && wsState === 'open' && !paused && (
@@ -202,7 +204,7 @@ export function SessionView({ id }: { id: number }) {
             </>
           )}
           {error !== null && (
-            <p className="form-error" role="alert">{error}</p>
+            <p className="form-error" role="alert">{renderDebugLink(error)}</p>
           )}
         </section>
       )}
@@ -235,6 +237,23 @@ export function SessionView({ id }: { id: number }) {
         </ol>
       </section>
     </main>
+  );
+}
+
+/**
+ * Рендер строки ошибки: путь /audio-debug.html — кликабельная ссылка
+ * (самодиагностика микрофона; дефект (b) инцидента 2026-10-08).
+ */
+function renderDebugLink(msg: string) {
+  const marker = '/audio-debug.html';
+  const idx = msg.indexOf(marker);
+  if (idx === -1) return msg;
+  return (
+    <>
+      {msg.slice(0, idx)}
+      <a className="debug-link" href={marker} target="_blank" rel="noreferrer" data-testid="debug-link">{marker}</a>
+      {msg.slice(idx + marker.length)}
+    </>
   );
 }
 
