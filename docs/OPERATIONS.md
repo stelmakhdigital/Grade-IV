@@ -64,7 +64,7 @@ docker compose -f infra/docker-compose.yml logs -f api      # slog JSON
 docker compose -f infra/docker-compose.yml logs -f voice caddy
 ```
 
-Ключевые события api: `stt: реплика кандидата`, `tts: синтез не удался`,
+Ключевые события api: `stt: реплика кандидата`, `tts: синтез предложения не удался`,
 `доставлен лимит времени сессии`, `отчёт готов` (список — DEPLOYMENT.md §3).
 
 ## 6. Troubleshooting
@@ -77,3 +77,4 @@ docker compose -f infra/docker-compose.yml logs -f voice caddy
 | voice долго отвечает (p95 > 4 с на CPU) | `STT_MODEL=small` → GPU-профиль (`--profile gpu`, large-v3) или стриминговый STT (DEPLOYMENT.md §3, баг-находка) |
 | sandbox не запускает Docker-задачи | `SANDBOX_MODE=docker`, на узле работает docker-демон (mount docker.sock в compose уже есть) |
 | Порт занят (80/443/3000/9090) | `ss -tlnp`; снять conflicting-сервис или поменять port-mapping в compose |
+| Сессия «прервана» после долгой паузы | Ожидание (SRS §7): пауза > `SESSION_PAUSE_TIMEOUT_S` (дефолт 1800 с) → при Resume сессия `aborted`, тарифицируется фактическое активное время. Лог api: `пауза дольше порога — сессия прервана`; события сессии — GET `/api/v1/sessions/{id}/events` |

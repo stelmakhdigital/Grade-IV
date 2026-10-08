@@ -16,6 +16,7 @@ help:
 	@echo "  make run-sandbox — запустить sandbox (dev, :8200)"
 	@echo "  make run-voice   — запустить voice (dev, :8100)"
 	@echo "  make run-frontend — запустить frontend (dev, :5173)"
+	@echo "  make models      — скачать модели STT/TTS (scripts/download-models.sh, MODELS_DIR)"
 	@echo "  make up          — docker compose (profile prod)"
 	@echo "  make up-gpu      — compose prod + gpu (voice на GPU-узле)"
 	@echo "  make down        — остановить compose"
@@ -66,6 +67,9 @@ run-frontend:
 
 up:
 	@docker compose -f infra/docker-compose.yml --profile prod up --build
+
+models:
+	@bash scripts/download-models.sh
 
 down:
 	@docker compose -f infra/docker-compose.yml --profile prod down

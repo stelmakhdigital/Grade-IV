@@ -16,7 +16,7 @@ System Design (whiteboard с палитрой архитектурных бло�
 | [`AGENTS.md`](AGENTS.md) | правила работы ИИ-агентов (обязательно читать агенту) |
 | [`REQUIREMENTS.md`](REQUIREMENTS.md) | SRS v1.1: FR, NFR, критерии и веса отчёта (§12) |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | архитектура, диаграммы, контракты REST/WS/voice/sandbox |
-| [`docs/adr/`](docs/adr) | ADR-001…006 (голосовой контур, VAD, sandbox, whiteboard, LLM, Go-стек) |
+| [`docs/adr/`](docs/adr) | ADR-001…007 (транспорт аудио, голосовой конвейер, sandbox, whiteboard, LLM, Go-стек, стриминговый STT) |
 | [`roadmap.md`](roadmap.md) | фазы SDLC и work packages со статусами |
 
 ## Композиция
@@ -36,7 +36,7 @@ scripts/     smoke.sh — REST e2e-смоук
 
 ## Быстрый старт (dev)
 
-Требования: Go ≥ 1.26, Node ≥ 22 + pnpm ≥ 12, Python ≥ 3.12.
+Требования: Go ≥ 1.26, Node ≥ 22 + pnpm ≥ 10.1 (в CI — pnpm 10), Python ≥ 3.12.
 
 ### Шаг 1. Установить зависимости
 
@@ -46,17 +46,21 @@ make install        # go mod download, pnpm install, voice venv (torch CPU + ML-
 
 ### Шаг 2. Скачать модели (STT/TTS)
 
-Модели скачиваются в `FOR_RUN/` (в `.gitignore`, не попадает в git):
-- **faster-whisper small** (STT) → `FOR_RUN/stt/Systran/faster-whisper-small/` (~460 МБ)
-- **Silero TTS v5 RU** → `FOR_RUN/tts/silero-tts-v5_ru.pt` (~150 МБ)
+Модели скачиваются в `services/voice/models/` (в `.gitignore`, не попадает в git) —
+именно этот каталог использует `make run-all`:
+- **faster-whisper** (STT) → `services/voice/models/stt/Systran/faster-whisper-<размер>/`
+  (small ~460 МБ; дефолт run-all — `large-v3`, ~3 ГБ)
+- **Silero TTS v5 RU** → `services/voice/models/tts/silero-tts-v5_ru.pt` (~150 МБ)
 - **Silero VAD onnx** — в комплекте с faster-whisper (не скачивается)
 
 ```sh
-make models         # или: MODELS_DIR=$PWD/FOR_RUN bash scripts/download-models.sh
+MODELS_DIR=$PWD/services/voice/models bash scripts/download-models.sh
+# или: MODELS_DIR=$PWD/services/voice/models make models
 ```
 
-LLM-модель (Qwen3.8-27B, ~60 ГБ) не скачивается (опционально в скрипте) — для dev
-достаточно `LLM_MOCK=1` (эхо-ответы) или внешний LLM-узел (см. Шаг 4).
+LLM-модель (Qwen3.8-27B, ~60 ГБ) по умолчанию не скачивается — скрипт спросит перед
+загрузкой (по умолчанию — «нет»); для dev достаточно `LLM_MOCK=1` (эхо-ответы) или
+внешнего LLM-узла (см. Шаг 4).
 
 ### Шаг 3. Запустить весь стек (одна команда)
 
@@ -67,14 +71,17 @@ make stop-all       # остановить всё
 ```
 
 После перезагрузки ПК достаточно `make run-all` — скрипт сам пересоберёт
-бинарники и поднимет сервисы (модели и БД живут в `FOR_RUN/` и переживают
-перезагрузку).
+бинарники и поднимет сервисы (БД — `FOR_RUN/`, модели — `services/voice/models/`;
+обе живут на диске и переживают перезагрузку).
 
 Варианты:
 - **без LLM-узла** (детерминированный эхо-интервьюер): `LLM_MOCK=1 make run-all`
 - **свой LLM-узел**: `LLM_BASE_URL=http://IP:8000/v1 LLM_MODEL=<имя> make run-all`
-- **модели в другом месте**: `bash scripts/download-models.sh` скачивает в
-  `FOR_RUN/`; окружение `STT_MODEL` (tiny/small/large-v3) — `STT_MODEL=small make run-all`
+- **модели в другом месте**: `MODELS_DIR=<каталог> bash scripts/download-models.sh`
+  (каталог по умолчанию скрипта — `/mnt/models`); окружение `STT_MODEL`
+  (tiny/small/large-v3) — `STT_MODEL=small make run-all`
+- **без GPU**: `STT_DEVICE=cpu STT_COMPUTE_TYPE=int8 make run-all` (дефолт run-all —
+  `STT_DEVICE=cuda`, `STT_COMPUTE_TYPE=float16`)
 - **время сессии**: по умолчанию в dev-запуске — без ограничения
   (`SESSION_LIMIT_S=off`); вернуть лимит по грейду — `SESSION_LIMIT_S= make run-all`
   (пустое значение) или свой: `SESSION_LIMIT_S=7200 make run-all` (2 часа, в секундах)
@@ -85,7 +92,7 @@ make stop-all       # остановить всё
 
 ```sh
 make run-sandbox    # :8200
-STT_MODEL=small STT_DOWNLOAD_ROOT=$PWD/FOR_RUN/stt TTS_MODEL_DIR=$PWD/FOR_RUN/tts make run-voice
+STT_MODEL=small STT_DOWNLOAD_ROOT=$PWD/services/voice/models/stt TTS_MODEL_DIR=$PWD/services/voice/models/tts make run-voice
 LLM_MOCK=1 make run-api
 make run-frontend   # :5173
 ```
@@ -129,9 +136,10 @@ make smoke
 | `LLM_MOCK` | `1` / `0` | `1` — детерминированный эхо-LLM (без узла), `0` — реальный LLM |
 | `LLM_BASE_URL` | `http://IP:8000/v1` | Адрес LLM-узла (OpenAI-совместимый API) |
 | `LLM_MODEL` | `qwen3.8-27b-fp8` | Имя модели на узле |
-| `STT_MODEL` | `small` / `tiny` / `large-v3` | Модель STT (faster-whisper) |
-| `STT_DOWNLOAD_ROOT` | `FOR_RUN/stt` | Директория кэша STT-моделей |
-| `TTS_MODEL_DIR` | `FOR_RUN/tts` | Директория TTS-модели (Silero) |
+| `STT_MODEL` | `small` / `tiny` / `large-v3` | Модель STT (faster-whisper; дефолт run-all — `large-v3`) |
+| `STT_DEVICE` / `STT_COMPUTE_TYPE` | `cuda` / `float16` (run-all) | Без GPU — `cpu` / `int8` |
+| `STT_DOWNLOAD_ROOT` | `services/voice/models/stt` | Директория кэша STT-моделей |
+| `TTS_MODEL_DIR` | `services/voice/models/tts` | Директория TTS-модели (Silero) |
 | `SANDBOX_MODE` | `subprocess` / `docker` | `subprocess` — без docker (dev), `docker` — prod |
 | `VOICE_STT_PROVIDER` | `faster-whisper` / `fake` | `fake` — без ML-моделей (детерминизм) |
 | `VOICE_TTS_PROVIDER` | `silero` / `fake` | `fake` — без ML-моделей (детерминизм) |
@@ -142,6 +150,34 @@ make smoke
 make stop-all       # всё, что запущено через make run-all
 # вручную (4 терминала): Ctrl+C в каждом
 ```
+
+## Пауза и возобновление сессии (FR-S7)
+
+Тарификация считает только **активное** время сессии (`active_seconds`); время
+паузы не тарифицируется (SRS §7).
+
+**API** (auth: Bearer JWT; маршрут `POST /api/v1/sessions/{id}/{action}` в
+`httpapi/server.go`, хендлер `handleSessionAction` в `httpapi/session_handlers.go`):
+
+| Action | Из статуса | Результат |
+|---|---|---|
+| `pause` | `active` | статус → `paused` (записывается `paused_at`); накопленные до паузы активные секунды сохраняются; клиенту по WS уходит кадр `{"type":"timer","remaining_s":…}`; событие `paused` (`reason: "user"`) |
+| `resume` | `paused` | статус → `active`, клиенту по WS — кадр `timer`; интервью продолжается с той же стадии. Если пауза длиннее `SESSION_PAUSE_TIMEOUT_S` (дефолт **1800 с** = 30 мин) — сессия завершается как `aborted` (`reason: "pause_timeout"`), тарифицируется фактическое активное время, клиенту по WS: `{"type":"error","code":"session_aborted"}` |
+| `finish` | `active` / `paused` | статус → `finished`, стадия → `report`; финальная тарификация активного времени; старт генерации отчёта (GET report: 202 → 200); клиенту по WS: `timer` (`remaining_s: 0`) и `stage: report` |
+
+**Обрыв связи:** при обрыве WS-соединения движок сам ставит активную сессию в паузу
+(`reason: "ws_disconnected"`, `Engine.Detach`); после рестарта api активные сессии без
+живого таймера также переводятся в паузу (recovery в `Engine.Attach`).
+
+Коды ошибок: 404 `not_found`, 409 `invalid_state` (запрещённый переход, например
+`pause` у завершённой сессии), 500 `internal`.
+
+**UI:** кнопки «Пауза» / «Продолжить» в экране сессии — добавляются в этой итерации
+фронтенд-агентом (REST-API уже готов).
+
+Источники: `services/api/internal/session/engine_lifecycle.go` (`Pause/Resume/Detach/abort`),
+`engine_timer.go` (тарификация), `internal/config/config.go` (`SESSION_PAUSE_TIMEOUT_S`),
+`REQUIREMENTS.md` §7, FR-S7; тесты — `session/engine_test.go`.
 
 ## Тесты и сборка
 
