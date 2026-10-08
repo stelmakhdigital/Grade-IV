@@ -3,6 +3,21 @@
 <head>
 <meta charset="utf-8">
 <title>Грейд — аудио-отладка</title>
+<script>
+// Хук событий ДО остального кода: для отчёта диагностики (mic-report).
+window.__diagEvents = [];
+(function () {
+  const push = (kind, msg) => {
+    if (window.__diagEvents.length < 200) window.__diagEvents.push({ t: Date.now(), kind, msg: String(msg).slice(0, 300) });
+  };
+  for (const m of ['log', 'info', 'warn', 'error']) {
+    const orig = console[m].bind(console);
+    console[m] = function () { push(m, Array.prototype.map.call(arguments, (a) => (typeof a === 'object' ? JSON.stringify(a) : a)).join(' ')); orig.apply(null, arguments); };
+  }
+  window.addEventListener('error', (e) => push('pageerror', e.message + ' @' + (e.filename || '') + ':' + e.lineno));
+  window.addEventListener('unhandledrejection', (e) => push('unhandledrejection', (e.reason && e.reason.message) || e.reason));
+})();
+</script>
 <style>
   body { font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3; padding: 24px; max-width: 900px; margin: 0 auto; }
   h1 { font-size: 20px; } .row { margin: 10px 0; } button { padding: 8px 16px; margin: 4px; cursor: pointer; }
@@ -22,7 +37,10 @@
   <b>Проверка микрофона</b>
   <div class="row">
     <button id="micbtn">Проверить микрофон (5 с)</button>
+    <button id="micbtnaec" style="margin-left:8px">Проверить с AEC (как в приложении)</button>
     <button id="wlbtn" style="margin-left:8px">Тест AudioWorklet (4 с)</button>
+    <button id="spprobe" style="margin-left:8px">Тест резервного пути (6 с)</button>
+    <button id="diagbtn" style="margin-left:8px;background:#1f6feb;color:#fff">📤 Диагностика (9 с) — отчёт агенту</button>
     <span id="micstate" style="margin-left:12px"></span>
   </div>
   <div style="height:18px;background:#161b22;border-radius:4px;overflow:hidden;margin-top:8px">
@@ -110,10 +128,11 @@ $('connect').onclick = async () => {
 };
 // --- Проверка микрофона ---
 let micRec = null;
-$('micbtn').onclick = async () => {
+async function micCheck(audioConstraints, tag) {
   const st = $('micstate');
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+    log('getUserMedia [' + tag + '] OK: ' + JSON.stringify(audioConstraints));
     const ac = new AudioContext();
     const src = ac.createMediaStreamSource(stream);
     const an = ac.createAnalyser();
@@ -124,11 +143,13 @@ $('micbtn').onclick = async () => {
     const data = new Float32Array(an.fftSize);
     const chunks = [];
     let n = 0;
+    let maxRms = 0;
     const iv = setInterval(() => {
       an.getFloatTimeDomainData(data);
       let s = 0;
       for (let i = 0; i < data.length; i++) s += data[i] * data[i];
       const rms = Math.sqrt(s / data.length);
+      if (rms > maxRms) maxRms = rms;
       $('micbar').style.width = Math.min(100, rms * 400) + '%';
       // накапливаем float32 -> int16 для WAV
       const i16 = new Int16Array(data.length);
@@ -160,14 +181,18 @@ $('micbtn').onclick = async () => {
     $('downloads').appendChild(a);
     a.textContent = 'Скачать mic-test.wav (5 с с микрофона)';
     a.style.cssText = 'display:inline-block;margin:4px;padding:8px 16px;background:#238636;color:white;border-radius:6px;text-decoration:none';
-    st.textContent = 'готово — скачайте wav и отправьте';
+    st.textContent = '[' + tag + '] max RMS = ' + maxRms.toFixed(4) + (maxRms < 0.001 ? ' — ТИШИНА!' : ' — звук есть') + ' · wav ниже';
     log('Микрофон: записал 5 с (' + (n / rate).toFixed(1) + ' с аудио)', 'ok');
   } catch (err) {
-    st.textContent = 'ОШИБКА: ' + err.message;
+    st.textContent = 'ОШИБКА [' + tag + ']: ' + err.message;
     st.style.color = '#f85149';
-    log('getUserMedia: ' + err.message, 'err');
+    log('getUserMedia [' + tag + ']: ' + err.message, 'err');
   }
-};
+}
+$('micbtn').onclick = () => micCheck({ channelCount: 1 }, 'RAW');
+$('micbtnaec').onclick = () => micCheck(
+  { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true },
+  'AEC/NS (то же, что в приложении)');
 // автозаполнение ID из hash (#12)
 if (location.hash) $('sid').value = location.hash.slice(1);
 
@@ -289,6 +314,156 @@ $('wlbtn').onclick = async () => {
     st.style.color = '#f85149';
     log('Worklet-тест: ' + err.message, 'err');
   }
+};
+$('spprobe').onclick = async () => {
+  // Точная копия fallback-пути приложения: AudioContext() + getUserMedia(как в app)
+  // + ScriptProcessorNode; меряем частоту колбэков и уровень за 6 с.
+  const st = $('micstate');
+  st.style.color = '#8b949e';
+  st.textContent = 'Тест резервного пути (6 с): шумите…';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true },
+    });
+    const ac = new AudioContext();
+    const src = ac.createMediaStreamSource(stream);
+    const sp = ac.createScriptProcessor(4096, 1, 1);
+    const cbTs = [];
+    let maxRms = 0;
+    sp.onaudioprocess = (e) => {
+      const now = Date.now();
+      if (cbTs.length < 12) cbTs.push(now);
+      const inBuf = e.inputBuffer.getChannelData(0);
+      let s = 0;
+      for (let i = 0; i < inBuf.length; i++) s += inBuf[i] * inBuf[i];
+      const r = Math.sqrt(s / inBuf.length);
+      if (r > maxRms) maxRms = r;
+      e.outputBuffer.getChannelData(0).fill(0);
+    };
+    const g = ac.createGain(); g.gain.value = 0;
+    src.connect(sp); sp.connect(g); g.connect(ac.destination);
+    await new Promise(r => setTimeout(r, 6000));
+    const gaps = cbTs.slice(1).map((t, i) => t - cbTs[i]);
+    const avg = gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length) : -1;
+    const verdict = cbTs.length === 0
+      ? 'onaudioprocess НЕ вызывает — контекст не расписывает audio-граф!'
+      : avg > 500 ? 'колбэки редкие (' + avg + ' мс средний интервал) — граф не расписывается в реальном времени'
+      : 'колбэки нормальные (' + avg + ' мс), уровень ' + maxRms.toFixed(4);
+    const rep = {
+      kind: 'sp-fallback-probe', time: new Date().toISOString(),
+      ctxState: ac.state, rate: ac.sampleRate, track: stream.getAudioTracks()[0].label,
+      callbacks: cbTs.length, avgGapMs: avg, maxGapMs: gaps.length ? Math.max(...gaps) : -1,
+      maxRms: +maxRms.toFixed(5),
+    };
+    st.textContent = verdict;
+    st.style.color = cbTs.length && avg <= 500 ? '#3fb950' : '#f85149';
+    log('SP-probe: ' + JSON.stringify(rep), cbTs.length ? 'ok' : 'err');
+    try {
+      const r = await fetch(`http://${location.hostname}:8000/debug/mic-report`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rep),
+      });
+      log('mic-report (sp): HTTP ' + r.status, r.ok ? 'ok' : 'err');
+    } catch (err) { log('mic-report (sp): ' + err.message, 'err'); }
+    sp.disconnect();
+    stream.getTracks().forEach(t => t.stop());
+    await ac.close();
+  } catch (err) {
+    st.textContent = 'ОШИБКА: ' + err.message;
+    st.style.color = '#f85149';
+    log('SP-probe: ' + err.message, 'err');
+  }
+};
+// --- 📤 Полная диагностика: raw + AEC + worklet + события консоли → POST на сервер ---
+$('diagbtn').onclick = async () => {
+  const st = $('micstate');
+  st.style.color = '#8b949e';
+  st.textContent = 'Диагностика ~9 с: шумите/говорите весь период…';
+  const out = {
+    time: new Date().toISOString(),
+    ua: navigator.userAgent,
+    platform: navigator.platform,
+    lang: navigator.language,
+    events: (window.__diagEvents || []).slice(-60),
+    raw: null, aec: null, worklet: null,
+  };
+  const probe = async (constraints, ms) => {
+    const res = { started: Date.now() };
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    const ac = new AudioContext();
+    if (ac.state === 'suspended') { try { await ac.resume(); } catch (e) {} }
+    const src = ac.createMediaStreamSource(stream);
+    const an = ac.createAnalyser();
+    an.fftSize = 2048;
+    src.connect(an);
+    const data = new Float32Array(an.fftSize);
+    res.rate = ac.sampleRate; res.state0 = ac.state;
+    res.trackLabel = stream.getAudioTracks()[0].label;
+    let maxRms = 0, maxGap = 0, last = Date.now(), n = 0;
+    const iv = setInterval(() => {
+      const now = Date.now();
+      maxGap = Math.max(maxGap, now - last - 120);
+      last = now;
+      an.getFloatTimeDomainData(data);
+      let s = 0;
+      for (let i = 0; i < data.length; i++) s += data[i] * data[i];
+      const r = Math.sqrt(s / data.length);
+      if (r > maxRms) maxRms = r;
+      n++;
+    }, 100);
+    await new Promise(r => setTimeout(r, ms));
+    clearInterval(iv);
+    res.maxRms = +maxRms.toFixed(5); res.maxGapMs = maxGap; res.ticks = n; res.state = ac.state;
+    stream.getTracks().forEach(t => t.stop());
+    await ac.close();
+    return res;
+  };
+  try {
+    out.raw = await probe({ channelCount: 1 }, 3000);
+    out.aec = await probe({ channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true }, 3000);
+    {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+      const ac = new AudioContext();
+      if (ac.state === 'suspended') { try { await ac.resume(); } catch (e) {} }
+      await ac.audioWorklet.addModule(URL.createObjectURL(new Blob([WL_CODE], { type: 'application/javascript' })));
+      const src = ac.createMediaStreamSource(stream);
+      const node = new AudioWorkletNode(ac, 'pcm-capture', {
+        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+        processorOptions: { inputRate: ac.sampleRate, targetRate: 16000, chunkSamples: 4000 },
+      });
+      const wl = { process: false, ticks: 0, chunks: 0, levels: 0, msgTs: [], maxAbs: 0, rate: ac.sampleRate, state0: ac.state };
+      node.port.onmessage = (e) => {
+        const d = e.data;
+        if (wl.msgTs.length < 6) wl.msgTs.push(Date.now());
+        if (d instanceof Int16Array) { wl.chunks++; }
+        else if (d && d.kind === 'level') { wl.levels++; }
+        else if (d && d.kind === 'first') { wl.process = true; }
+        else if (d && d.kind === 'tick') { wl.ticks = d.n; if (d.maxAbs > wl.maxAbs) wl.maxAbs = d.maxAbs; }
+      };
+      src.connect(node);
+      const g = ac.createGain(); g.gain.value = 0;
+      node.connect(g); g.connect(ac.destination);
+      await new Promise(r => setTimeout(r, 3000));
+      wl.msgTs.push(Date.now());
+      wl.firstGapMs = wl.msgTs.length >= 2 ? wl.msgTs[1] - wl.msgTs[0] : null;
+      node.disconnect();
+      stream.getTracks().forEach(t => t.stop());
+      await ac.close();
+      out.worklet = wl;
+    }
+    st.textContent = '📤 Отчёт отправлен (скажите агенту: «отчёт ушёл»)';
+    st.style.color = '#3fb950';
+  } catch (err) {
+    out.error = String((err && err.message) || err);
+    st.textContent = 'Диагностика: ОШИБКА ' + out.error;
+    st.style.color = '#f85149';
+  }
+  try {
+    const r = await fetch(`http://${location.hostname}:8000/debug/mic-report`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(out),
+    });
+    log('mic-report: HTTP ' + r.status, r.ok ? 'ok' : 'err');
+  } catch (err) { log('mic-report: ' + err.message, 'err'); }
 };
 </script>
 </body>

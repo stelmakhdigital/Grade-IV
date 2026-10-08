@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
@@ -81,6 +82,8 @@ func (s *Server) Engine() *session.Engine { return s.engine }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("POST /debug/mic-report", s.handleDebugMicReport)
+	mux.HandleFunc("OPTIONS /debug/mic-report", s.handleDebugMicReport)
 	mux.HandleFunc("GET /metrics", metrics.Handler)
 	mux.HandleFunc("POST /api/v1/auth/register", s.handleRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
@@ -100,6 +103,36 @@ func (s *Server) Handler() http.Handler {
 	// Голосовой канал (WP-3, ADR-001): auth — токен в query/заголовке.
 	mux.HandleFunc("GET /ws/session/{id}", s.handleSessionWS)
 	return s.withLogging(mux)
+}
+
+// Dev-эндпоинт (audio-debug.html): принимает отчёт диагностики микрофона
+// из браузера пользователя и сохраняет в FOR_RUN/debug/ для анализа.
+func (s *Server) handleDebugMicReport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", r.Header.Get("Origin"))
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "некорректный JSON: "+err.Error())
+		return
+	}
+	ts := time.Now().Format("20060102-150405")
+	const dir = "FOR_RUN/debug"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		writeError(w, http.StatusInternalServerError, "io_error", err.Error())
+		return
+	}
+	b, _ := json.MarshalIndent(payload, "", "  ")
+	if err := os.WriteFile(dir+"/mic-report-"+ts+".json", b, 0o644); err != nil {
+		writeError(w, http.StatusInternalServerError, "io_error", err.Error())
+		return
+	}
+	s.log.Info("debug: mic-report сохранён", "file", dir+"/mic-report-"+ts+".json")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {

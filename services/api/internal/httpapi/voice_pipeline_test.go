@@ -593,3 +593,26 @@ func TestSTTStreamFallbackToBatch(t *testing.T) {
 		t.Fatal("нет метрики grade_stt_stream_fallbacks_total 1")
 	}
 }
+
+// TestTruncateForLog: короткая строка не должна паниковать (баг 2026-10-08:
+// text[:32] на 19-байтной реплике ронял процесс), длинные — ровно n байт
+// без разрыва юникод-последовательности.
+func TestTruncateForLog(t *testing.T) {
+	if got := truncateForLog("абв", 32); got != "абв" {
+		t.Fatalf("короткая: %q", got)
+	}
+	long := "abcdefghijklmnopqrstuvwxyz0123456789" // 36 байт
+	if got := truncateForLog(long, 32); len(got) != 32 || got != long[:32] {
+		t.Fatalf("длинная: %q (%d)", got, len(got))
+	}
+	// 32 байта — ровно на границе 2-байтовых букв (16 × 2): граница допустима.
+	cyr := "абвгдежзиклмнопрст" // 18 символов × 2 = 36 байт
+	got := truncateForLog(cyr, 32)
+	if len(got) != 32 || got != cyr[:32] {
+		t.Fatalf("юникод: %q (%d)", got, len(got))
+	}
+	// А 31 байт — внутри 16-й буквы: усечь до 30 (15 букв).
+	if got := truncateForLog(cyr, 31); len(got) != 30 || got != cyr[:30] {
+		t.Fatalf("юникод-2: %q (%d)", got, len(got))
+	}
+}

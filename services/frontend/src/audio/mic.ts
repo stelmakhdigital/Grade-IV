@@ -159,6 +159,15 @@ class PcmCapture {
 registerProcessor('pcm-capture', PcmCapture);
 `;
 
+export interface MicDebugInfo {
+  path: 'worklet' | 'fallback';
+  ctxState: AudioContextState | null;
+  rate: number;
+  chunks: number;
+  medGapMs: number;
+  maxRms: number;
+}
+
 export class MicCapture {
   private ctx: AudioContext | null = null;
   private stream: MediaStream | null = null;
@@ -168,6 +177,13 @@ export class MicCapture {
   private noDataTimer: number | null = null;
   private spNode: ScriptProcessorNode | null = null; // резервный захват
   private silence: SilenceDetector | null = null; // детектор «молчащего» микрофона
+  // Живая диагностика (dev): статистика чанков + автоотчёт /debug/mic-report.
+  private dbgChunks = 0;
+  private dbgRms = 0;
+  private dbgGaps: number[] = [];
+  private dbgLastTs = 0;
+  private dbgTimer: number | null = null;
+  private pathRef: 'worklet' | 'fallback' = 'worklet';
 
   async start(events: MicCaptureEvents): Promise<void> {
     if (this.micState === 'running' || this.micState === 'muted') return;
@@ -253,6 +269,8 @@ export class MicCapture {
     node.connect(silence);
     silence.connect(ctx.destination);
     this.node = node;
+    this.pathRef = 'worklet';
+    this.startDebugReporter();
     this.setState('running', events);
   }
 
@@ -261,6 +279,10 @@ export class MicCapture {
     if (this.noDataTimer !== null) {
       window.clearTimeout(this.noDataTimer);
       this.noDataTimer = null;
+    }
+    if (this.dbgTimer !== null) {
+      window.clearInterval(this.dbgTimer);
+      this.dbgTimer = null;
     }
     this.silence?.reset();
     this.silence = null;
@@ -291,6 +313,18 @@ export class MicCapture {
     this.noDataTimer = window.setTimeout(() => {
       this.noDataTimer = null;
       if (this.micState !== 'running') return;
+      // Диагностика: почему путь молчит (состояние контекста, устройство).
+      const track = typeof this.stream?.getAudioTracks === 'function'
+        ? this.stream.getAudioTracks()[0]
+        : null;
+      console.info('mic-debug', {
+        kind: this.spNode === null ? 'worklet-silent' : 'fallback-silent',
+        ctxState: this.ctx?.state,
+        rate: this.inputRate,
+        track: track ? track.label : null,
+        muted: track?.muted ?? null,
+        enabled: track?.enabled ?? null,
+      });
       if (this.spNode === null) {
         this.switchToScriptProcessor(events);
       } else {
@@ -310,10 +344,49 @@ export class MicCapture {
   }
 
   // Кормим детектор тишины (только когда микрофон «включён», включая
-  // состояние «молчит» — там ищем возвращение уровня).
+  // состояние «молчит» — там ищем возвращение уровня). Плюс живая диагностика.
   private feedSilence(pcm: Int16Array): void {
     if (this.micState !== 'running' && this.micState !== 'muted') return;
-    this.silence?.feed(chunkRms(pcm), Date.now());
+    const now = Date.now();
+    if (this.dbgLastTs > 0) {
+      const gap = now - this.dbgLastTs;
+      if (gap >= 0 && gap < 30000) {
+        this.dbgGaps.push(gap);
+        if (this.dbgGaps.length > 8) this.dbgGaps.shift();
+      }
+    }
+    this.dbgLastTs = now;
+    this.dbgChunks++;
+    const r = chunkRms(pcm);
+    if (r > this.dbgRms) this.dbgRms = r;
+    this.silence?.feed(r, now);
+  }
+
+  /** Dev: статистика захвата для UI/отчёта. */
+  debugInfo(): MicDebugInfo {
+    const sorted = [...this.dbgGaps].sort((a, b) => a - b);
+    const med = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0;
+    return {
+      path: this.pathRef,
+      ctxState: this.ctx?.state ?? null,
+      rate: this.inputRate,
+      chunks: this.dbgChunks,
+      medGapMs: med,
+      maxRms: Math.round(this.dbgRms * 10000) / 10000,
+    };
+  }
+
+  /** Dev: раз в 10 с — снапшот захвата на /debug/mic-report (тихо, не критичен). */
+  private startDebugReporter(): void {
+    if (this.dbgTimer !== null) return;
+    this.dbgTimer = window.setInterval(() => {
+      const info = this.debugInfo();
+      void fetch(`http://${location.hostname}:8000/debug/mic-report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'mic-capture-live', time: new Date().toISOString(), ua: navigator.userAgent, ...info }),
+      }).catch(() => {});
+    }, 10000);
   }
 
   // Резервный захват (legacy ScriptProcessorNode, main thread): работает в
@@ -359,6 +432,15 @@ export class MicCapture {
       sp.connect(silence);
       silence.connect(ctx.destination);
       this.spNode = sp;
+      this.pathRef = 'fallback';
+      console.info('mic-debug', {
+        kind: 'fallback-on',
+        ctxState: ctx.state,
+        rate: ctx.sampleRate,
+        track: typeof this.stream?.getAudioTracks === 'function'
+          ? (this.stream.getAudioTracks()[0]?.label ?? null)
+          : null,
+      });
       // Переход на fallback — информировать UI (не блокирующее info).
       events.onInfo?.(
         'Микрофон: основной путь (AudioWorklet) молчит, включён резервный захват',

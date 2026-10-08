@@ -25,6 +25,7 @@ export function SessionView({ id }: { id: number }) {
     remainingS,
     lastAiText,
     mic,
+    micDbg,
     speaking,
     wsState,
     error,
@@ -101,6 +102,11 @@ export function SessionView({ id }: { id: number }) {
             {mic !== 'running' && mic !== 'denied' && mic !== 'muted' && stage === 'voice' && wsState === 'open' && (
               <span className="form-error" role="alert">
                 Микрофон выключен — ИИ вас не слышит. Нажмите «Включить микрофон».
+              </span>
+            )}
+            {micDbg !== null && micDbg.chunks > 0 && (
+              <span className="mic-dbg" title="Диагностика захвата: путь, частота чанков, уровень">
+                мик[{micDbg.path}]: чанков {micDbg.chunks} · шаг {micDbg.medGapMs} мс · max rms {micDbg.maxRms} · ctx {micDbg.ctxState}
               </span>
             )}
           </div>

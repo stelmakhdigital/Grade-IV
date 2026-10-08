@@ -546,7 +546,7 @@ func (s *Server) handleVoiceUtterance(ws *wsSession, pcm []byte) {
 	// Фильтр доверия: STT на шуме/дыхании галлюцинирует с низкой уверенностью.
 	// Реальные реплики — conf ≥ 0.7 (замеры). Порог 0.5: ниже — шум, без хода.
 	if res.Confidence < 0.5 {
-		s.log.Debug("stt: низкое доверие — шум, без хода", "session", ws.id, "conf", res.Confidence, "text", text[:32])
+		s.log.Debug("stt: низкое доверие — шум, без хода", "session", ws.id, "conf", res.Confidence, "text", truncateForLog(text, 32))
 		return
 	}
 	s.log.Info("stt: реплика кандидата", "session", ws.id, "chars", len(text), "conf", res.Confidence, "pre", ok)
@@ -712,11 +712,24 @@ func (w *wsSession) runStreamTurn(s *Server, text string, conf float64) {
 	// Фильтр доверия (как в batch-пути): STT на шуме галлюцинирует с низкой
 	// уверенностью; реальные реплики — conf ≥ 0.7 (замеры), порог 0.5.
 	if conf < 0.5 {
-		s.log.Debug("stt: низкое доверие — шум, без хода", "session", w.id, "conf", conf, "text", text[:32])
+		s.log.Debug("stt: низкое доверие — шум, без хода", "session", w.id, "conf", conf, "text", truncateForLog(text, 32))
 		return
 	}
 	s.log.Info("stt: реплика кандидата", "session", w.id, "chars", len(text), "conf", conf, "stream", true)
 	s.runCandidateTurn(w, text)
+}
+
+// truncateForLog — безопасное усечение строки для лога (не больше n байт;
+// не режет юникод-последовательность; короче n — как есть). Паника text[:32]
+// на короткой реплике роняла весь процесс (2026-10-08).
+func truncateForLog(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && n < len(s) && s[n]&0xC0 == 0x80 {
+		n--
+	}
+	return s[:n]
 }
 
 // feedVADBatch — batch-путь (fallback ADR-007 / voice без стрима): локальный

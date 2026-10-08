@@ -372,6 +372,13 @@ p {
   color: #7aa2f7;
 }
 
+/* Живая диагностика захвата (dev): путь/чанки/шаг/rms/ctx. */
+.mic-dbg {
+  color: #8b949e;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
 /* Эквалайзер микрофона (MicVisualizer): live — бирюза, muted — янтарь
    (ИИ говорит, микрофон подавлен), idle — тусклый серый. */
 .mic-eq {

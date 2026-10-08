@@ -60,3 +60,37 @@ agents/
 screenshots/
 secrets/
 *.secret
+
+
+# Agent working files
+memory*
+memmory*
+task.md
+agents.md
+worker_roles.md
+worker_prompt_addition.md
+
+# Agent screenshots and reports
+screenshots/
+*.png
+*.jpg
+*.jpeg
+*.webp
+agent-reports/
+
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+credentials/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+.tmp/
+services/models/

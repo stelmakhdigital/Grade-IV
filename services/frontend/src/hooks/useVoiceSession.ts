@@ -11,7 +11,7 @@ import {
   type Session,
   type SessionEvent,
 } from '../api';
-import { MicCapture, type MicState } from '../audio/mic';
+import { MicCapture, type MicDebugInfo, type MicState } from '../audio/mic';
 import { PcmPlayer } from '../audio/player';
 import { SessionWS, type StageTask, type WsMessage } from '../ws';
 import { apiErrorMessage } from '../views/LoginView';
@@ -35,6 +35,7 @@ export function useVoiceSession(id: number) {
   const [remainingS, setRemainingS] = useState<number | null>(null);
   const [lastAiText, setLastAiText] = useState<string>('');
   const [mic, setMic] = useState<MicState>('idle');
+  const [micDbg, setMicDbg] = useState<MicDebugInfo | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const [wsState, setWsState] = useState<'connecting' | 'open' | 'closed' | 'error'>('connecting');
   const [error, setError] = useState<string | null>(null);
@@ -174,6 +175,10 @@ export function useVoiceSession(id: number) {
     const speakingTimer = window.setInterval(() => {
       setSpeaking(player.isSpeaking());
     }, 300);
+    // Живая диагностика микрофона (dev): снапшот захвата на экран.
+    const dbgTimer = window.setInterval(() => {
+      setMicDbg(micCap.debugInfo());
+    }, 1500);
 
     async function refreshStatus() {
       try {
@@ -191,6 +196,7 @@ export function useVoiceSession(id: number) {
 
     return () => {
       window.clearInterval(speakingTimer);
+      window.clearInterval(dbgTimer);
       micCap.stop();
       player.dispose();
       ws.close();
@@ -208,6 +214,7 @@ export function useVoiceSession(id: number) {
       micCap.stop();
       micLevelRef.current = 0;
       setMic('stopped');
+      setMicDbg(null);
       return;
     }
     try {
@@ -256,6 +263,7 @@ export function useVoiceSession(id: number) {
     remainingS,
     lastAiText,
     mic,
+    micDbg,
     speaking,
     wsState,
     error,
