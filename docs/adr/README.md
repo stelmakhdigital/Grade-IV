@@ -8,5 +8,6 @@
 | [0004](0004-whiteboard.md) | Whiteboard System Design: Excalidraw + палитра блоков | Принято | 2026-09-09 |
 | [0005](0005-llm-serving.md) | Сервинг LLM: vLLM (prod) / llama.cpp (локально) | Принято | 2026-09-09 |
 | [0006](0006-backend-language.md) | Язык бекэнда: Go (api, sandbox), voice — Python | Принято | 2026-09-09 |
+| [0007](0007-streaming-stt.md) | Стриминговый STT: WS /stt/stream, Silero VAD (onnx) на стороне voice, partial в UI | Принято | 2026-10-05 |
 
 Формат записи: Контекст → Решение → Альтернативы → Последствия.
