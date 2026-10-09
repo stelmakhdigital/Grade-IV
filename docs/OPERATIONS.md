@@ -30,10 +30,25 @@ docker compose -f infra/docker-compose.yml --profile prod --profile monitoring u
 ## 2. Метрики (Grafana / Prometheus)
 
 - Grafana: `http://<vps>:3000` (admin / `GRAFANA_ADMIN_PASSWORD`),
-  дашборд **Grade → «Grade — голосовой контур (voice SLO)»**:
-  p50/p95 `grade_ai_turn_seconds` по стадиям (ключевой SLO — p95
-  `llm_first_token` < 4 с), rate ходов/мин, ошибки (LLM-стрим, TTS).
+  дашборд **Grade → «Grade — голосовой контур (voice SLO)»**: row «Barge-in &
+  Fallback» (прерывания/мин, доля barge-in с речью ≤ 500 мс, fallback-счётчики,
+  `grade_barge_in_speech_ms` p50/p95), row «Latency» (p50/p95 `grade_ai_turn_seconds`
+  по стадиям — ключевой SLO: p95 `llm_first_token` < 4 с; `grade_ai_tts_synth_seconds`;
+  ходы/мин), row «Health» (ошибки LLM-стрим/TTS).
 - Prometheus: `http://<vps>:9090` (скрейп `api:8000/metrics` + self, retention 7 д).
+
+### Алертные пороги (что считать инцидентом)
+
+| Метрика | Порог (за 5 м) | Что это | Действие |
+|---------|----------------|---------|----------|
+| `grade_ai_turn_seconds` p95 `llm_first_token` | > 4 с | Нарушение SLO голосового контура | LLM-узел: GPU, vLLM-лог, очередь (Troubleshooting §6) |
+| `grade_ai_llm_stream_errors_total` | rate > 1/мин | LLM-узел недоступен/ошибки | `curl $LLM_BASE_URL/v1/models` с app-узла |
+| `grade_ai_tts_errors_total` | rate > 1/мин | TTS (voice) деградирует | voice-сервис: лог, GPU/CPU, Silero |
+| `grade_stt_stream_fallbacks_total` | рост > 1 за час | /stt/stream падает → деградация на batch (latency +) | voice: /stt/stream, реконнекты, GPU |
+| `grade_vad_stream_fallbacks_total` | рост > 1 за час | /vad/stream падает → energy-путь (last-resort) | voice: /vad/stream, Silero onnx |
+| `grade_barge_in_speech_ms` p50 | устойчиво 500–1000 мс | Подозрение на ранние barge-in (pre-roll/post-silence, ADR-002 поправка) | Посмотреть dашборд «доля ≤ 500 мс»; при росте — пересмотр порога/подтверждения |
+| `grade_barge_in_speech_ms` доля `le="500"` | > 5% за час | pre-roll-риск проявляется (прерывание на короткой речи) | Лог api: `barge-in: ... ms=... preroll_ms=...`; решение по порогу |
+| `grade_barge_ins_total` | аномальный рост (×3 от базы) | Кандидат постоянно перебивает / эхо-петля | Проверить эхо (динамика+мик), TTS-громкость, barge-in-метрики |
 
 ## 3. Обновление
 
