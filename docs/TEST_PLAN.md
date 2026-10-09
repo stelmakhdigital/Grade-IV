@@ -119,13 +119,26 @@ AGENTS.md (правила).
 ## 4. Сандбокс: изоляция и лимиты (задача Фазы 4)
 
 1. **Догонялки:** задача-«бомба» (infinite loop) → timeout (10 c) + timeout=true;
-   задача-«память» (alloc 2 ГБ) → OOM-kill (docker) / SIGKILL (subprocess).
+   задача-«память» (alloc 2 ГБ) → OOM-kill (docker) / быстрая смерть от RLIMIT
+   (subprocess: MemoryError/exit!=0 для python, SIGXCPU→SIGKILL→124/timeout для
+   CPU-цикла) — T-20261009133832: subprocess-режим получил rlimit (аналог
+   docker ADR-003): RLIMIT_AS (go 2 ГБ VA / python 512 МБ) + RLIMIT_CPU 10 с
+   (sh-proлог `ulimit` перед командой; Go stdlib SysProcAttr без Rlimit —
+   фиксация в ADR-003). Тесты: TestSubprocessMemoryLimit, TestSubprocessCPULimit,
+   TestBankSubprocessRegression (12 задач банка не сломаны rlimit).
 2. **Сеть (docker):** контейнер без сети (curl 8.8.8.8 → отказ) — network=none.
 3. **FS:** работа только в workdir (создание файлов за пределами → запрет).
 4. **Доверенность тестов:** тесты из банка кандидатам видны (MVP-ограничение,
    задокументировано); проверка: тест не может «сдавать» задачу сам
    (задача с тестом-трояном → runner не исполняет произвольные main-запросы).
-5. Результаты: docs/test-results/sandbox-{date}.md.
+5. **Docker-пробы (CI + локально, T-20261009133832):** `TestSandboxDockerProbe`
+   (opt-in `SANDBOX_DOCKER=1`, skip без docker): go-pass + proof network=none
+   (внешний dial обязан упасть), py-pass, py-oom (2 ГБ при --memory=512m →
+   OOM-kill 137, без timeout) — Result-контракт (passed/timeout/exit_code).
+   CI: джоб `sandbox-docker` (.github/workflows/ci.yml, ubuntu-latest с docker,
+   pull golang:1.24 / python:3.12-slim); локально: `bash scripts/ci-docker-test.sh`
+   (в среде без docker — exit 2; docker-часть валидируется только в CI).
+6. Результаты: docs/test-results/sandbox-{date}.md.
 
 ## 5. Load-тест real-time (задача Фазы 4)
 

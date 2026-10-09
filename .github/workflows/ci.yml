@@ -1,6 +1,7 @@
 # «Грейд» — CI (Фаза 5): сборка + тесты всех сервисов + REST-смоук.
 # Запуск: push в master + pull_request. Таймауты: go ~10 мин (load-тест 20 с
 # входит в make test), frontend ~5 мин, voice ~15 мин (pip ML-стек), smoke ~5 мин.
+# sandbox-docker — docker-пробы сандбокса (network=none, лимиты, OOM), ~10 мин.
 name: ci
 
 on:
@@ -36,6 +37,23 @@ jobs:
           go vet ./...
           go test -count=1 ./...
           CGO_ENABLED=0 go build -o bin/sandbox ./cmd/sandbox
+
+  sandbox-docker:
+    name: "Sandbox docker-пробы (network=none, лимиты, OOM)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: "docker-пробы (3 задачи: go-pass + network=none, py-pass, py-oom)"
+        working-directory: services/sandbox
+        run: |
+          # ubuntu-latest runners идут с docker; образы — палл (локально: scripts/ci-docker-test.sh)
+          docker image inspect golang:1.24 >/dev/null 2>&1 || docker pull golang:1.24
+          docker image inspect python:3.12-slim >/dev/null 2>&1 || docker pull python:3.12-slim
+          SANDBOX_DOCKER=1 go test -count=1 -v -run TestSandboxDockerProbe ./internal/runner/
 
   frontend:
     name: Frontend (tsc, vitest, build)
