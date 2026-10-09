@@ -775,6 +775,12 @@ func (s *Server) handleVoiceUtterance(ws *wsSession, pcm []byte) {
 		s.log.Debug("stt: низкое доверие — шум, без хода", "session", ws.id, "conf", res.Confidence, "text", truncateForLog(text, 32))
 		return
 	}
+	// Режим записи (FR-S8): сегмент — в окно записи клиента, ход кандидата НЕ
+	// стартует (отправка — только явная, выключением микрофона/«Отправить сейчас»).
+	if ws.recording.Load() {
+		ws.emitRecSegment(s, text, len(pcm)*1000/32000)
+		return
+	}
 	s.log.Info("stt: реплика кандидата", "session", ws.id, "chars", len(text), "conf", res.Confidence, "pre", ok)
 	s.runCandidateTurn(ws, text)
 }
@@ -912,7 +918,7 @@ func (w *wsSession) handleSTTStreamFinal(s *Server, ev voicesvc.StreamEvent) {
 			if !w.busy.CompareAndSwap(false, true) {
 				return // на границе занята — реплика теряется (допустимо)
 			}
-			w.runStreamTurn(s, text, ev.Confidence)
+			w.runStreamTurn(s, text, ev.Confidence, ev.SpeechMS)
 		}()
 		return
 	}
@@ -934,19 +940,36 @@ func (w *wsSession) handleSTTStreamFinal(s *Server, ev voicesvc.StreamEvent) {
 			if !w.busy.CompareAndSwap(false, true) {
 				return // на границе занята — реплика теряется (допустимо)
 			}
-			w.runStreamTurn(s, text, ev.Confidence)
+			w.runStreamTurn(s, text, ev.Confidence, ev.SpeechMS)
 		}()
 		return
 	}
 	if !w.busy.CompareAndSwap(false, true) {
 		return // на границе занят — реплика теряется (допустимо в ходовом режиме)
 	}
-	go w.runStreamTurn(s, text, ev.Confidence)
+	go w.runStreamTurn(s, text, ev.Confidence, ev.SpeechMS)
+}
+
+// emitRecSegment — режим записи (FR-S8, ADR-009): распознанный сегмент —
+// в окно записи клиента (stt_segment), суммарная речь (total_speech_ms)
+// — для клиентского критерия «недостаточно речи» (< 1.5 с). AI-ход НЕ
+// стартует; barge-in-логика (tts_stop) при этом работает как обычно.
+// Чанкование длинных записей: сегментация по тишине уже происходит в VAD
+// voice (каждый final — отдельный сегмент, граница — на тиши); текст
+// склеивается клиентом (KB-масштаб, без аудио-буфера).
+func (w *wsSession) emitRecSegment(s *Server, text string, ms int) {
+	if ms > 0 {
+		w.recSpeechMS.Add(int64(ms))
+	}
+	s.log.Info("recording: сегмент транскрипта", "session", w.id, "chars", len(text), "speech_ms", ms, "total_speech_ms", w.recSpeechMS.Load())
+	s.engine.SendTo(w.id, map[string]any{
+		"type": "stt_segment", "text": text, "speech_ms": ms, "total_speech_ms": w.recSpeechMS.Load(),
+	})
 }
 
 // runStreamTurn — ход кандидата из стримингового STT (busy уже занят;
 // сбрасывается defer'ом): валидация стадии/доверия → runCandidateTurn.
-func (w *wsSession) runStreamTurn(s *Server, text string, conf float64) {
+func (w *wsSession) runStreamTurn(s *Server, text string, conf float64, speechMS int) {
 	defer w.busy.Store(false)
 	if text == "" {
 		return // молчание/шум — без хода
@@ -959,6 +982,11 @@ func (w *wsSession) runStreamTurn(s *Server, text string, conf float64) {
 	// уверенностью; реальные реплики — conf ≥ 0.7 (замеры), порог 0.5.
 	if conf < 0.5 {
 		s.log.Debug("stt: низкое доверие — шум, без хода", "session", w.id, "conf", conf, "text", truncateForLog(text, 32))
+		return
+	}
+	// Режим записи (FR-S8): сегмент — в окно записи, AI-ход не стартует.
+	if w.recording.Load() {
+		w.emitRecSegment(s, text, speechMS)
 		return
 	}
 	s.log.Info("stt: реплика кандидата", "session", w.id, "chars", len(text), "conf", conf, "stream", true)

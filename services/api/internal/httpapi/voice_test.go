@@ -93,6 +93,13 @@ func (m *mockVoice) server(t *testing.T) *httptest.Server {
 	return ts
 }
 
+// STTCalls — число STT-распознаваний (batch + стримовые final'ы) для тестов.
+func (m *mockVoice) STTCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sttCalls
+}
+
 // TTSStarts — времена начала каждого /tts-вызова (тесты: перекрытие синтеза).
 func (m *mockVoice) TTSStarts() []time.Time {
 	m.mu.Lock()

@@ -139,6 +139,13 @@ type wsSession struct {
 	// (если кадры уже уходили) + WS tts_stop. Закрывает гонку «пауза в LLM-фазе»:
 	// beginTTS при флаге возвращает УЖЕ ЗАКРЫТЫЙ канал — стрим не стартует.
 	sessStopped atomic.Bool // pause/finish: TTS-кадры не шлём (сброс — resume)
+	// Режим записи (FR-S8, ADR-009): клиент включил микрофон — сервис слушает
+	// и распознаёт налёт (STT-стриминг), но транскрипт-сегменты НЕ становятся
+	// ходами кандидата (AI-ход не стартует) — отправляются как stt_segment в
+	// клиентское окно записи. Явная отправка (выключение микрофона / «Отправить
+	// сейчас») — клиент шлёт recording off + utterance (WS-порядок гарантирован).
+	recording     atomic.Bool
+	recSpeechMS   atomic.Int64 // суммарная речь (мс) с начала записи (критерий «< 1.5 с»)
 	// Pre-STT (voice_pipeline.go): предварительное распознавание при первой
 	// тишине — перекрывает VAD-хвост, экономит время STT.
 	preSTTActive atomic.Bool  // pre-STT запущен (на текущий буфер)
@@ -392,6 +399,10 @@ func (s *Server) nudgeLoop(ws *wsSession, ctx context.Context) {
 		if ws.busy.Load() || ws.ttsActive.Load() || ws.isSpeaking() {
 			continue // ход/речь ИИ/речь кандидата (в т.ч. Silero-путь) — nudge не нужен
 		}
+		if ws.recording.Load() {
+			continue // режим записи (FR-S8): длинные паузы внутри записи — норма,
+			// nudge не прерывает запись (ответ ИИ — только по явной отправке)
+		}
 		silent := ws.silentS()
 		if silent < s.cfg.SilenceNudgeS {
 			ws.nudgeCount.Store(0) // кандидат активен — сброс счётчика
@@ -543,6 +554,18 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage, ws *wsSession) {
 	case "whiteboard_saved":
 		// Сохранение холста (PUT /whiteboard) — WP-10; событие фиксируем.
 		_, _ = s.eventData(ctx, id, "whiteboard_save", map[string]any{"payload": json.RawMessage(msg.Payload)})
+
+	case "recording":
+		// Режим записи (FR-S8, ADR-009): on/off от клиента. On: STT-сегменты
+		// идут как stt_segment (AI-ход не стартует); off — до явной отправки
+		// (utterance) — WS-порядок: off обрабатывается раньше utterance.
+		var p struct {
+			On bool `json:"on"`
+		}
+		_ = json.Unmarshal(msg.Payload, &p)
+		ws.recording.Store(p.On)
+		ws.recSpeechMS.Store(0)
+		s.log.Info("ws: режим записи", "session", id, "on", p.On)
 
 	case "utterance":
 		// Реплика кандидата (текстовый режим / FR-V8 / тесты; голосовой STT — WP-4).
