@@ -144,8 +144,8 @@ type wsSession struct {
 	// ходами кандидата (AI-ход не стартует) — отправляются как stt_segment в
 	// клиентское окно записи. Явная отправка (выключение микрофона / «Отправить
 	// сейчас») — клиент шлёт recording off + utterance (WS-порядок гарантирован).
-	recording     atomic.Bool
-	recSpeechMS   atomic.Int64 // суммарная речь (мс) с начала записи (критерий «< 1.5 с»)
+	recording   atomic.Bool
+	recSpeechMS atomic.Int64 // суммарная речь (мс) с начала записи (критерий «< 1.5 с»)
 	// Pre-STT (voice_pipeline.go): предварительное распознавание при первой
 	// тишине — перекрывает VAD-хвост, экономит время STT.
 	preSTTActive atomic.Bool  // pre-STT запущен (на текущий буфер)

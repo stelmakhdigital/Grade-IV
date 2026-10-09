@@ -224,9 +224,13 @@ export class MicCapture {
 
   // Поток жив: track существует и не завершён (device removed/changed —
   // readyState 'ended'; тогда toggle идёт через полную инициализацию).
+  // getAudioTracks с фолбэком на getTracks (старые тестовые моки).
   private isStreamAlive(): boolean {
     if (this.stream === null) return false;
-    const track = this.stream.getAudioTracks()[0];
+    const tracks = typeof this.stream.getAudioTracks === 'function'
+      ? this.stream.getAudioTracks()
+      : this.stream.getTracks();
+    const track = tracks[0];
     return track !== undefined && track.readyState === 'live';
   }
 
