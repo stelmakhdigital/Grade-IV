@@ -87,10 +87,28 @@ do_stop() {
 
 do_build() {
   mkdir -p "$RUN/bin"
+  # Инцидент 2026-10-09: `go build -o` на живом/занятом бинарнике может НЕ
+  # обновить файл без ошибки — api продолжал работать со СТАРЫМ кодом
+  # (нет обработчика recording → «неизвестное событие», авто-ответы на паузах).
+  # Защита: если после сборки мт-время не изменилось — громкий сбой.
   echo "==> сборка api"
-  (cd "$ROOT/services/api" && go build -o "$API_BIN" ./cmd/api)
+  local api_tmp="$API_BIN.tmp.$$" api_old_ts=0 api_new_ts=0
+  [[ -f "$API_BIN" ]] && api_old_ts=$(stat -c %Y "$API_BIN" 2>/dev/null || echo 0)
+  (cd "$ROOT/services/api" && go build -o "$api_tmp" ./cmd/api)
+  mv -f "$api_tmp" "$API_BIN"
+  api_new_ts=$(stat -c %Y "$API_BIN" 2>/dev/null || echo 0)
+  if [[ "$api_new_ts" -le "$api_old_ts" ]]; then
+    echo "ОШИБКА: бинарник api не обновился ($API_BIN) — сборка не прошла" >&2; exit 1
+  fi
   echo "==> сборка sandbox"
-  (cd "$ROOT/services/sandbox" && go build -o "$SBX_BIN" ./cmd/sandbox)
+  local sbx_tmp="$SBX_BIN.tmp.$$" sbx_old_ts=0 sbx_new_ts=0
+  [[ -f "$SBX_BIN" ]] && sbx_old_ts=$(stat -c %Y "$SBX_BIN" 2>/dev/null || echo 0)
+  (cd "$ROOT/services/sandbox" && go build -o "$sbx_tmp" ./cmd/sandbox)
+  mv -f "$sbx_tmp" "$SBX_BIN"
+  sbx_new_ts=$(stat -c %Y "$SBX_BIN" 2>/dev/null || echo 0)
+  if [[ "$sbx_new_ts" -le "$sbx_old_ts" ]]; then
+    echo "ОШИБКА: бинарник sandbox не обновился ($SBX_BIN) — сборка не прошла" >&2; exit 1
+  fi
   if [[ ! -x "$ROOT/services/frontend/node_modules/.bin/vite" ]]; then
     echo "==> pnpm install (frontend)"
     (cd "$ROOT/services/frontend" && pnpm install --frozen-lockfile)
