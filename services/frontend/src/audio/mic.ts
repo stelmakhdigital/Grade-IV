@@ -24,6 +24,11 @@ export type MicState = 'idle' | 'running' | 'stopped' | 'denied' | 'muted';
 // без DOM.
 export const SILENCE_RMS = 0.005;
 export const SILENCE_MS = 5000;
+// Тишина — норма в голосовом диалоге: пока ИИ говорит (свой TTS уходит в мик —
+// эхо) и TTS_TAIL_GRACE_MS после его конца (кандидат думает/слушает) детектор
+// «молчащего» микрофона не кормим. Инцидент 2026-10-09: ложная алерт «Микрофон
+// молчит» в режиме записи на паузе 5 с (микросан нормальный).
+export const TTS_TAIL_GRACE_MS = 30_000;
 // Цепочка надёжности захвата (инцидент 2026-10-08): 3 с без чанков —
 // следующий шаг: worklet → fallback (ScriptProcessor) → полная повторная
 // инициализация (getUserMedia заново → снова worklet). Не более MAX_REINIT
@@ -190,6 +195,8 @@ export class MicCapture {
   private noDataTimer: number | null = null;
   private spNode: ScriptProcessorNode | null = null; // резервный захват
   private silence: SilenceDetector | null = null; // детектор «молчащего» микрофона
+  private ttsSpeaking = false; // ИИ говорит (TTS) — эхо в мике, детектор off
+  private ttsStoppedAt: number | null = null; // конец TTS (Date.now) — grace TTS_TAIL_GRACE_MS
   // Живая диагностика (dev): статистика чанков + автоотчёт /debug/mic-report.
   private dbgChunks = 0;
   private dbgRms = 0;
@@ -525,7 +532,32 @@ export class MicCapture {
     this.dbgChunks++;
     const r = chunkRms(pcm);
     if (r > this.dbgRms) this.dbgRms = r;
-    this.silence?.feed(r, now);
+    // Тихий микрофон при работающем звуке — нормальное состояние диалога:
+    // пока ИИ говорит (TTS → эхо в мик) и TTS_TAIL_GRACE_MS после — детектор
+    // не кормим (ложная алерт «Микрофон молчит» на паузе/раздумье, инцидент
+    // 2026-10-09).
+    if (!this.ttsSpeaking && (this.ttsStoppedAt === null || now - this.ttsStoppedAt >= TTS_TAIL_GRACE_MS)) {
+      this.silence?.feed(r, now);
+    }
+  }
+
+  // TTS-статус от хука (speaking): во время речи ИИ (TTS → эхо в мик) и
+  // TTS_TAIL_GRACE_MS после — детектор «молчащего» микрофона не кормим
+  // (feedSilence гейтит); тишина — нормальное состояние диалога.
+  setTtsSpeaking(speaking: boolean): void {
+    if (speaking === this.ttsSpeaking) return;
+    this.ttsSpeaking = speaking;
+    if (speaking) {
+      this.silence?.reset(); // эхо не считается «речью кандидата»
+      // Сессия явно жива (ИИ отвечает) — снимаем «молчит» из состояния:
+      // иначе пользователь, уже заговоривший, видел бы предупреждение до
+      // возврата уровня (onRecover сработает на первом громком чанке).
+      if (this.micState === 'muted') {
+        this.setState('running', this.events ?? undefined);
+      }
+    } else {
+      this.ttsStoppedAt = Date.now();
+    }
   }
 
   /** Dev: статистика захвата для UI/отчёта. */

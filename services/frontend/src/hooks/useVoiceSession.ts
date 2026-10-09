@@ -70,6 +70,12 @@ export function useVoiceSession(id: number) {
   const micLevelRef = useRef(0); // RMS с worklet (эквалайзер)
   const playerRef = useRef<PcmPlayer | null>(null);
   const stageRef = useRef<string>('voice');
+  // TTS-статус → мик: детектор «молчащего» микрофона не кормим, пока ИИ говорит
+  // (TTS-эхо) и TTS_TAIL_GRACE_MS после (кандидат думает/слушает) — иначе ложная
+  // алерт «Микрофон молчит» на обычной паузе диалога (инцидент 2026-10-09).
+  useEffect(() => {
+    micRef.current?.setTtsSpeaking(speaking);
+  }, [speaking]);
   // Микрофон был включён до паузы — при «Продолжить» пытаемся вернуть захват.
   const micBeforePauseRef = useRef(false);
 

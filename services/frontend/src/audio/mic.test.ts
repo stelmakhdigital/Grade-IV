@@ -4,7 +4,7 @@
  * эхо динамика→микрофон подавляется браузером, см. ADR-002/SRS §8).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { MicCapture, MAX_REINIT, SILENCE_MS, type MicCaptureEvents } from './mic';
+import { MicCapture, MAX_REINIT, SILENCE_MS, TTS_TAIL_GRACE_MS, type MicCaptureEvents } from './mic';
 
 /** Доступ к приватным полям/методам MicCapture (dev-диагностика). */
 type MicInternal = {
@@ -310,6 +310,37 @@ describe('MicCapture: цепочка надёжности (worklet → fallback 
     expect(h.mic.state).toBe('muted');
     expect(h.states.at(-1)).toBe('muted');
     expect(h.errors.at(-1)).toContain('/audio-debug.html');
+    expect(h.errors.at(-1)).toContain('Микрофон молчит');
+  });
+
+  it('TTS-grace: тишина пока ИИ говорит (и после, в grace) — без алерта; по истечении grace — алерт', async () => {
+    const h = await beginMic();
+    // Мик «включён», ИИ говорит: тишиные чанки — детектор не кормим (TTS-эхо).
+    h.mic.setTtsSpeaking(true);
+    const feedSilence = (h.mic as unknown as { feedSilence(p: Int16Array): void }).feedSilence.bind(h.mic);
+    feedSilence(new Int16Array(4000));
+    feedSilence(new Int16Array(4000));
+    await advance(SILENCE_MS + 1000); // > SILENCE_MS тишины — но под TTS
+    expect(h.states).not.toContain('muted');
+    expect(h.errors).toEqual([]);
+    // ИИ замолчал: grace TTS_TAIL_GRACE_MS (кандидат думает) — тишина не алертит.
+    h.mic.setTtsSpeaking(false);
+    feedSilence(new Int16Array(4000));
+    feedSilence(new Int16Array(4000)); // чанки идут (захват жив) — noData-таймер не гонит reinit
+    await advance(SILENCE_MS + 1000);
+    feedSilence(new Int16Array(4000));
+    expect(h.states).not.toContain('muted');
+    expect(h.errors).toEqual([]);
+    // Кончилось grace (30 с) — следующая тишина ≥ SILENCE_MS → «молчит».
+    // Чанки каждые 1 с — noData-таймер (3 с без данных) не гонит reinit.
+    for (let i = 0; i < 31; i++) {
+      feedSilence(new Int16Array(4000));
+      await advance(1000);
+    }
+    // ≥ SILENCE_MS тишины после конца grace → алерт.
+    feedSilence(new Int16Array(4000));
+    await advance(SILENCE_MS + 1000);
+    expect(h.mic.state).toBe('muted');
     expect(h.errors.at(-1)).toContain('Микрофон молчит');
   });
 });
