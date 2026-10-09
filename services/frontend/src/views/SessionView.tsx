@@ -172,11 +172,6 @@ export function SessionView({ id }: { id: number }) {
                 — диагностика микрофона.
               </span>
             )}
-            {mic !== 'running' && mic !== 'denied' && mic !== 'muted' && stage === 'voice' && wsState === 'open' && !paused && (
-              <span className="form-error" role="alert">
-                Микрофон выключен — ИИ вас не слышит. Нажмите «Включить микрофон».
-              </span>
-            )}
             {micDebugEnabled() && micDbg !== null && micDbg.chunks > 0 && (
               <span className="mic-dbg" title="Диагностика захвата: путь, частота чанков, уровень">
                 мик[{micDbg.path}]: чанков {micDbg.chunks} · шаг {micDbg.medGapMs} мс · max rms {micDbg.maxRms} · ctx {micDbg.ctxState}
