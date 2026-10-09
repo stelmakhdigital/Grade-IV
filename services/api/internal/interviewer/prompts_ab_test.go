@@ -143,3 +143,30 @@ func TestCodeRunHintContract(t *testing.T) {
 		}
 	}
 }
+
+// TestDesignReviewMessageContract — контракт design-review-сообщения
+// (T-20261009152316): ревью озвучивается TTS — ограничение формата
+// (3–5 предложений, без списков) + рубрика + follow-up должны быть в промпте.
+// Без ограничения модель отдаёт ~150 слов со структурой (A/B-оценка,
+// design_review: voice_fit=2, prompts-ab-2026-10-09.md).
+func TestDesignReviewMessageContract(t *testing.T) {
+	msg := designReviewMessage(`{"blocks":["client","lb","api","db","cache"],"edges":[["client","lb"]]}`)
+	for _, want := range []string{
+		"3–5 предложений",
+		"без списков и нумерации",
+		"озвучен TTS",
+		"(1) покрытие",
+		"(2) масштабируемость",
+		"(3) отказоустойчивость",
+		"(4) обоснование trade-offs",
+		"follow-up",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("designReviewMessage: нет контракта %q:\n%s", want, msg)
+		}
+	}
+	// Структура схемы передаётся как есть (контракт данных не сломан).
+	if !strings.Contains(msg, `"blocks":["client","lb","api","db","cache"]`) {
+		t.Fatalf("структура схемы потеряна:\n%s", msg)
+	}
+}

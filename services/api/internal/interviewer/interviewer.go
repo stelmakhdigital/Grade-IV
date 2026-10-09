@@ -194,9 +194,19 @@ func (i *Interviewer) OnCodeRun(ctx context.Context, sessionID int64, summary ma
 	return resp.Content, nil
 }
 
-// OnDesignSubmit — оценка схемы System Design (ADR-004, WP-10): структура
-// блоков/связей (из холста) + устный ответ стадии → ревью по рубрике
-// (покрытие, масштабируемость, отказоустойчивость, trade-offs) + follow-up.
+// designReviewMessage — user-сообщение ревью схемы System Design (OnDesignSubmit).
+// Формат-контракт (T-20261009152316): ревью будет ОЗВУЧЕНО TTS — 3–5 предложений
+// живой речью, без списков/нумерации (без ограничения модель отдаёт ~150 слов
+// со структурой — voice_fit=2 по A/B-оценке, prompts-ab-2026-10-09.md).
+func designReviewMessage(structureRaw string) string {
+	return "Кандидат представил схему System Design. Структура (JSON: блоки и связи): " +
+		structureRaw +
+		"\nОцени по рубрике: (1) покрытие (клиент, балансировка, сервисы, БД/кэш, очереди, мониторинг), " +
+		"(2) масштабируемость, (3) отказоустойчивость, (4) обоснование trade-offs. " +
+		"Ревью — 3–5 предложений живой речью, без списков и нумерации (ответ будет озвучен TTS). " +
+		"В конце задай один follow-up вопрос. Устно: "
+}
+
 // OnDesignSubmit — оценка схемы System Design (ADR-004, WP-10): структура
 // блоков/связей (из холста) + PNG схемы (vision, если есть) + устный ответ
 // стадии → ревью по рубрике (покрытие, масштабируемость, отказоустойчивость,
@@ -214,11 +224,7 @@ func (i *Interviewer) OnDesignSubmit(ctx context.Context, sessionID int64, struc
 	}
 
 	raw, _ := json.Marshal(structure)
-	userMsg := "Кандидат представил схему System Design. Структура (JSON: блоки и связи): " +
-		string(raw) +
-		"\nОцени по рубрике: (1) покрытие (клиент, балансировка, сервисы, БД/кэш, очереди, мониторинг), " +
-		"(2) масштабируемость, (3) отказоустойчивость, (4) обоснование trade-offs. " +
-		"В конце задай один follow-up вопрос. Устно: "
+	userMsg := designReviewMessage(string(raw))
 	var imgs []string
 	if len(png) > 0 {
 		imgs = []string{"data:image/png;base64," + base64.StdEncoding.EncodeToString(png)}
