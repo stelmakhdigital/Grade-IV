@@ -87,7 +87,7 @@ func Load() (*Config, error) {
 		LLMAPIKey:         os.Getenv("LLM_API_KEY"),
 		SandboxURL:        getEnv("SANDBOX_URL", "http://localhost:8200"),
 		LogLevel:          getEnv("LOG_LEVEL", "info"),
-		SilenceNudgeS:     getEnvInt("SILENCE_NUDGE_S", 8),
+		SilenceNudgeS:     getEnvInt("SILENCE_NUDGE_S", 45),
 		LLMMock:           getEnv("LLM_MOCK", "") == "1",
 		DebugEndpoints:    getEnv("ENABLE_DEBUG", "") == "1",
 		LLMEnableThinking: getEnv("LLM_ENABLE_THINKING", "") == "true",

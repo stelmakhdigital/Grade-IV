@@ -103,9 +103,6 @@ export function LoginView() {
         <button type="submit" className="btn primary" disabled={busy}>
           {busy ? '…' : mode === 'login' ? 'Войти' : 'Создать аккаунт'}
         </button>
-        <p className="muted small">
-          Новым пользователям — 60 минут интервью бесплатно.
-        </p>
       </form>
     </main>
   );

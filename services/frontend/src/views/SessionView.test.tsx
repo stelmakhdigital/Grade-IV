@@ -227,10 +227,6 @@ describe('SessionView (WP-8)', () => {
     expect(fake.url).toContain('/ws/session/9');
     await flush();
 
-    // таймер от сервера
-    fake.deliver(JSON.stringify({ type: 'timer', remaining_s: 2950 }));
-    expect(await screen.findByTestId('timer')).toHaveTextContent('49:10');
-
     // живой транскрипт
     fake.deliver(JSON.stringify({ type: 'transcript', who: 'user', text: 'Говорю' }));
     expect(await screen.findByText('Говорю')).toBeInTheDocument();
@@ -389,10 +385,8 @@ describe('SessionView (WP-8)', () => {
     expect(await screen.findByRole('button', { name: 'Продолжить' })).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Пауза' })).toBeNull());
     expect(await screen.findByText('пауза')).toBeInTheDocument();
-    // WS не переподключался (один и тот же инстанс), таймер жив
+    // WS не переподключался (один и тот же инстанс)
     expect(FakeWebSocket.instances).toHaveLength(1);
-    fake.deliver(JSON.stringify({ type: 'timer', remaining_s: 2900 }));
-    expect(await screen.findByTestId('timer')).toHaveTextContent('48:20');
 
     // «Продолжить» → POST /resume, пауза снята
     await user.click(screen.getByRole('button', { name: 'Продолжить' }));

@@ -25,12 +25,10 @@ export function SessionView({ id }: { id: number }) {
     runReview,
     designReview,
     task,
-    remainingS,
     lastAiText,
     mic,
     micDbg,
-    speaking,
-    wsState,
+    speaking,    wsState,
     error,
     micLevelRef,
     live,
@@ -107,9 +105,6 @@ export function SessionView({ id }: { id: number }) {
           </h1>
           <p className="muted small">
             {user?.email} · <span className={`status ${paused ? 'paused' : session.status}`}>{statusLabel(paused ? 'paused' : session.status)}</span>
-            {live && remainingS !== null && (
-              <span data-testid="timer"> · осталось {formatClock(remainingS)}</span>
-            )}
             {live && (
               <span> · {stageLabel(stage)}</span>
             )}
@@ -341,10 +336,4 @@ function renderDebugLink(msg: string) {
       {msg.slice(idx + marker.length)}
     </>
   );
-}
-
-function formatClock(total: number): string {
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
 }
