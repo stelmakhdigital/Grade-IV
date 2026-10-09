@@ -277,10 +277,45 @@ p {
 
 /* ------------------------------------------------------------- транскрипт */
 
+/* Окно записи (FR-S8, ADR-009): склеивающийся транскрипт + мм:сс + статус. */
+.rec-window {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid #3a2b1a;
+  border-left: 3px solid #e5a15d;
+  border-radius: 8px;
+  background: #171310;
+}
+
+.rec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rec-status {
+  color: #e5a15d;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.rec-text {
+  margin: 8px 0;
+  color: #d8dee9;
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
 .transcript-list {
   list-style: none;
   margin: 0;
   padding: 0;
+  /* Новые сверху (FR-S8): внутренний скролл контейнера + автоскролл
+     к началу при новом сообщении (SessionView). */
+  max-height: 420px;
+  overflow-y: auto;
 }
 
 .event {

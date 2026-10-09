@@ -31,15 +31,25 @@ vi.mock('../hooks/useVoiceSession', async (importOriginal) => {
   };
 });
 
-/** Фиктивное возвращаемое useVoiceSession для сценариев mic-dbg/мьюта. */
+/** Фиктивное возвращаемое useVoiceSession для сценариев mic-dbg/мьюта/записи. */
 function fakeVoiceSession(
   micDbg: Record<string, unknown> | null,
-  opts: { mic?: string; error?: string | null } = {},
+  opts: {
+    mic?: string;
+    error?: string | null;
+    lines?: Array<Record<string, unknown>>;
+    recActive?: boolean;
+    recSegs?: string[];
+    recPartial?: string;
+    recSince?: number | null;
+    recCollapsed?: boolean;
+    recNote?: string | null;
+  } = {},
 ): Record<string, unknown> {
   return {
     session: S_ACTIVE,
     loadError: null,
-    lines: [],
+    lines: opts.lines ?? [],
     stage: 'voice',
     runReview: '',
     designReview: '',
@@ -60,6 +70,16 @@ function fakeVoiceSession(
     resume: vi.fn(),
     onStageAction: vi.fn(),
     onFinish: vi.fn(),
+    recActive: opts.recActive ?? false,
+    recSegs: opts.recSegs ?? [],
+    recPartial: opts.recPartial ?? '',
+    recTotalSpeechMs: opts.recSince !== null ? 3000 : 0,
+    recSince: opts.recSince ?? null,
+    recCollapsed: opts.recCollapsed ?? false,
+    setRecCollapsed: vi.fn(),
+    recNote: opts.recNote ?? null,
+    finishRecording: vi.fn(),
+    sendRecordingNow: vi.fn(),
   };
 }
 
@@ -529,4 +549,216 @@ describe('SessionView (WP-8)', () => {
     expect(screen.queryByTestId('debug-link')).toBeNull();
     expect(screen.queryByTestId('debug-link-mic-muted')).toBeNull();
   }, 10000);
+});
+
+// --- Voice UX (FR-S8): история новые-сверху + автоскролл + окно записи
+
+describe('Voice UX: история новые-сверху + режим записи (FR-S8)', () => {
+  it('рендер: последние сообщения СВЕРХУ (live-строки), interim — первая', () => {
+    hookMock.fake = fakeVoiceSession(null, {
+      lines: [
+        { who: 'user', text: 'Первый вопрос кандидата' },
+        { who: 'ai', text: 'Ответ ИИ' },
+        { who: 'user', text: 'Новая реплика', interim: true },
+      ],
+    });
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    const items = Array.from(document.querySelectorAll('[data-testid="lines"] > li'));
+    expect(items).toHaveLength(3);
+    // Новые сверху: последняя (interim) — первый li.
+    expect(items[0]).toHaveTextContent('Новая реплика');
+    expect(items[0].className).toContain('interim');
+    expect(items[1]).toHaveTextContent('Ответ ИИ');
+    expect(items[2]).toHaveTextContent('Первый вопрос кандидата');
+    cleanup();
+  });
+
+  it('REST-история завершённой сессии — тот же порядок (новое сверху)', async () => {
+    // EVENTS: user «Привет» → ai «Расскажите о себе» (последнее).
+    renderSession(mockApi({ session: S_FINISHED }));
+    await screen.findByText('Кандидат');
+    const items = Array.from(document.querySelectorAll('[data-testid="lines"] > li'));
+    expect(items.length).toBeGreaterThanOrEqual(2);
+    expect(items[0]).toHaveTextContent('Расскажите о себе'); // последнее событие — сверху
+  });
+
+  it('автоскролл: новое сообщение → scrollTo(0) если пользователь у верхнего края', async () => {
+    const scrollToSpy = vi.fn();
+    // jsdom: scrollTo отсутствует — ставим шпион на прототип (до рендера).
+    (Element.prototype as unknown as { scrollTo: unknown }).scrollTo = scrollToSpy;
+    renderSession(mockApi({ session: S_ACTIVE }));
+    const fake = await waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      return FakeWebSocket.instances[0]!;
+    });
+    await flush();
+    // Новое сообщение — контейнер у верхнего края (scrollTop=0 < 80) → скролл к началу.
+    fake.deliver(JSON.stringify({ type: 'transcript', who: 'ai', text: 'Новое сообщение' }));
+    await screen.findByText('Новое сообщение');
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: 0 });
+    // Пользователь прокрутил вниз (в старые сообщения) — скролл не трогаем.
+    const before = scrollToSpy.mock.calls.length;
+    const ol = document.querySelector('[data-testid="lines"]') as HTMLOListElement;
+    ol.scrollTop = 200; // > 80 — пользователь читает старые
+    fake.deliver(JSON.stringify({ type: 'transcript', who: 'ai', text: 'Ещё сообщение' }));
+    await screen.findByText('Ещё сообщение');
+    expect(scrollToSpy.mock.calls.length).toBe(before);
+  });
+
+  it('окно записи: рендер (статус/текст), сворачивание, «недостаточно речи»', async () => {
+    hookMock.fake = fakeVoiceSession(null, {
+      recActive: true,
+      recSegs: ['Привет, меня'],
+      recPartial: 'зовут',
+      recSince: Date.now() - 45_000,
+    });
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    expect(screen.getByTestId('rec-window')).toBeInTheDocument();
+    expect(screen.getByTestId('rec-status')).toHaveTextContent('Запись 00:45');
+    expect(screen.getByTestId('rec-text')).toHaveTextContent('Привет, меня зовут');
+    cleanup();
+    // Свёрнутое окно: текст и кнопка отправки скрыты, кнопка — «Развернуть».
+    hookMock.fake = fakeVoiceSession(null, {
+      recActive: true,
+      recSegs: ['Привет, меня'],
+      recPartial: 'зовут',
+      recSince: Date.now() - 45_000,
+      recCollapsed: true,
+    });
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    expect(screen.getByTestId('rec-window')).toBeInTheDocument();
+    expect(screen.queryByTestId('rec-text')).toBeNull();
+    expect(screen.queryByTestId('rec-send')).toBeNull();
+    expect(screen.getByTestId('rec-collapse')).toHaveTextContent('Развернуть');
+    cleanup();
+
+    // «Недостаточно речи» — заметка после сброса окна.
+    hookMock.fake = fakeVoiceSession(null, {
+      recNote: 'Недостаточно речи для отправки (минимум ~1.5 с).',
+    });
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    expect(screen.getByTestId('rec-note')).toHaveTextContent('Недостаточно речи');
+    expect(screen.queryByTestId('rec-window')).toBeNull();
+  });
+
+  // --- E2E (реальный хук + fake-микрофон): сегменты НЕ становятся ответами,
+  // выключение микрофона → ОДНО utterance-сообщение со склеенным текстом.
+
+  class RecWorkletNode {
+    port: { onmessage: ((e: { data: unknown }) => void) | null } = { onmessage: null };
+    connect = vi.fn();
+    disconnect = vi.fn();
+  }
+  class RecAudioContext {
+    sampleRate = 48000;
+    state = 'running';
+    audioWorklet = { addModule: vi.fn(async () => undefined) };
+    destination = {};
+    createMediaStreamSource = () => ({ connect: vi.fn() });
+    createGain = () => ({ gain: { value: 1 }, connect: vi.fn() });
+    createScriptProcessor = () => ({ onaudioprocess: null, connect: vi.fn(), disconnect: vi.fn() });
+    close = vi.fn(async () => undefined);
+  }
+
+  function stubMicEnv(): void {
+    const track = {
+      enabled: true,
+      readyState: 'live',
+      muted: false,
+      label: 'Fake Mic',
+      stop: vi.fn(),
+      onended: null as null | (() => void),
+    };
+    const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: vi.fn(async () => stream) } });
+    vi.stubGlobal('AudioContext', RecAudioContext);
+    vi.stubGlobal('AudioWorkletNode', RecWorkletNode);
+    (URL as unknown as { createObjectURL: (b: Blob) => string }).createObjectURL = () => 'blob:fake';
+  }
+
+  it('режим записи (E2E): сегменты не становятся user-строками и не запускают AI-ход; выключение мика → одно utterance со склеенным текстом', async () => {
+    stubMicEnv();
+    renderSession(mockApi({ session: S_ACTIVE }));
+    const fake = await waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      return FakeWebSocket.instances[0]!;
+    });
+    await flush();
+    const user = userEvent.setup();
+
+    // Включили микрофон → recording on + окно записи.
+    await user.click(screen.getByTestId('mic-toggle'));
+    expect(await screen.findByTestId('rec-window')).toBeInTheDocument();
+    expect(fake.sent.some((m) => JSON.parse(String(m))['name'] === 'recording' && JSON.parse(String(m))['payload']['on'] === true)).toBe(true);
+
+    // Распознавание налёт: partial → окно (не строка), сегменты → окно.
+    fake.deliver(JSON.stringify({ type: 'stt_partial', text: 'Привет' }));
+    expect(await screen.findByTestId('rec-text')).toHaveTextContent('Привет');
+    fake.deliver(JSON.stringify({ type: 'stt_segment', text: 'Привет, меня', speech_ms: 2000, total_speech_ms: 2000 }));
+    await screen.findByText(/Привет, меня/);
+    fake.deliver(JSON.stringify({ type: 'stt_segment', text: 'зовут Артём', speech_ms: 1000, total_speech_ms: 3000 }));
+    expect(await screen.findByTestId('rec-text')).toHaveTextContent('Привет, меня зовут Артём');
+    // Ни один сегмент не стал user-строкой.
+    expect(document.querySelectorAll('.line.user')).toHaveLength(0);
+
+    // Выключили микрофон → recording off + ОДНО utterance со склеенным текстом.
+    await user.click(screen.getByTestId('mic-toggle'));
+    expect(screen.queryByTestId('rec-window')).toBeNull();
+    const utterances = fake.sent
+      .map((m) => JSON.parse(String(m)) as { name?: string; payload?: { text?: string } })
+      .filter((m) => m.name === 'utterance');
+    expect(utterances).toHaveLength(1);
+    expect(utterances[0].payload?.text).toBe('Привет, меня зовут Артём');
+    // recording off ушёл (до utterance — WS-порядок).
+    const offIdx = fake.sent.findIndex((m) => JSON.parse(String(m))['name'] === 'recording' && JSON.parse(String(m))['payload']['on'] === false);
+    const uttIdx = fake.sent.findIndex((m) => JSON.parse(String(m))['name'] === 'utterance');
+    expect(offIdx).toBeGreaterThan(-1);
+    expect(offIdx).toBeLessThan(uttIdx);
+
+    // AI-ответ (transcript user — как из сервера) — одна user-строка, сверху.
+    fake.deliver(JSON.stringify({ type: 'transcript', who: 'user', text: 'Привет, меня зовут Артём' }));
+    await screen.findByText('Привет, меня зовут Артём', { selector: '.line-text' });
+    expect(document.querySelectorAll('.line.user')).toHaveLength(1);
+    const first = document.querySelector('[data-testid="lines"] > li');
+    expect(first).toHaveTextContent('Привет, меня зовут Артём');
+  }, 15000);
+
+  it('«недостаточно речи» (E2E): запись < 1.5 с речи → utterance НЕ отправляется, заметка', async () => {
+    stubMicEnv();
+    renderSession(mockApi({ session: S_ACTIVE }));
+    const fake = await waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      return FakeWebSocket.instances[0]!;
+    });
+    await flush();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('mic-toggle'));
+    expect(await screen.findByTestId('rec-window')).toBeInTheDocument();
+    // Короткая реплика: total_speech_ms 500 < 1500.
+    fake.deliver(JSON.stringify({ type: 'stt_segment', text: 'М', speech_ms: 500, total_speech_ms: 500 }));
+    await screen.findByText(/М/);
+    await user.click(screen.getByTestId('mic-toggle'));
+    // utterance не отправлен, recording off — ушёл, заметка «недостаточно речи».
+    const utterances = fake.sent
+      .map((m) => JSON.parse(String(m)) as { name?: string })
+      .filter((m) => m.name === 'utterance');
+    expect(utterances).toHaveLength(0);
+    expect(await screen.findByTestId('rec-note')).toHaveTextContent('Недостаточно речи');
+  }, 15000);
 });

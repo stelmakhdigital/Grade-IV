@@ -4,10 +4,12 @@
  * useVoiceSession. Рендер: активная сессия (голос/Live-Code/Design),
  * завершённая (запись диалога + отчёт).
  */
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth';
 import { MicVisualizer, type MicEqMode } from './MicVisualizer';
 import { useVoiceSession } from '../hooks/useVoiceSession';
 import { micDebugEnabled } from '../audio/mic';
+import { formatRecDuration, mergeRecording } from '../recording';
 import { statusLabel, stageLabel } from '../labels';
 import { LiveCodePanel } from './livecode/LiveCodePanel';
 import { DesignPanel } from './design/DesignPanel';
@@ -39,7 +41,40 @@ export function SessionView({ id }: { id: number }) {
     resume,
     onStageAction,
     onFinish,
+    recActive,
+    recSegs,
+    recPartial,
+    recSince,
+    recCollapsed,
+    setRecCollapsed,
+    recNote,
+    sendRecordingNow,
   } = useVoiceSession(id);
+
+  // Окно записи (FR-S8): «мм:сс» — тик каждую секунду, пока запись активна.
+  const [recNow, setRecNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!recActive) return;
+    const t = window.setInterval(() => setRecNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [recActive]);
+  const recText = mergeRecording(recSegs, recPartial);
+
+  // История диалога — новые СВЕРХУ (FR-S8): lines хранятся как есть (append,
+  // кап 200), рендер — перевёрнутый порядок (interim — последняя — наверху).
+  // Автоскролл: при новом сообщении/обновлении interim — контейнер к началу
+  // (наверх), если пользователь у верхнего края (userNearTop, < 80 px);
+  // прокрутил вниз в старые — не трогаем.
+  const transcriptRef = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (el === null || el.scrollTop >= 80) return;
+    if (typeof el.scrollTo === 'function') {
+      el.scrollTo({ top: 0 });
+    } else {
+      el.scrollTop = 0; // jsdom: scrollTo отсутствует
+    }
+  }, [lines]);
 
   if (loadError !== null) {
     return (
@@ -173,6 +208,47 @@ export function SessionView({ id }: { id: number }) {
             </p>
           )}
 
+          {/* Окно записи (FR-S8, ADR-009): склеивающийся транскрипт +
+              длительность + статус; сворачивается; «Отправить сейчас» —
+              досрочная отправка (микрофон по умолчанию выключается). */}
+          {recActive && (
+            <div className="rec-window" data-testid="rec-window">
+              <div className="rec-head">
+                <span className="rec-status" data-testid="rec-status">
+                  ⏺ Запись {formatRecDuration(recSince, recNow)}
+                </span>
+                <button
+                  type="button"
+                  className="btn ghost small"
+                  onClick={() => setRecCollapsed(!recCollapsed)}
+                  data-testid="rec-collapse"
+                >
+                  {recCollapsed ? 'Развернуть' : 'Свернуть'}
+                </button>
+              </div>
+              {!recCollapsed && (
+                <>
+                  <p className="rec-text" data-testid="rec-text">
+                    {recText !== '' ? recText : 'Говорите — транскрипт появится здесь…'}
+                  </p>
+                  <button
+                    type="button"
+                    className="btn primary small"
+                    onClick={() => void sendRecordingNow()}
+                    data-testid="rec-send"
+                  >
+                    Отправить сейчас
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          {recNote !== null && !recActive && (
+            <p className="form-error" role="status" data-testid="rec-note">
+              {recNote}
+            </p>
+          )}
+
           <div className="voice-controls">
             {(() => {
               const eqMode: MicEqMode = mic !== 'running' ? 'idle' : speaking ? 'muted' : 'live';
@@ -222,8 +298,8 @@ export function SessionView({ id }: { id: number }) {
 
       <section className="card transcript" aria-label="Транскрипт">
         {lines.length === 0 && <p className="muted">Диалог появится здесь.</p>}
-        <ol className="transcript-list" data-testid="lines">
-          {lines.map((l, i) => (
+        <ol className="transcript-list" data-testid="lines" ref={transcriptRef}>
+          {[...lines].reverse().map((l, i) => (
             <li key={i} className={`line ${l.who}${l.interim ? ' interim' : ''}`}>
               <div className="line-who">
                 {l.who === 'user' ? 'Кандидат' : l.who === 'ai' ? 'ИИ-интервьюер' : 'Система'}
