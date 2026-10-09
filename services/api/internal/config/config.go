@@ -38,6 +38,12 @@ type Config struct {
 	// VADPreSilenceMS — предварительная тишина для pre-STT (VAD_PRESTT_SILENCE_MS,
 	// default 400; 0 — отключает pre-STT).
 	VADPreSilenceMS int
+	// LLM-мок: детерминированный замер (T-20261009001516).
+	// LLMMockResponse — фиксированный текст ответа (LLM_MOCK_RESPONSE); пуст — эхо.
+	// LLMMockTokensPerS — скорость стриминга токенов, ток/с (LLM_MOCK_TOKENS_PER_S);
+	// 0 — весь ответ одним токеном (как раньше). Эмулирует скорость реального узла.
+	LLMMockResponse   string
+	LLMMockTokensPerS float64
 }
 
 func getEnv(key, def string) string {
@@ -51,6 +57,15 @@ func getEnvInt(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
+		}
+	}
+	return def
+}
+
+func getEnvFloat(key string, def float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
 		}
 	}
 	return def
@@ -79,6 +94,8 @@ func Load() (*Config, error) {
 		VADEndSilenceMS:   getEnvInt("VAD_END_SILENCE_MS", 900),
 		VADRMSThreshold:   getEnvInt("VAD_RMS_THRESHOLD", 100),
 		VADPreSilenceMS:   getEnvInt("VAD_PRESTT_SILENCE_MS", 400),
+		LLMMockResponse:   getEnv("LLM_MOCK_RESPONSE", ""),
+		LLMMockTokensPerS: getEnvFloat("LLM_MOCK_TOKENS_PER_S", 0),
 	}
 	if c.JWTExpiryHours <= 0 {
 		return nil, fmt.Errorf("JWT_EXPIRY_HOURS должен быть > 0 (получено %d)", c.JWTExpiryHours)

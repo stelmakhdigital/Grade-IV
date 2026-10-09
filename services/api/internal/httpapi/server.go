@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,7 +47,7 @@ type Server struct {
 func New(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *slog.Logger) *Server {
 	var provider llm.Provider
 	if cfg.LLMMock {
-		provider = llm.NewMockProvider()
+		provider = newMockProvider(cfg)
 	} else {
 		provider = llm.NewClient(cfg.LLMBaseURL, cfg.LLMModel, cfg.LLMAPIKey).
 			WithEnableThinking(cfg.LLMEnableThinking)
@@ -84,6 +85,30 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 
 // Engine — движок сессий (main: Stop при завершении).
 func (s *Server) Engine() *session.Engine { return s.engine }
+
+// newMockProvider — LLM-мок (LLM_MOCK=1): эхо по умолчанию; детерминированный
+// замер (T-20261009001516) — LLM_MOCK_RESPONSE (фиксированный ответ) +
+// LLM_MOCK_TOKENS_PER_S (скорость стриминга токенов, эмуляция реального узла).
+func newMockProvider(cfg *config.Config) llm.Provider {
+	m := llm.NewMockProvider()
+	if cfg.LLMMockResponse != "" {
+		resp := cfg.LLMMockResponse
+		m.SetResponder(func(req llm.Request) (string, error) {
+			// Приветствие (system-промпт «поприветствуй») — короткий ответ:
+			// ускоряет замер (дренирование greeting), на измеряемый ход не влияет.
+			for _, msg := range req.Messages {
+				if msg.Role == llm.RoleSystem && strings.Contains(msg.Content, "поприветствуй") {
+					return "Привет. Давайте начнём.", nil
+				}
+			}
+			return resp, nil
+		})
+	}
+	if cfg.LLMMockTokensPerS > 0 {
+		m.SetTokenDelay(time.Duration(float64(time.Second) / cfg.LLMMockTokensPerS))
+	}
+	return m
+}
 
 // Handler — корневой обработчик с маршрутами.
 func (s *Server) Handler() http.Handler {
