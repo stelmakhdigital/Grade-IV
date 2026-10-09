@@ -209,7 +209,25 @@ export class MicCapture {
       // захвата из консоли — window.__gradeMic. В prod-сборке отсутствует.
       (window as unknown as Record<string, unknown>).__gradeMic = this;
     }
+    // Быстрый путь (toggle = mute, FR-S8): поток жив (soft stop) — просто
+    // снимаем мьют (track.enabled=true), без getUserMedia (< 10 мс).
+    if (this.micState === 'stopped' && this.isStreamAlive()) {
+      this.stream!.getAudioTracks().forEach((t) => {
+        t.enabled = true;
+      });
+      this.armNoDataTimeout();
+      this.setState('running', events);
+      return;
+    }
     await this.initCapture();
+  }
+
+  // Поток жив: track существует и не завершён (device removed/changed —
+  // readyState 'ended'; тогда toggle идёт через полную инициализацию).
+  private isStreamAlive(): boolean {
+    if (this.stream === null) return false;
+    const track = this.stream.getAudioTracks()[0];
+    return track !== undefined && track.readyState === 'live';
   }
 
   // Полная инициализация захвата: getUserMedia → AudioContext → AudioWorklet.
@@ -243,6 +261,13 @@ export class MicCapture {
       throw err;
     }
     this.stream = stream;
+    // Device changed / removed: track завершён — полная реинициализация
+    // (мёртвый поток не оживить мьютом, FR-S8). Лимит — MAX_REINIT.
+    stream.getTracks().forEach((t) => {
+      t.onended = () => {
+        this.handleTrackEnded();
+      };
+    });
     const Ctx = window.AudioContext ?? (window as any).webkitAudioContext;
     let ctx: AudioContext;
     try {
@@ -301,6 +326,9 @@ export class MicCapture {
     node.port.onmessage = (e: MessageEvent) => {
       const d = e.data;
       if (d instanceof Int16Array) {
+        // Мьют (soft stop, FR-S8): нулевые чанки не шлём. 'muted' —
+        // состояние «микрофон молчит» (детектор): чанки идут (поиск возврата).
+        if (this.micState !== 'running' && this.micState !== 'muted') return;
         this.onFirstChunk();
         this.feedSilence(d);
         events.onChunk(d);
@@ -320,10 +348,59 @@ export class MicCapture {
     this.setState('running', events);
   }
 
+  // «Выключить микрофон» (toggle, FR-S8): НЕ рвём поток — только мьют
+  // (track.enabled=false) + state 'stopped' + сброс счётчиков отладки.
+  // Повторное «включить» — быстрый путь в start() (< 10 мс, без getUserMedia).
+  // Полное освобождение (tracks/контекст) — dispose() (конец сессии/пауза).
   stop(): void {
     if (this.micState === 'idle') return;
-    this.disposeCapture();
+    if (this.isStreamAlive()) {
+      this.softMute();
+      return;
+    }
+    this.dispose();
+  }
+
+  // Мягкий мьют: поток/контекст/ноды живут — только track.enabled=false.
+  // Аудиообработчик в state 'stopped' чанки не шлёт (нулевые чанки не
+  // шлём) — гейт в onmessage-обработчиках обоих путей захвата.
+  private softMute(): void {
+    this.stream?.getAudioTracks().forEach((t) => {
+      t.enabled = false;
+    });
+    if (this.noDataTimer !== null) {
+      window.clearTimeout(this.noDataTimer);
+      this.noDataTimer = null;
+    }
+    this.silence?.reset();
+    this.silence = null;
+    this.dbgChunks = 0;
+    this.dbgRms = 0;
+    this.dbgGaps = [];
+    this.dbgLastTs = 0;
     this.setState('stopped');
+  }
+
+  // Полное освобождение ресурсов (tracks/контекст/ноды/таймеры):
+  // конец сессии (unmount), пауза, reinit. Состояние ставим ДО disposeCapture:
+  // stop-.tracks() вызывает track 'ended' — обработчик не должен увидеть
+  // 'running' и запустить reinit.
+  dispose(): void {
+    if (this.micState !== 'idle') {
+      this.setState('stopped');
+    }
+    this.disposeCapture();
+  }
+
+  // Устройство отключено/сменено между сессиями (track 'ended'): мёртвый
+  // поток не оживить мьютом — полная повторная инициализация (FR-S8).
+  // Лимит MAX_REINIT защищает от цикла при постоянно отключённом устройстве.
+  private handleTrackEnded(): void {
+    const events = this.events;
+    if (events === null) return;
+    if (this.micState !== 'running' && this.micState !== 'muted') return;
+    events.onInfo?.('Микрофон: устройство отключено — повторяю инициализацию захвата');
+    this.reinitCapture(events);
   }
 
   // Освобождение ресурсов захвата (tracks, контекст, ноды, таймеры) без
@@ -493,6 +570,11 @@ export class MicCapture {
       let sum = 0;
       let n = 0;
       sp.onaudioprocess = (e: AudioProcessingEvent) => {
+        // Мьют (soft stop, FR-S8): нулевые чанки не шлём.
+        if (this.micState !== 'running' && this.micState !== 'muted') {
+          e.outputBuffer.getChannelData(0).fill(0);
+          return;
+        }
         const input = e.inputBuffer.getChannelData(0);
         for (let i = 0; i < input.length; i++) {
           sum += input[i] * input[i];

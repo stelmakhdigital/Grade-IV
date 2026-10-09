@@ -313,3 +313,151 @@ describe('MicCapture: цепочка надёжности (worklet → fallback 
     expect(h.errors.at(-1)).toContain('Микрофон молчит');
   });
 });
+
+// --- toggle = mute (FR-S8): init один раз, «выключить/включить» без getUserMedia
+
+describe('MicCapture: toggle = mute (init один раз, FR-S8)', () => {
+  class FakeWorkletNode2 {
+    static instances: FakeWorkletNode2[] = [];
+    port: { onmessage: ((e: { data: unknown }) => void) | null } = { onmessage: null };
+    connect = vi.fn();
+    disconnect = vi.fn();
+    constructor() {
+      FakeWorkletNode2.instances.push(this);
+    }
+    sendChunk(pcm: Int16Array): void {
+      this.port.onmessage?.({ data: pcm });
+    }
+  }
+
+  interface FakeTrack {
+    enabled: boolean;
+    readyState: 'live' | 'ended';
+    muted: boolean;
+    label: string;
+    stop: ReturnType<typeof vi.fn>;
+    onended: (() => void) | null;
+  }
+
+  function makeTrack(): FakeTrack {
+    return { enabled: true, readyState: 'live', muted: false, label: 'Fake Mic', stop: vi.fn(), onended: null };
+  }
+
+  class FakeCtx2 {
+    sampleRate = 48000;
+    state = 'running';
+    audioWorklet = { addModule: vi.fn(async () => undefined) };
+    destination = {};
+    createMediaStreamSource = () => ({ connect: vi.fn() });
+    createGain = () => ({ gain: { value: 1 }, connect: vi.fn() });
+    createScriptProcessor = () => {
+      const n = { onaudioprocess: null as null | ((e: unknown) => void), connect: vi.fn(), disconnect: vi.fn() };
+      return n;
+    };
+    close = vi.fn(async () => undefined);
+  }
+
+  interface ToggleHarness {
+    mic: MicCapture;
+    getUserMedia: ReturnType<typeof vi.fn>;
+    track: FakeTrack;
+    stream: MediaStream;
+    chunks: Int16Array[];
+    states: string[];
+  }
+
+  async function beginToggleMic(): Promise<ToggleHarness> {
+    FakeWorkletNode2.instances = [];
+    const track = makeTrack();
+    const stream = { getTracks: () => [track], getAudioTracks: () => [track] } as unknown as MediaStream;
+    const getUserMedia = vi.fn(async () => stream);
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+    vi.stubGlobal('AudioContext', FakeCtx2);
+    vi.stubGlobal('AudioWorkletNode', class extends FakeWorkletNode2 {});
+    (URL as unknown as { createObjectURL: (b: Blob) => string }).createObjectURL = () => 'blob:fake';
+    const chunks: Int16Array[] = [];
+    const states: string[] = [];
+    const mic = new MicCapture();
+    await mic.start({
+      onChunk: (pcm) => chunks.push(pcm),
+      onState: (s) => states.push(s),
+    });
+    return { mic, getUserMedia, track, stream, chunks, states };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('stop → мьют (track.enabled=false), start → unmute: getUserMedia ровно 1 раз, stream тот же', async () => {
+    const h = await beginToggleMic();
+    h.mic.stop();
+    expect(h.mic.state).toBe('stopped');
+    expect(h.track.enabled).toBe(false);
+    expect(h.track.stop).not.toHaveBeenCalled(); // поток не рвём
+    // Включение: без getUserMedia, тот же MediaStream, enabled=true.
+    const t0 = performance.now();
+    await h.mic.start({ onChunk: () => {} });
+    expect(performance.now() - t0).toBeLessThan(10); // < 10 мс
+    expect(h.mic.state).toBe('running');
+    expect(h.track.enabled).toBe(true);
+    expect(h.getUserMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('в state stopped чанки НЕ шлются (нулевые чанки не уходят), в running — идут', async () => {
+    const h = await beginToggleMic();
+    const node = FakeWorkletNode2.instances.at(-1)!;
+    node.sendChunk(new Int16Array(4000).fill(100));
+    expect(h.chunks).toHaveLength(1); // running — шлём
+    h.mic.stop();
+    node.sendChunk(new Int16Array(4000).fill(0)); // мьют — не шлём
+    node.sendChunk(new Int16Array(4000).fill(0));
+    expect(h.chunks).toHaveLength(1);
+    await h.mic.start({ onChunk: () => {} });
+    node.sendChunk(new Int16Array(4000).fill(100));
+    expect(h.chunks).toHaveLength(2); // unmute — снова шлём
+  });
+
+  it('stop сбрасывает счётчики отладки (chunks/medGapMs/maxRms = 0)', async () => {
+    const h = await beginToggleMic();
+    const node = FakeWorkletNode2.instances.at(-1)!;
+    node.sendChunk(new Int16Array(4000).fill(8000));
+    expect(h.mic.debugInfo().chunks).toBe(1);
+    h.mic.stop();
+    expect(h.mic.debugInfo()).toMatchObject({ chunks: 0, medGapMs: 0, maxRms: 0 });
+  });
+
+  it('мёртвый track (readyState ended) → полная инициализация (getUserMedia 2 раза)', async () => {
+    const h = await beginToggleMic();
+    h.track.readyState = 'ended'; // устройство отключилось
+    h.mic.stop();
+    expect(h.track.stop).toHaveBeenCalled(); // мёртвый поток — освобождаем
+    await h.mic.start({ onChunk: () => {} });
+    expect(h.getUserMedia).toHaveBeenCalledTimes(2);
+    expect(h.mic.state).toBe('running');
+  });
+
+  it('track ended во время работы → полная реинициализация (getUserMedia 2 раза)', async () => {
+    const h = await beginToggleMic();
+    h.track.readyState = 'ended';
+    h.track.onended?.(); // браузер уведомляет об отключении устройства
+    // reinitCapture — асинхронная цепочка (микрозадачи)
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(h.getUserMedia).toHaveBeenCalledTimes(2);
+    expect(h.mic.state).toBe('running');
+  });
+
+  it('ADR-008-цепочка на месте: после soft stop 3 с без чанков → не раньше, чем включён', async () => {
+    // В state stopped no-data таймер снят — 10 с «мьюта» не запускают reinit.
+    const h = await beginToggleMic();
+    h.mic.stop();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(h.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(h.mic.state).toBe('stopped');
+  });
+});
