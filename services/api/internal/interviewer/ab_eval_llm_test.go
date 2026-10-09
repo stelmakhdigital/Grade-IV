@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -118,9 +119,49 @@ func TestABEvalLLM(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// LLM_EVAL_RUNS — повторений на сценарий/вариант (дефолт 1; N≥3 —
+	// усреднение «ничьих», T-20261009152316). LLM_EVAL_SCENARIOS — подмножество
+	// имён сценариев через запятую (дефолт — весь корпус).
+	runs := 1
+	if v := os.Getenv("LLM_EVAL_RUNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			runs = n
+		}
+	}
+	var subset []string
+	if v := os.Getenv("LLM_EVAL_SCENARIOS"); v != "" {
+		subset = strings.Split(v, ",")
+	}
+	inSubset := func(name string) bool {
+		if len(subset) == 0 {
+			return true
+		}
+		for _, n := range subset {
+			if strings.TrimSpace(n) == name {
+				return true
+			}
+		}
+		return false
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
-	c := &abLLMClient{base: base, model: model, client: &http.Client{Timeout: 120 * time.Second}}
+	c := &abLLMClient{base: base, model: model, client: &http.Client{Timeout: 180 * time.Second}}
+
+	// chatOnce — генерация/judge с одним ретраем (узел LLM нестабильно);
+	// ошибка — строка пропускается (не роняет весь прогон).
+	chatOnce := func(temp float64, msgs []map[string]string) (string, error) {
+		for attempt := 0; attempt < 2; attempt++ {
+			text, err := c.chat(ctx, temp, msgs)
+			if err == nil {
+				return text, nil
+			}
+			if attempt == 0 {
+				time.Sleep(2 * time.Second)
+			}
+		}
+		return c.chat(ctx, temp, msgs)
+	}
 
 	type row struct {
 		Scenario  string         `json:"scenario"`
@@ -138,56 +179,72 @@ func TestABEvalLLM(t *testing.T) {
 	md.WriteString("|---|---|---|---|---|---|---|---|\n")
 
 	for _, s := range abCorpus {
+		if !inSubset(s.name) {
+			continue
+		}
 		variants := []string{"A=B"} // контекстные сценарии: A и B совпадают
 		if s.voice {
 			variants = []string{"A", "B"}
 		}
-		texts := map[string]string{}
-		for _, v := range variants {
-			style := voiceStyleA
-			if v == "B" {
-				style = voiceStyleB
+		for run := 0; run < runs; run++ {
+			rowName := s.name
+			if runs > 1 {
+				rowName = fmt.Sprintf("%s#%d", s.name, run+1)
 			}
-			sys := systemPrompt(s.grade, s.stack, s.stage, style)
-			tCtx := ctx
-			text, err := c.chat(tCtx, s.temp, []map[string]string{
-				{"role": "system", "content": sys},
-				{"role": "user", "content": s.userMsg},
-			})
-			if err != nil {
-				t.Fatalf("генерация %s/%s: %v", s.name, v, err)
+			texts := map[string]string{}
+			runOK := true
+			for _, v := range variants {
+				style := voiceStyleA
+				if v == "B" {
+					style = voiceStyleB
+				}
+				sys := systemPrompt(s.grade, s.stack, s.stage, style)
+				text, err := chatOnce(s.temp, []map[string]string{
+					{"role": "system", "content": sys},
+					{"role": "user", "content": s.userMsg},
+				})
+				if err != nil {
+					t.Logf("пропуск run: генерация %s/%s (run %d): %v", s.name, v, run+1, err)
+					runOK = false
+					break
+				}
+				texts[v] = strings.TrimSpace(text)
 			}
-			texts[v] = strings.TrimSpace(text)
-		}
-		for _, v := range variants {
-			text := texts[v]
-			// Эвристика (детерминированный слой): для voice — вопрос/длина/списки.
-			wantQ := s.stage == models.StageVoice && !strings.Contains(s.userMsg, "молчит")
-			heuristic := validateVoiceReply(t, text, wantQ)
-			judge, err := c.chat(ctx, 0.2, []map[string]string{
-				{"role": "system", "content": abJudgeSystem},
-				{"role": "user", "content": fmt.Sprintf("Контекст: стадия %s, грейд %s, стек %s.\nРеплика кандидата (вход): %s\nРеплика ИИ (оцени): %s",
-					s.stage, s.grade, s.stack, s.userMsg, text)},
-			})
-			if err != nil {
-				t.Fatalf("judge %s/%s: %v", s.name, v, err)
+			if !runOK {
+				continue
 			}
-			var scores map[string]any
-			if err := json.Unmarshal([]byte(extractJSON(judge)), &scores); err != nil {
-				t.Fatalf("judge JSON %s/%s: %v (%q)", s.name, v, err, judge)
+			for _, v := range variants {
+				text := texts[v]
+				// Эвристика (детерминированный слой): для voice — вопрос/длина/списки.
+				wantQ := s.stage == models.StageVoice && !strings.Contains(s.userMsg, "молчит")
+				heuristic := validateVoiceReply(t, text, wantQ)
+				judge, err := chatOnce(0.2, []map[string]string{
+					{"role": "system", "content": abJudgeSystem},
+					{"role": "user", "content": fmt.Sprintf("Контекст: стадия %s, грейд %s, стек %s.\nРеплика кандидата (вход): %s\nРеплика ИИ (оцени): %s",
+						s.stage, s.grade, s.stack, s.userMsg, text)},
+				})
+				if err != nil {
+					t.Logf("пропуск: judge %s/%s (run %d): %v", s.name, v, run+1, err)
+					continue
+				}
+				var scores map[string]any
+				if err := json.Unmarshal([]byte(extractJSON(judge)), &scores); err != nil {
+					t.Logf("пропуск: judge JSON %s/%s (run %d): %v (%q)", s.name, v, run+1, err, judge)
+					continue
+				}
+				ii := map[string]int{}
+				sum := 0
+				for _, k := range []string{"naturalness", "grade_fit", "specificity", "voice_fit"} {
+					n, _ := scores[k].(float64)
+					ii[k] = int(n)
+					sum += int(n)
+				}
+				comment, _ := scores["comment"].(string)
+				rows = append(rows, row{rowName, v, string(s.grade), string(s.stage), text, ii, comment, heuristic})
+				md.WriteString(fmt.Sprintf("| %s | %s | %d | %d | %d | %d | %d | %s |\n",
+					rowName, v, ii["naturalness"], ii["grade_fit"], ii["specificity"], ii["voice_fit"], sum,
+					strings.Join(heuristic, "; ")))
 			}
-			ii := map[string]int{}
-			sum := 0
-			for _, k := range []string{"naturalness", "grade_fit", "specificity", "voice_fit"} {
-				n, _ := scores[k].(float64)
-				ii[k] = int(n)
-				sum += int(n)
-			}
-			comment, _ := scores["comment"].(string)
-			rows = append(rows, row{s.name, v, string(s.grade), string(s.stage), text, ii, comment, heuristic})
-			md.WriteString(fmt.Sprintf("| %s | %s | %d | %d | %d | %d | %d | %s |\n",
-				s.name, v, ii["naturalness"], ii["grade_fit"], ii["specificity"], ii["voice_fit"], sum,
-				strings.Join(heuristic, "; ")))
 		}
 	}
 	raw, _ := json.MarshalIndent(rows, "", "  ")
@@ -213,6 +270,36 @@ func TestABEvalLLM(t *testing.T) {
 	}
 	if nB > 0 {
 		t.Logf("Средняя сумма (4 критерия, макс 20): A=%.1f (n=%d), B=%.1f (n=%d)", float64(sumA)/float64(nA), nA, float64(sumB)/float64(nB), nB)
+	}
+	// Усреднение по сценариям (runs>1): таблица «сценарий: A=… B=…».
+	if runs > 1 {
+		type agg struct{ sum, n int }
+		by := map[string]map[string]*agg{}
+		for _, r := range rows {
+			base := r.Scenario
+			if i := strings.Index(base, "#"); i >= 0 {
+				base = base[:i]
+			}
+			m, ok := by[base]
+			if !ok {
+				m = map[string]*agg{}
+				by[base] = m
+			}
+			a, ok := m[r.Variant]
+			if !ok {
+				a = &agg{}
+				m[r.Variant] = a
+			}
+			a.sum += r.Scores["naturalness"] + r.Scores["grade_fit"] + r.Scores["specificity"] + r.Scores["voice_fit"]
+			a.n++
+		}
+		for base, m := range by {
+			for _, v := range []string{"A", "B", "A=B"} {
+				if a, ok := m[v]; ok && a.n > 0 {
+					t.Logf("усреднение %s [%s]: %.2f (n=%d)", base, v, float64(a.sum)/float64(a.n), a.n)
+				}
+			}
+		}
 	}
 }
 
