@@ -27,6 +27,35 @@ docker compose -f infra/docker-compose.yml --profile prod --profile monitoring u
 Без публичного IP (локальная VPS-проверка): `GRADE_DOMAIN=localhost`,
 `CADDY_TLS=internal`.
 
+### Чек-лист актуальности prod-состава (T-20261009133832, 2026-10-09)
+
+Сверено: docker-compose.yml (prod/gpu/monitoring) ↔ .env.example ↔ Dockerfile'ы
+↔ HEALTHCHECK'и ↔ код (env, которые реально читает сервис). Найденные
+рассинхронизации (исправлены):
+
+1. **sandbox.Dockerfile без docker-cli** — prod (SANDBOX_MODE=docker) монтирует
+   /var/run/docker.sock, но образ не имел CLI → все запуски 503 «docker
+   недоступен на узле». Фикс: `apk add docker-cli`.
+2. **Caddyfile: `tls {$CADDY_TLS:letsencrypt}`** — невалидный аргумент (допустимы
+   пусто | internal | email | cert+key) → при пустом CADDY_TLS (prod-дефолт)
+   caddy не стартовал. Фикс: `tls {$CADDY_TLS:}` (пусто = авто/LE, internal = CA).
+3. **.env.example**: +VITE_MIC_DEBUG (build-время, в prod-сборке выключено),
+   +STT_DOWNLOAD_ROOT (compose: /models/stt), −STT_COMPUTE_TYPE (код voice не
+   читает — устарело).
+4. **compose voice**: +TTS_SPEAKER (явно, дефолт ru_01 — как в коде).
+
+Сверено и не тронуто: env api (LLM_BASE_URL/LLM_MODEL/VOICE_URL/SANDBOX_URL —
+все читаются; ENABLE_DEBUG в prod сознательно отсутствует → 404), порты/имена
+сервисов (api:8000, voice:8100, sandbox:8200), HEALTHCHECK'и (api/sandbox —
+/healthz, voice — /api/v1/health, frontend — nginx), nginx-прокси (/api, /healthz,
+/ws Upgrade), prometheus.yml (скрейп api:8000/metrics — все метрики дашборда
+«Голосовой контур» живут в api), Grafana-дашборд v2 (T-20261009021739) примонтирован.
+
+Ограничение: в рабочей среде docker недоступен — валидация **структуры**
+(YAML/Dockerfile-синтаксис, имена env/портов/объёмов по коду); фактический
+запуск контейнеров (compose config + up + health) — при деплое (по п. «Проверка»
+выше). Docker-пробы сандбокса в CI: джоб sandbox-docker (см. TEST_PLAN §4.5).
+
 ## 2. Метрики (Grafana / Prometheus)
 
 - Grafana: `http://<vps>:3000` (admin / `GRAFANA_ADMIN_PASSWORD`),
