@@ -56,12 +56,10 @@ export function CabinetView() {
     void load();
   }, [load]);
 
-  const gradeMinutes = GRADES.find((g) => g.value === grade)?.minutes ?? 50;
-  const notEnoughMinutes = minutesRemainingMin < gradeMinutes;
 
   const onStart = async (e: FormEvent) => {
     e.preventDefault();
-    if (starting || notEnoughMinutes) return;
+    if (starting) return;
     setStarting(true);
     setStartError(null);
     try {
@@ -115,12 +113,6 @@ export function CabinetView() {
               ))}
             </select>
           </label>
-          {notEnoughMinutes && (
-            <p className="form-warn">
-              Не хватает минут: для {grade} нужно {gradeMinutes}, доступно{' '}
-              {minutesRemainingMin}.
-            </p>
-          )}
           {startError !== null && (
             <p className="form-error" role="alert">
               {startError}
@@ -129,7 +121,7 @@ export function CabinetView() {
           <button
             type="submit"
             className="btn primary"
-            disabled={starting || notEnoughMinutes}
+            disabled={starting}
             data-testid="start-session"
           >
             {starting ? 'Запуск…' : 'Начать интервью'}

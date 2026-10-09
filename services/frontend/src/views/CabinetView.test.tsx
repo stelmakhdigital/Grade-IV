@@ -64,7 +64,7 @@ beforeEach(() => {
 });
 
 describe('CabinetView (WP-7)', () => {
-  it('показывает email и минуты; история со статусами и действиями', async () => {
+  it('показывает email и баланс; история со статусами и действиями', async () => {
     const fetchMock = mockApi({ sessions: [S_ACTIVE, S_FINISHED] });
     renderCabinet(fetchMock);
     expect(await screen.findByTestId('user-email')).toBeInTheDocument();
@@ -97,16 +97,4 @@ describe('CabinetView (WP-7)', () => {
     });
   });
 
-  it('недостаток минут: кнопка старта заблокирована с предупреждением', async () => {
-    const fetchMock = mockApi({
-      sessions: [],
-      me: { user: ME.user, minutes_remaining_s: 1800 }, // 30 мин
-    });
-    renderCabinet(fetchMock);
-    await screen.findByTestId('user-email');
-    const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText('Грейды'), 'staff'); // 75 мин
-    expect(await screen.findByText(/Не хватает минут/)).toBeInTheDocument();
-    expect(screen.getByTestId('start-session')).toBeDisabled();
-  });
 });
