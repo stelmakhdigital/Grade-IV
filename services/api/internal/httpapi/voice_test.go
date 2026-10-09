@@ -23,13 +23,13 @@ import (
 // VAD на rms > 1000 → state/partial/final с тем же фиксированным текстом).
 // Считает вызовы (sttCalls — и batch /stt, и стримовый final).
 type mockVoice struct {
-	mu           sync.Mutex // /tts теперь параллельный (пул воркеров, очередь #3)
-	sttCalls     int
-	ttsCalls     int
-	ttsTexts     []string
-	sttBytes     int
-	ttsPCMSize   int
-	streamBroken bool // true: /stt/stream отвечает 500 (тест fallback на нижние уровни)
+	mu              sync.Mutex // /tts теперь параллельный (пул воркеров, очередь #3)
+	sttCalls        int
+	ttsCalls        int
+	ttsTexts        []string
+	sttBytes        int
+	ttsPCMSize      int
+	streamBroken    bool // true: /stt/stream отвечает 500 (тест fallback на нижние уровни)
 	vadStreamBroken bool // true: /vad/stream отвечает 500 (тест fallback на energy-путь)
 	// Тест параллельного TTS: искусственная задержка синтеза и амплитуда
 	// на предложение (маркер предложения в PCM для проверки порядка вывода).

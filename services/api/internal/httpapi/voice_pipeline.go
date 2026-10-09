@@ -768,10 +768,12 @@ func (s *Server) handleVoiceUtterance(ws *wsSession, pcm []byte) {
 
 // feedVAD — бинарный кадр PCM из readLoop.
 // Цепочка деградации (3 уровня, ADR-002 поправка 2026-10-09):
-//  (1) voice /stt/stream (Silero VAD + стриминговый STT, ADR-007, дефолт);
-//  (2) voice /vad/stream (Silero VAD) + batch /stt — кадры в VADStream, реплики
-//      обрабатываются onVADStreamEvent (pre-STT на pre_silence);
-//  (3) energy VAD в Go + batch /stt (feedVADBatch) — last-resort.
+//
+//	(1) voice /stt/stream (Silero VAD + стриминговый STT, ADR-007, дефолт);
+//	(2) voice /vad/stream (Silero VAD) + batch /stt — кадры в VADStream, реплики
+//	    обрабатываются onVADStreamEvent (pre-STT на pre_silence);
+//	(3) energy VAD в Go + batch /stt (feedVADBatch) — last-resort.
+//
 // Переход на следующий уровень — Warn + метрика (однократно, в on*-event).
 // Turn-taking общий для всех путей: пока ход занят И ИИ не говорит
 // (LLM-фаза) — кадры не слушаются.
