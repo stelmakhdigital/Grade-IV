@@ -59,17 +59,22 @@ var gradeProgram = map[models.Grade]string{
 		"Вопросы по блокам по порядку, по 2 на блок, оценивай влияние на систему целиком.",
 }
 
-// stagePrompt — system-промпт по стадии.
-func stagePrompt(grade models.Grade, stack string, stage models.Stage) string {
+// stagePrompt — system-промпт по стадии. voiceStyle — блок формата голосовой
+// реплики (варианты A/B, T-20261009121144; пустая строка — без ограничения).
+func stagePrompt(grade models.Grade, stack string, stage models.Stage, voiceStyle string) string {
 	switch stage {
 	case models.StageVoice:
 		prog := gradeProgram[grade]
 		if prog == "" {
 			prog = gradeProgram["middle"]
 		}
+		style := ""
+		if voiceStyle != "" {
+			style = " " + voiceStyle
+		}
 		return fmt.Sprintf("Стадия: голосовое интервью. Стек: %s. "+
 			"Веди диалог по программе грейда: вопрос → на реплику кандидата реагуй, уточняй, переходи к следующему. "+
-			"Одна мысль за раз. \n\n%s", stack, prog)
+			"Одна мысль за раз.%s \n\n%s", stack, style, prog)
 	case models.StageLiveCode:
 		return fmt.Sprintf("Стадия: Live-Code, стек %s. Кандидат решает задачу в редакторе, запускать тесты будет сам. "+
 			"Твои роли: (1) при входе — представить задачу и дать старт; (2) по результатам запуска кода — короткое ревью "+
@@ -84,9 +89,32 @@ func stagePrompt(grade models.Grade, stack string, stage models.Stage) string {
 	}
 }
 
-// SystemPrompt — полный system-промпт хода.
+// voiceStyle — варианты блока формата голосовой реплики (A/B-промпты,
+// T-20261009121144): A — текущее поведение (без ограничения); B — ограничение
+// длины (1–2 предложения, ≤ 40 слов), явная структура (реакция + один вопрос/
+// подсказка), разговорные запреты (списки, «давайте разберём»).
+const (
+	voiceStyleA = ""
+	voiceStyleB = "Формат реплики: 1–2 предложения, не длиннее 40 слов. " +
+		"Структура: короткая реакция на реплику кандидата + один вопрос ИЛИ одна конкретная подсказка (не и то и другое). " +
+		"Говори как в живом разговоре: без списков и нумерации, без вводных «давайте разберём», «в целом», «хороший вопрос»."
+)
+
+// activeVoiceStyle — активный вариант, выбранный A/B-оценкой
+// (docs/test-results/prompts-ab-2026-10-09.md): B — ограничение длины +
+// структура + разговорные правила (средняя сумма judge 18.9 vs 18.1, все
+// voice-сценарии ≥ A, junior-сценарии — строго лучше; без ограничения A
+// выдаёт реплики 41–62 слова).
+const activeVoiceStyle = voiceStyleB
+
+// systemPrompt — полный system-промпт хода (voiceStyle — вариант формата).
+func systemPrompt(grade models.Grade, stack string, stage models.Stage, voiceStyle string) string {
+	return strings.Join([]string{persona, gradeFocus[grade], stagePrompt(grade, stack, stage, voiceStyle)}, "\n\n")
+}
+
+// SystemPrompt — полный system-промпт хода (активный вариант A/B).
 func SystemPrompt(grade models.Grade, stack string, stage models.Stage) string {
-	return strings.Join([]string{persona, gradeFocus[grade], stagePrompt(grade, stack, stage)}, "\n\n")
+	return systemPrompt(grade, stack, stage, activeVoiceStyle)
 }
 
 // FallbackText — стандартная реплика ИИ, когда LLM-эндпоинт недоступен
