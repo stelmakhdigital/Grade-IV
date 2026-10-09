@@ -21,6 +21,7 @@ export type WsMessage =
   | { type: 'ai_text'; text: string }
   | { type: 'transcript'; who: 'user' | 'ai'; text: string }
   | { type: 'stt_partial'; text: string }
+  | { type: 'stt_segment'; text: string; speech_ms: number; total_speech_ms: number }
   | { type: 'tts_stop' }
   | { type: 'run_result'; [k: string]: unknown }
   | { type: 'report_ready'; [k: string]: unknown }

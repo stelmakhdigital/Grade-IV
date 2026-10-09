@@ -16,6 +16,11 @@ import {
 import { MicCapture, type MicDebugInfo, type MicState } from '../audio/mic';
 import { PcmPlayer } from '../audio/player';
 import { SessionWS, type StageTask, type WsMessage } from '../ws';
+import {
+  MIN_SPEECH_MS,
+  isInsufficientSpeech,
+  mergeRecording,
+} from '../recording';
 import { apiErrorMessage } from '../views/LoginView';
 import { eventKindLabel, eventText } from '../labels';
 
@@ -46,6 +51,19 @@ export function useVoiceSession(id: number) {
   // перезагружена на paused-сессии, статус приходит из REST (session.status).
   const [uiPaused, setUiPaused] = useState(false);
   const [pauseBusy, setPauseBusy] = useState(false);
+  // Режим записи (FR-S8, ADR-009): микрофон включён — сервис слушает и
+  // распознаёт налёт, но сегменты НЕ становятся ответами кандидата; склеенный
+  // транскрипт отправляется ОДНИМ сообщением при выключении микрофона /
+  // «Отправить сейчас» (реф — WS-колбэк создан один раз, state в замыкании
+  // бы устаревал).
+  const [recActive, setRecActive] = useState(false);
+  const [recSegs, setRecSegs] = useState<string[]>([]);
+  const [recPartial, setRecPartial] = useState('');
+  const [recTotalSpeechMs, setRecTotalSpeechMs] = useState(0);
+  const [recSince, setRecSince] = useState<number | null>(null); // мм:сс окна
+  const [recCollapsed, setRecCollapsed] = useState(false);
+  const [recNote, setRecNote] = useState<string | null>(null);
+  const recRef = useRef<{ active: boolean }>({ active: false });
 
   const wsRef = useRef<SessionWS | null>(null);
   const micRef = useRef<MicCapture | null>(null);
@@ -133,7 +151,13 @@ export function useVoiceSession(id: number) {
             });
             break;
           case 'stt_partial':
-            // Стриминговый STT (ADR-007): интеримный текст кандидата —
+            // Стриминговый STT (ADR-007): интеримный текст кандидата.
+            // Режим записи (FR-S8): интерим — в окно записи, НЕ в строки
+            // (сегменты не становятся ответами кандидата).
+            if (recRef.current.active) {
+              setRecPartial(m.text);
+              break;
+            }
             // обновляем последнюю интерим-строку (или создаём её).
             setLines((prev) => {
               const last = prev[prev.length - 1];
@@ -142,6 +166,18 @@ export function useVoiceSession(id: number) {
               }
               return [...prev.slice(-199), { who: 'user', text: m.text, interim: true }];
             });
+            break;
+          case 'stt_segment':
+            // Режим записи (FR-S8, ADR-009): распознанный сегмент (final по
+            // тишине) — в накопитель окна записи; AI-ход не стартует (сервер
+            // подавляет turn, пока recording on). Вне записи — игнор
+            // (backward-compat: старые серверы событие не шлют).
+            if (!recRef.current.active) {
+              break;
+            }
+            setRecSegs((prev) => [...prev, m.text]);
+            setRecPartial('');
+            setRecTotalSpeechMs(m.total_speech_ms ?? 0);
             break;
           case 'tts_stop':
             // barge-in: кандидат прервал речь ИИ — плеер останавливается
@@ -208,7 +244,7 @@ export function useVoiceSession(id: number) {
     return () => {
       window.clearInterval(speakingTimer);
       window.clearInterval(dbgTimer);
-      micCap.stop();
+      micCap.dispose(); // полное освобождение (tracks/контекст) при unmount
       player.dispose();
       ws.close();
       wsRef.current = null;
@@ -245,23 +281,69 @@ export function useVoiceSession(id: number) {
     });
   };
 
+    // Конец записи (FR-S8): recording off + склеенный транскрипт ОДНИМ
+  // utterance-сообщением (WS-порядок: off раньше utterance) → AI-ход стартует.
+  // «Недостаточно речи» (< MIN_SPEECH_MS или пусто) — не отправляем.
+  const finishRecording = useCallback(() => {
+    if (!recRef.current.active) return;
+    recRef.current.active = false;
+    setRecActive(false);
+    setRecSince(null);
+    const merged = mergeRecording(recSegs, recPartial);
+    const insufficient = isInsufficientSpeech(merged, recTotalSpeechMs);
+    setRecSegs([]);
+    setRecPartial('');
+    setRecTotalSpeechMs(0);
+    wsRef.current?.sendUi('recording', { on: false });
+    if (insufficient) {
+      setRecNote(`Недостаточно речи для отправки (минимум ~${Math.round(MIN_SPEECH_MS / 100) / 10} с).`);
+      return;
+    }
+    setRecNote(null);
+    wsRef.current?.sendUi('utterance', { text: merged });
+  }, [recSegs, recPartial, recTotalSpeechMs]);
+
   const toggleMic = async () => {
     const micCap = micRef.current;
     if (micCap === null) return;
     if (mic === 'running' || mic === 'muted') {
-      micCap.stop();
+      micCap.stop(); // soft: mute без разрыва потока (FR-S8)
       micLevelRef.current = 0;
       setMic('stopped');
       setMicDbg(null);
+      finishRecording(); // выключить микрофон — отправить склеенный транскрипт
       return;
     }
     try {
       await startMic();
+      // Режим записи (FR-S8): включил микрофон — сервис слушает и склеивает
+      // транскрипт; ответ кандидата — только при выключении/«Отправить сейчас».
+      wsRef.current?.sendUi('recording', { on: true });
+      recRef.current.active = true;
+      setRecActive(true);
+      setRecSegs([]);
+      setRecPartial('');
+      setRecTotalSpeechMs(0);
+      setRecSince(Date.now());
+      setRecNote(null);
+      setRecCollapsed(false);
     } catch {
       setMic('denied');
       setError('Нет доступа к микрофону — разрешите в браузере.');
     }
   };
+
+  // «Отправить сейчас» (окно записи): досрочная отправка накопленного;
+  // по умолчанию после отправки микрофон выключается (решение, ADR-009).
+  const sendRecordingNow = useCallback(() => {
+    if (mic === 'running' || mic === 'muted') {
+      micRef.current?.stop();
+      micLevelRef.current = 0;
+      setMic('stopped');
+      setMicDbg(null);
+    }
+    finishRecording();
+  }, [mic, finishRecording]);
 
   // Пауза сессии (FR-S7): тарификация останавливается на сервере.
   // Локально: микрофон (остановка отправки PCM), TTS-плеер (stop),
@@ -272,7 +354,18 @@ export function useVoiceSession(id: number) {
     setPauseBusy(true);
     try {
       micBeforePauseRef.current = mic === 'running' || mic === 'muted';
-      micRef.current?.stop();
+      // Пауза — полное освобождение микрофона (долго), не мягкий мьут;
+      // незавершённая запись сбрасывается (ADR-009: запись не переживает паузу).
+      if (recRef.current.active) {
+        recRef.current.active = false;
+        wsRef.current?.sendUi('recording', { on: false });
+        setRecActive(false);
+        setRecSince(null);
+        setRecSegs([]);
+        setRecPartial('');
+        setRecTotalSpeechMs(0);
+      }
+      micRef.current?.dispose();
       micLevelRef.current = 0;
       setMic('stopped');
       setMicDbg(null);
@@ -351,6 +444,17 @@ export function useVoiceSession(id: number) {
     resume,
     onStageAction,
     onFinish,
+    // Режим записи (FR-S8, ADR-009).
+    recActive,
+    recSegs,
+    recPartial,
+    recTotalSpeechMs,
+    recSince,
+    recCollapsed,
+    setRecCollapsed,
+    recNote,
+    finishRecording,
+    sendRecordingNow,
   };
 }
 
