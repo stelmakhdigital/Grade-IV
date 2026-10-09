@@ -16,12 +16,14 @@ import (
 // поправка 2026-10-09, вариант 2): "speech_start" (старт речи), "pre_silence"
 // (предварительная тишина в речи — Utterance = текущий буфер, сигнал pre-STT),
 // "utterance" (реплика завершена: Utterance = полная реплика с pre-roll,
-// SpeechMS = длительность, мс), "unavailable" (voice недоступен после
-// реконнектов — деградация на energy-путь).
+// SpeechMS = длительность всего буфера (с pre-roll), мс; PreRollMS = доля
+// pre-roll в буфере, мс — для вычитания при barge-in пороге), "unavailable"
+// (voice недоступен после реконнектов — деградация на energy-путь).
 type VADEvent struct {
 	Type      string // "speech_start" | "pre_silence" | "utterance" | "unavailable"
 	Utterance []byte // pre_silence: текущий буфер; utterance: полная реплика (с pre-roll)
-	SpeechMS  int    // utterance: длительность речи, мс
+	SpeechMS  int    // utterance: длительность всего буфера (с pre-roll), мс
+	PreRollMS int    // utterance: длительность pre-roll (тишина перед речью), мс
 }
 
 // vadPreRollFrames — pre-roll кольцо: последние кадры тишины перед словом
@@ -55,6 +57,7 @@ type VADStream struct {
 	mu         sync.Mutex
 	ring       [][]byte // pre-roll: последние кадры (не-речь), ≤ vadPreRollFrames
 	buf        []byte   // аудио текущей реплики (от pre-roll)
+	prerollB   int      // байты pre-roll, включённые в буфер при старте речи (для PreRollMS)
 	preEmitted bool     // pre_silence уже выдан (тише-кадры не буферизуем)
 	inSpeech   atomic.Bool
 }
@@ -185,8 +188,10 @@ func (s *VADStream) serve(ctx context.Context, conn *websocket.Conn) {
 			// Старт речи: сброс буфера, pre-roll кольцо — в начало буфера.
 			s.mu.Lock()
 			s.buf = nil
+			s.prerollB = 0
 			for _, f := range s.ring {
 				s.buf = append(s.buf, f...)
+				s.prerollB += len(f)
 			}
 			s.ring = nil
 			s.preEmitted = false
@@ -212,7 +217,9 @@ func (s *VADStream) serve(ctx context.Context, conn *websocket.Conn) {
 			s.mu.Unlock()
 			if len(u) > 0 {
 				ms := int(int64(len(u)) * 1000 / 2 / SampleRate)
-				s.onEvent(VADEvent{Type: "utterance", Utterance: u, SpeechMS: ms})
+				prerollMS := int(int64(s.prerollB) * 1000 / 2 / SampleRate)
+				s.prerollB = 0
+				s.onEvent(VADEvent{Type: "utterance", Utterance: u, SpeechMS: ms, PreRollMS: prerollMS})
 			}
 		}
 	}

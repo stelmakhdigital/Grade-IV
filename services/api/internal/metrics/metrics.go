@@ -165,6 +165,13 @@ var (
 	TTSErrors = NewCounter("grade_ai_tts_errors_total", "ошибок синтеза TTS")
 	// BargeInsTotal — barge-in: кандидат прервал речь ИИ во время TTS-стрима.
 	BargeInsTotal = NewCounter("grade_barge_ins_total", "barge-in (кандидат прервал речь ИИ)")
+	// BargeInSpeechMS — длительность (мс) РЕЧИ кандидата (без pre-roll) при
+	// barge-in: распределение — наблюдение pre-roll-риска (решение #40): если
+	// п50 устойчиво в 500–1000 мс — подозрение на ложные/ранние прерывания.
+	// Buckets вокруг порога BargeInMinSpeechMS=500 мс. Обсерв в МС (имя _ms).
+	BargeInSpeechMS = NewHistogram("grade_barge_in_speech_ms",
+		"длительность (мс) речи кандидата (без pre-roll) при barge-in",
+		100, 250, 500, 1000, 2000, 5000)
 	// STTStreamFallbacks — деградации стримингового STT на batch-путь
 	// (voice /stt/stream недоступен; ADR-007).
 	STTStreamFallbacks = NewCounter("grade_stt_stream_fallbacks_total", "деградаций стримингового STT на batch-путь")
@@ -184,7 +191,7 @@ func ResultLabel(result string) Labels { return Labels{"result": result} }
 
 type texter interface{ text() string }
 
-var all = []texter{TurnStage, TurnsTotal, LLMStreamErrors, TTSErrors, BargeInsTotal, STTStreamFallbacks, VADStreamFallbacks, TTSSynth}
+var all = []texter{TurnStage, TurnsTotal, LLMStreamErrors, TTSErrors, BargeInsTotal, BargeInSpeechMS, STTStreamFallbacks, VADStreamFallbacks, TTSSynth}
 
 // Handler — GET /metrics (Prometheus text format).
 func Handler(w http.ResponseWriter, _ *http.Request) {

@@ -674,23 +674,33 @@ func (s *Server) preSTTFor(ws *wsSession, buf []byte) {
 	s.log.Debug("stt: pre-распознавание запущено", "session", ws.id, "bytes", len(buf))
 }
 
-// completeUtterance — завершённая реплика (energy-путь: VAD-хвост;
-// Silero-путь: utterance-событие /vad/stream). Общее: сброс pre-STT-флага,
-// barge-in-проверка (ttsActive + BargeInMinSpeechMS), busy-CAS, ход кандидата
-// (handleVoiceUtterance). Поведение energy-пути не меняется (DRY-вынос).
-func (s *Server) completeUtterance(ws *wsSession, utterance []byte) {
+// completeUtterance — завершённая реплика (energy-путь: VAD-хвост; Silero-путь:
+// utterance-событие /vad/stream). Общее: сброс pre-STT-флага, barge-in-проверка
+// (ttsActive + BargeInMinSpeechMS), busy-CAS, ход кандидата (handleVoiceUtterance).
+// Поведение energy-пути не меняется (DRY-вынос). prerollMS — доля pre-roll в
+// буфере (Silero-путь: до 1 с тишины перед речью; energy-путь: 0) — вычитается
+// при barge-in пороге (решение #41: короткая речь с pre-roll не прерывает TTS).
+func (s *Server) completeUtterance(ws *wsSession, utterance []byte, prerollMS int) {
 	// Реплика завершена: сбрасываем pre-STT-флаг (если ещё не сброшен).
 	ws.preSTTActive.Store(false)
 	if ws.ttsActive.Load() {
-		// Кандидат заговорил, пока ИИ говорит.
-		ms := int(int64(len(utterance)) * 1000 / 2 / 16000)
+		// Кандидат заговорил, пока ИИ говорит. Порог barge-in — по длительности
+		// РЕЧИ (без pre-roll): totalMS = весь буфер (Silero включает pre-ring),
+		// ms = речь. Короткая речь (< BargeInMinSpeechMS) не прерывает, даже если
+		// pre-roll в буфере «добил» totalMS до порога (pre-roll-риск, решение #40).
+		totalMS := int(int64(len(utterance)) * 1000 / 2 / 16000)
+		ms := totalMS - prerollMS
+		if ms < 0 {
+			ms = 0
+		}
 		if ms < BargeInMinSpeechMS {
-			s.log.Debug("barge-in: короткая реплика, без прерывания", "session", ws.id, "ms", ms)
-			return // защита от ложных срабатываний (эхо, дыхание)
+			s.log.Debug("barge-in: короткая реплика, без прерывания", "session", ws.id, "ms", ms, "preroll_ms", prerollMS)
+			return // защита от ложных срабатываний (эхо, дыхание, pre-roll)
 		}
 		ws.stopTTS()
 		metrics.BargeInsTotal.Inc(nil)
-		s.log.Info("barge-in: кандидат прервал речь ИИ", "session", ws.id, "ms", ms)
+		metrics.BargeInSpeechMS.Observe(nil, float64(ms))
+		s.log.Info("barge-in: кандидат прервал речь ИИ", "session", ws.id, "ms", ms, "preroll_ms", prerollMS)
 		s.engine.SendTo(ws.id, map[string]any{"type": "tts_stop"})
 		go func() {
 			// Прерванный ход отпустит busy после end-кадра (turnDone) — ждём,
@@ -852,7 +862,11 @@ func (w *wsSession) streamBargeIn(s *Server) {
 	}
 	w.stopTTS()
 	metrics.BargeInsTotal.Inc(nil)
-	s.log.Info("barge-in: кандидат прервал речь ИИ (стрим, во время речи)", "session", w.id)
+	// Длительность речи (wall, от state=true): стрим-путь — реальное время
+	// (аудио в реальном времени ⇒ wall ≈ аудио-длительность). Без pre-roll.
+	ms := int(time.Since(time.Unix(0, w.sttSpeechSince.Load())).Milliseconds())
+	metrics.BargeInSpeechMS.Observe(nil, float64(ms))
+	s.log.Info("barge-in: кандидат прервал речь ИИ (стрим, во время речи)", "session", w.id, "ms", ms)
 	s.engine.SendTo(w.id, map[string]any{"type": "tts_stop"})
 }
 
@@ -873,6 +887,7 @@ func (w *wsSession) handleSTTStreamFinal(s *Server, ev voicesvc.StreamEvent) {
 		if w.sttBarged.CompareAndSwap(false, true) {
 			w.stopTTS()
 			metrics.BargeInsTotal.Inc(nil)
+			metrics.BargeInSpeechMS.Observe(nil, float64(ms)) // speech_ms из Silero VAD (без pre-roll)
 			s.log.Info("barge-in: кандидат прервал речь ИИ", "session", w.id, "ms", ms)
 			s.engine.SendTo(w.id, map[string]any{"type": "tts_stop"})
 		}
@@ -970,7 +985,7 @@ func (s *Server) feedVADBatch(ws *wsSession, pcm []byte) {
 		}
 		return
 	}
-	s.completeUtterance(ws, utterance)
+	s.completeUtterance(ws, utterance, 0) // energy-путь: pre-roll в реплику не входит
 }
 
 // onVADStreamEvent — событие voice /vad/stream (Silero VAD, ADR-002
@@ -992,6 +1007,6 @@ func (w *wsSession) onVADStreamEvent(s *Server, ev voicesvc.VADEvent) {
 		s.preSTTFor(w, ev.Utterance)
 	case "utterance":
 		w.sileroSpeech.Store(false)
-		s.completeUtterance(w, ev.Utterance)
+		s.completeUtterance(w, ev.Utterance, ev.PreRollMS) // Silero-путь: вычитать pre-roll
 	}
 }

@@ -250,6 +250,145 @@ func TestVADStreamFallbackToEnergy(t *testing.T) {
 	}
 }
 
+// TestBargeInSpeechMSBuckets — barge-in несёт метрику grade_barge_in_speech_ms
+// (решение #42): длительность речи (totalMS − pre-roll) в бакеты. Детерминированная
+// последовательность для /vad/stream (после деградации /stt/stream): 2×тишина
+// (pre-ring) + 4×тон 250 мс (1 с речи) + 3×тишина → реплика 2000 мс, pre-roll
+// 750 мс (2 тише-кадра + кадр-триггер, race — known limitation) → ms = 1250 ∈
+// (1000, 2000]: count +1, le=2000 +1, le=1000 без изменения. Длинная речь
+// прерывает TTS (tts_stop + transcript user).
+func TestBargeInSpeechMSBuckets(t *testing.T) {
+	ts, token, sessionID, m, _ := newVoiceEnv(t)
+	m.streamBroken = true // level 1 мёртв → /vad/stream
+	m.ttsPCMSize = 96000  // 3 с TTS на реплику ИИ (12 pacing-кадров)
+	conn := dialWS(t, ts, token, sessionID)
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	// Старт: stage + приветствие; TTS приветствия — до end-кадра.
+	msgs := wsReadMixed(t, conn, 2, 3*time.Second)
+	if msgs[0] != "text:stage/<nil>/<nil>" || !startsWith(msgs[1], "text:ai_text/") {
+		t.Fatalf("старт: %v", msgs)
+	}
+	greetingEnd := false
+	deadline := time.Now().Add(10 * time.Second)
+	for !greetingEnd && time.Now().Before(deadline) {
+		typ, _, fr, ok := bargeInReadOne(t, conn)
+		if !ok {
+			continue
+		}
+		if typ == "bin" && fr.end {
+			greetingEnd = true
+		}
+	}
+	// Текстовая реплика → ход ИИ (pacing, ttsActive=true).
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	_ = conn.Write(ctx, websocket.MessageText, mustJSON(
+		map[string]any{"type": "ui", "name": "utterance", "payload": map[string]string{"text": "Привет"}}))
+	cancel()
+	bins := 0
+	deadline = time.Now().Add(5 * time.Second)
+	for bins < 2 && time.Now().Before(deadline) {
+		typ, _, _, ok := bargeInReadOne(t, conn)
+		if !ok {
+			continue
+		}
+		if typ == "bin" {
+			bins++
+		}
+	}
+	if bins < 2 {
+		t.Fatal("TTS-кадры ответа ИИ не пришли (pacing не стартовал)")
+	}
+	writePCM := func(pcm []byte) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = conn.Write(ctx, websocket.MessageBinary, pcm)
+		cancel()
+	}
+	// Приминг-кадр: запускает /stt/stream-клиент (мёртв: 3 реконнекта ~1 с).
+	// Во время ожидания кадры НЕ шлём — в /vad/stream ничего не «протекает»
+	// (детерминизм состава реплики). Ждём ДЕЛЬТУ глобальной метрики (тесты
+	// идут последовательно в одном процессе — базовое значение может быть > 0).
+	baseFallbacks := metricValue(metricsBody(t, ts.URL), "grade_stt_stream_fallbacks_total")
+	writePCM(tonePCM(250, 5000))
+	for i := 0; i < 50; i++ {
+		if metricValue(metricsBody(t, ts.URL), "grade_stt_stream_fallbacks_total") > baseFallbacks {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	base := metricsBody(t, ts.URL)
+	baseCount := histValue(base, "grade_barge_in_speech_ms", "")
+	base1000 := histValue(base, "grade_barge_in_speech_ms", "1000")
+	base2000 := histValue(base, "grade_barge_in_speech_ms", "2000")
+	// Детерминированная реплика: 2×тишина (pre-ring) + 4×тон (1 с речи) + 3×тишина.
+	// Кадры с интервалом 50 мс (имитация реального времени): событие VAD-стрима
+	// обрабатывается клиентом МЕЖДУ кадрами (при burst-отправке ring «догоняет»
+	// кадры — pre-roll завышается до 4 кадров, known limitation).
+	for i := 0; i < 2; i++ {
+		writePCM(silencePCM(250))
+		time.Sleep(50 * time.Millisecond)
+	}
+	for i := 0; i < 4; i++ {
+		writePCM(tonePCM(250, 5000))
+		time.Sleep(50 * time.Millisecond)
+	}
+	for i := 0; i < 3; i++ {
+		writePCM(silencePCM(250))
+		time.Sleep(50 * time.Millisecond)
+	}
+	// (1) длинная речь прерывает TTS: tts_stop + transcript(user).
+	sawTTSStop, sawUser := false, false
+	deadline = time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) && !(sawTTSStop && sawUser) {
+		typ, who, _, ok := bargeInReadOne(t, conn)
+		if !ok {
+			continue
+		}
+		if typ == "tts_stop" {
+			sawTTSStop = true
+		}
+		if typ == "transcript" && who == "user" {
+			sawUser = true
+		}
+	}
+	if !sawTTSStop {
+		t.Fatal("нет tts_stop — barge-in по Silero-пути не сработал")
+	}
+	if !sawUser {
+		t.Fatal("нет transcript(user) от прерывающей реплики")
+	}
+	// (2) метрика: наблюдение 1250 мс ∈ (1000, 2000] — count +1, le=2000 +1,
+	// le=1000 без изменения.
+	body := metricsBody(t, ts.URL)
+	if got := histValue(body, "grade_barge_in_speech_ms", ""); got != baseCount+1 {
+		t.Fatalf("grade_barge_in_speech_ms_count = %d (want %d = база + 1)", got, baseCount+1)
+	}
+	if got := histValue(body, "grade_barge_in_speech_ms", "2000"); got != base2000+1 {
+		t.Fatalf("bucket le=2000 = %d (want база + 1: ms 1250 ≤ 2000)", got)
+	}
+	if got := histValue(body, "grade_barge_in_speech_ms", "1000"); got != base1000 {
+		t.Fatalf("bucket le=1000 = %d (want база: ms 1250 > 1000)", got)
+	}
+}
+
+// histValue — значение ряда гистограммы в /metrics-теле: name_bucket{le=le}
+// (le="" — name_count); 0 — нет строки.
+func histValue(body, name, le string) int {
+	suffix := "_count"
+	if le != "" {
+		suffix = "_bucket{le=" + le + "}"
+	}
+	prefix := name + suffix + " "
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			if v, err := strconv.Atoi(strings.TrimSpace(line[len(prefix):])); err == nil {
+				return v
+			}
+		}
+	}
+	return 0
+}
+
 // metricValue — значение счётчика name в /metrics-теле (0 — нет строки).
 func metricValue(body, name string) int {
 	for _, line := range strings.Split(body, "\n") {
