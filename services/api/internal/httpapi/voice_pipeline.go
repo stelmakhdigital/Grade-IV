@@ -694,12 +694,15 @@ func (s *Server) completeUtterance(ws *wsSession, utterance []byte, prerollMS in
 			ms = 0
 		}
 		if ms < BargeInMinSpeechMS {
+			// Короткая речь не прерывает — но несёт метрику (result="ignored"):
+			// наблюдаемость вычитания pre-roll и порога (T-20261009152316).
+			metrics.BargeInSpeechMS.Observe(metrics.Labels{"result": "ignored"}, float64(ms))
 			s.log.Debug("barge-in: короткая реплика, без прерывания", "session", ws.id, "ms", ms, "preroll_ms", prerollMS)
 			return // защита от ложных срабатываний (эхо, дыхание, pre-roll)
 		}
 		ws.stopTTS()
 		metrics.BargeInsTotal.Inc(nil)
-		metrics.BargeInSpeechMS.Observe(nil, float64(ms))
+		metrics.BargeInSpeechMS.Observe(metrics.Labels{"result": "barge_in"}, float64(ms))
 		s.log.Info("barge-in: кандидат прервал речь ИИ", "session", ws.id, "ms", ms, "preroll_ms", prerollMS)
 		s.engine.SendTo(ws.id, map[string]any{"type": "tts_stop"})
 		go func() {
@@ -865,7 +868,7 @@ func (w *wsSession) streamBargeIn(s *Server) {
 	// Длительность речи (wall, от state=true): стрим-путь — реальное время
 	// (аудио в реальном времени ⇒ wall ≈ аудио-длительность). Без pre-roll.
 	ms := int(time.Since(time.Unix(0, w.sttSpeechSince.Load())).Milliseconds())
-	metrics.BargeInSpeechMS.Observe(nil, float64(ms))
+	metrics.BargeInSpeechMS.Observe(metrics.Labels{"result": "barge_in"}, float64(ms))
 	s.log.Info("barge-in: кандидат прервал речь ИИ (стрим, во время речи)", "session", w.id, "ms", ms)
 	s.engine.SendTo(w.id, map[string]any{"type": "tts_stop"})
 }
@@ -881,13 +884,15 @@ func (w *wsSession) handleSTTStreamFinal(s *Server, ev voicesvc.StreamEvent) {
 	ms := ev.SpeechMS
 	if w.ttsActive.Load() {
 		if !w.sttBarged.Load() && ms < BargeInMinSpeechMS {
+			// Короткая реплика — без прерывания, но с метрикой (result="ignored").
+			metrics.BargeInSpeechMS.Observe(metrics.Labels{"result": "ignored"}, float64(ms))
 			s.log.Debug("barge-in: короткая реплика (стрим), без прерывания", "session", w.id, "ms", ms)
 			return // защита от ложных срабатываний (эхо, дыхание)
 		}
 		if w.sttBarged.CompareAndSwap(false, true) {
 			w.stopTTS()
 			metrics.BargeInsTotal.Inc(nil)
-			metrics.BargeInSpeechMS.Observe(nil, float64(ms)) // speech_ms из Silero VAD (без pre-roll)
+			metrics.BargeInSpeechMS.Observe(metrics.Labels{"result": "barge_in"}, float64(ms)) // speech_ms из Silero VAD (без pre-roll)
 			s.log.Info("barge-in: кандидат прервал речь ИИ", "session", w.id, "ms", ms)
 			s.engine.SendTo(w.id, map[string]any{"type": "tts_stop"})
 		}

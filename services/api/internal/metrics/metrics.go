@@ -166,11 +166,14 @@ var (
 	// BargeInsTotal — barge-in: кандидат прервал речь ИИ во время TTS-стрима.
 	BargeInsTotal = NewCounter("grade_barge_ins_total", "barge-in (кандидат прервал речь ИИ)")
 	// BargeInSpeechMS — длительность (мс) РЕЧИ кандидата (без pre-roll) при
-	// barge-in: распределение — наблюдение pre-roll-риска (решение #40): если
-	// п50 устойчиво в 500–1000 мс — подозрение на ложные/ранние прерывания.
+	// barge-событиях: метка result: "barge_in" — прерывание сработало (3 точки),
+	// "ignored" — короткая реплика во время TTS (ms < порога, без прерывания;
+	// наблюдаемость вычитания pre-roll и порога, T-20261009152316). Распределение
+	// result="barge_in" — наблюдение pre-roll-риска (решение #40): если p50
+	// устойчиво в 500–1000 мс — подозрение на ложные/ранние прерывания.
 	// Buckets вокруг порога BargeInMinSpeechMS=500 мс. Обсерв в МС (имя _ms).
 	BargeInSpeechMS = NewHistogram("grade_barge_in_speech_ms",
-		"длительность (мс) речи кандидата (без pre-roll) при barge-in",
+		"длительность (мс) речи кандидата (без pre-roll) при barge-in / коротких репликах (result=barge_in|ignored)",
 		100, 250, 500, 1000, 2000, 5000)
 	// STTStreamFallbacks — деградации стримингового STT на batch-путь
 	// (voice /stt/stream недоступен; ADR-007).

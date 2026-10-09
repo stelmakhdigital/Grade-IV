@@ -75,8 +75,9 @@ docker compose -f infra/docker-compose.yml --profile prod --profile monitoring u
 | `grade_ai_tts_errors_total` | rate > 1/мин | TTS (voice) деградирует | voice-сервис: лог, GPU/CPU, Silero |
 | `grade_stt_stream_fallbacks_total` | рост > 1 за час | /stt/stream падает → деградация на batch (latency +) | voice: /stt/stream, реконнекты, GPU |
 | `grade_vad_stream_fallbacks_total` | рост > 1 за час | /vad/stream падает → energy-путь (last-resort) | voice: /vad/stream, Silero onnx |
-| `grade_barge_in_speech_ms` p50 | устойчиво 500–1000 мс | Подозрение на ранние barge-in (pre-roll/post-silence, ADR-002 поправка) | Посмотреть dашборд «доля ≤ 500 мс»; при росте — пересмотр порога/подтверждения |
-| `grade_barge_in_speech_ms` доля `le="500"` | > 5% за час | pre-roll-риск проявляется (прерывание на короткой речи) | Лог api: `barge-in: ... ms=... preroll_ms=...`; решение по порогу |
+| `grade_barge_in_speech_ms` p50 (`result="barge_in"`) | устойчиво 500–1000 мс | Подозрение на ранние barge-in (pre-roll/post-silence, ADR-002 поправка) | Посмотреть dашборд «доля ≤ 500 мс»; при росте — пересмотр порога/подтверждения |
+| `grade_barge_in_speech_ms` доля `le="500"` (`result="barge_in"`) | > 5% за час | pre-roll-риск проявляется (прерывание на короткой речи) | Лог api: `barge-in: ... ms=... preroll_ms=...`; решение по порогу |
+| `grade_barge_in_speech_ms` `result="ignored"` | устойчивый рост (короткие реплики во время TTS) | Эхо/дыхание/эхо-петля — реплики отбракованы порогом (непрерывания) | Не инцидент само по себе; при росте — эхо (см. строку `grade_barge_ins_total`), метрика — наблюдаемость вычитания pre-roll и порога (T-20261009152316) |
 | `grade_barge_ins_total` | аномальный рост (×3 от базы) | Кандидат постоянно перебивает / эхо-петля | Проверить эхо (динамика+мик), TTS-громкость, barge-in-метрики |
 
 ## 3. Обновление

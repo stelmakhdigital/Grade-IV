@@ -317,12 +317,13 @@ func TestBargeInSpeechMSBuckets(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	base := metricsBody(t, ts.URL)
-	baseCount := histValue(base, "grade_barge_in_speech_ms", "")
-	base1000 := histValue(base, "grade_barge_in_speech_ms", "1000")
-	base2000 := histValue(base, "grade_barge_in_speech_ms", "2000")
+	bargeLabel := `result="barge_in"`
+	baseCount := histValue(base, "grade_barge_in_speech_ms", bargeLabel, "")
+	base1000 := histValue(base, "grade_barge_in_speech_ms", bargeLabel, "1000")
+	base2000 := histValue(base, "grade_barge_in_speech_ms", bargeLabel, "2000")
 	// Детерминированная реплика: 2×тишина (pre-ring) + 4×тон (1 с речи) + 3×тишина.
 	// Кадры с интервалом 50 мс (имитация реального времени): событие VAD-стрима
-	// обрабатывается клиентом МЕЖДУ кадрами (при burst-отправке ring «догоняет»
+	// обрабатывается клиентом МЕЖДУ кадрами (при burst-отправке ring «догоняет"
 	// кадры — pre-roll завышается до 4 кадров, known limitation).
 	for i := 0; i < 2; i++ {
 		writePCM(silencePCM(250))
@@ -360,25 +361,85 @@ func TestBargeInSpeechMSBuckets(t *testing.T) {
 	// (2) метрика: наблюдение 1250 мс ∈ (1000, 2000] — count +1, le=2000 +1,
 	// le=1000 без изменения.
 	body := metricsBody(t, ts.URL)
-	if got := histValue(body, "grade_barge_in_speech_ms", ""); got != baseCount+1 {
+	if got := histValue(body, "grade_barge_in_speech_ms", bargeLabel, ""); got != baseCount+1 {
 		t.Fatalf("grade_barge_in_speech_ms_count = %d (want %d = база + 1)", got, baseCount+1)
 	}
-	if got := histValue(body, "grade_barge_in_speech_ms", "2000"); got != base2000+1 {
+	if got := histValue(body, "grade_barge_in_speech_ms", bargeLabel, "2000"); got != base2000+1 {
 		t.Fatalf("bucket le=2000 = %d (want база + 1: ms 1250 ≤ 2000)", got)
 	}
-	if got := histValue(body, "grade_barge_in_speech_ms", "1000"); got != base1000 {
+	if got := histValue(body, "grade_barge_in_speech_ms", bargeLabel, "1000"); got != base1000 {
 		t.Fatalf("bucket le=1000 = %d (want база: ms 1250 > 1000)", got)
 	}
 }
 
-// histValue — значение ряда гистограммы в /metrics-теле: name_bucket{le=le}
-// (le="" — name_count); 0 — нет строки.
-func histValue(body, name, le string) int {
-	suffix := "_count"
-	if le != "" {
-		suffix = "_bucket{le=" + le + "}"
+// TestBargeInSileroNegativeShortSpeech — НЕГАТИВНЫЙ кейс barge-in Silero-пути
+// (T-20261009152316): totalMS=800, pre-roll=500 → ms = 300 < BargeInMinSpeechMS=500
+// → TTS НЕ прерывается (нет tts_stop, счётчики barge-in не растут), метрика
+// несёт ms=300 с меткой result="ignored" (le=500 +1, le=250 без изменения).
+// Прямой вызов completeUtterance с синтетической репликой — детерминировано,
+// без живых сервисов и WS (кадровая арифметика мока VAD даёт ms ≥ 750:
+// post-silence 500 + тон 250 — known limitation, решение #42).
+func TestBargeInSileroNegativeShortSpeech(t *testing.T) {
+	_, _, _, _, env := newVoiceEnv(t)
+	// wsSession напрямую: ИИ говорит (ttsActive), pre-STT активен (проверяем сброс).
+	ws := &wsSession{id: -1, ctx: context.Background()}
+	ws.ttsActive.Store(true)
+	ws.preSTTActive.Store(true)
+
+	base := metricsBody(t, env.ts.URL)
+	bargeLabel := `result="barge_in"`
+	ignoreLabel := `result="ignored"`
+	baseBarge := histValue(base, "grade_barge_in_speech_ms", bargeLabel, "")
+	baseTotal := metricValue(base, "grade_barge_ins_total")
+
+	// 800 мс @ 16 кГц 16-bit = 25 600 байт; pre-roll 500 мс → ms = 300.
+	utterance := make([]byte, 16000*2*800/1000)
+	env.srv.completeUtterance(ws, utterance, 500)
+
+	if !ws.ttsActive.Load() {
+		t.Fatal("TTS прервана (ttsActive=false) — короткая речь (300 мс < 500) не должна прерывать")
 	}
-	prefix := name + suffix + " "
+	if ws.preSTTActive.Load() {
+		t.Fatal("preSTTActive не сброшен после завершения реплики")
+	}
+	body := metricsBody(t, env.ts.URL)
+	// Метрика: ms=300 → ignored: count +1, le=500 +1, le=250 без изменения.
+	if got := histValue(body, "grade_barge_in_speech_ms", ignoreLabel, ""); got != 1 {
+		t.Fatalf("grade_barge_in_speech_ms{result=ignored}_count = %d (want 1)", got)
+	}
+	if got := histValue(body, "grade_barge_in_speech_ms", ignoreLabel, "500"); got != 1 {
+		t.Fatalf("ignored le=500 = %d (want 1: ms 300 ≤ 500)", got)
+	}
+	if got := histValue(body, "grade_barge_in_speech_ms", ignoreLabel, "250"); got != 0 {
+		t.Fatalf("ignored le=250 = %d (want 0: ms 300 > 250)", got)
+	}
+	// Barge-in НЕ было: серия result="barge_in" и счётчик без изменений.
+	if got := histValue(body, "grade_barge_in_speech_ms", bargeLabel, ""); got != baseBarge {
+		t.Fatalf("серия result=barge_in изменилась: %d → %d", baseBarge, got)
+	}
+	if got := metricValue(body, "grade_barge_ins_total"); got != baseTotal {
+		t.Fatalf("grade_barge_ins_total: %d → %d (barge-in не должен был произойти)", baseTotal, got)
+	}
+}
+
+// histValue — значение ряда гистограммы в /metrics-теле: name_bucket{label,le=le}
+// (le="" — name{label}_count; label="" — без метки); 0 — нет строки.
+// Формат экспорта: bucket-метки после _bucket, прочие — в имени ряда (name{label}_count).
+func histValue(body, name, label, le string) int {
+	var prefix string
+	if le == "" {
+		prefix = name
+		if label != "" {
+			prefix += "{" + label + "}"
+		}
+		prefix += "_count "
+	} else {
+		prefix = name + "_bucket{"
+		if label != "" {
+			prefix += label + ","
+		}
+		prefix += "le=" + le + "} "
+	}
 	for _, line := range strings.Split(body, "\n") {
 		if strings.HasPrefix(line, prefix) {
 			if v, err := strconv.Atoi(strings.TrimSpace(line[len(prefix):])); err == nil {
