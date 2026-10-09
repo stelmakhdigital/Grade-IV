@@ -31,6 +31,23 @@ const (
 	DefaultMaxBytes = 1 << 20 // 1 МБ на stdout/stderr
 )
 
+// RLIMIT по умолчанию для subprocess-режима (аналог лимитов docker-режима
+// ADR-003: --memory=512m, --cpus=1; dev-режим, где docker недоступен):
+// CPU — те же 10 с (RLIMIT_CPU), память — RLIMIT_AS. Важное отличие: RLIMIT_AS
+// ограничивает ВИРТУАЛЬНОЕ адресное пространство (VA), а не RSS (в отличие от
+// cgroup --memory). Go-рантайм/тулчейн резервируют VA (arena/компиляция) много
+// больше фактического RSS: холодная сборка std (GOCACHE per-run, как и раньше)
+// требует >1.5 ГБ VA и работает при 2 ГБ (измерено) — для go берём 2048 МБ;
+// для python VA≈RSS — 512 МБ, как у docker. Точный RSS-потолок в rlimit на
+// Linux не выразить (RLIMIT_RSS не поддерживается) — known limitation
+// (ADR-003 поправка): защита subprocess-режима — от «виснет/OOM-хост»,
+// не точный RSS-бюджет (это — docker-режим).
+const (
+	defaultMemLimitGo     = 2048 << 20 // VA-потолок для go-запусков (см. выше)
+	defaultMemLimitPython = 512 << 20  // как docker --memory=512m
+	defaultCPUSecs        = 10         // как docker-режим: результат ≤ 10 с (ADR-003)
+)
+
 // Ошибки (маппинг на HTTP — в handlers).
 var (
 	ErrUnsupportedStack = errors.New("неподдерживаемый стек")
@@ -69,6 +86,10 @@ type Config struct {
 	// WorkDirBase — корень рабочих каталогов (по умолчанию $SANDBOX_WORKDIR_BASE
 	// или ~/.local/share/grade-sandbox; НЕ /tmp — см. newWorkDir).
 	WorkDirBase string
+	// Subprocess-лимиты (dev-режим, аналог docker ADR-003; 0 — значения по
+	// умолчанию выше): RLIMIT_AS (байты) и RLIMIT_CPU (сек).
+	MemLimitBytes int
+	CPUSecs       int
 }
 
 // Runner — выполнение запусков.
@@ -220,8 +241,28 @@ func safePath(p string) bool {
 }
 
 // runSubprocess — dev-режим: честный интерпретатор хоста в изолированном cwd.
+// RLIMIT (аналог docker ADR-003) — через sh-proлог `ulimit` перед командой:
+// ограничения наследуются всем дочерним процессам, ставятся детерминированно
+// (без гонки и без parent-состояния). Примечание: syscall.SysProcAttr в
+// Go stdlib не имеет Rlimit (только x/sys/unix, который не совместим с
+// os/exec) — ulimit-пролог даёт те же семантики без зависимостей.
 func (r *Runner) runSubprocess(ctx context.Context, stack, workdir string) ([]byte, int, error) {
 	cmdLine := r.cfg.Commands[stack]
+	memLimit := r.cfg.MemLimitBytes
+	if memLimit <= 0 {
+		memLimit = defaultMemLimitPython
+		if stack == "go" {
+			memLimit = defaultMemLimitGo
+		}
+	}
+	cpuSecs := r.cfg.CPUSecs
+	if cpuSecs <= 0 {
+		cpuSecs = defaultCPUSecs
+	}
+	// ulimit -v — виртуальная память (KB), ulimit -t — CPU-время (с).
+	// БЕЗ exec: exec ломает builtin-команды (exit/cd) и составные («&&»):
+	// ограничения установлены в sh ДО команды и наследуются ей.
+	cmdLine = fmt.Sprintf("ulimit -v %d; ulimit -t %d; %s", memLimit/1024, cpuSecs, cmdLine)
 	// ВАЖНО: exec.Command (не CommandContext): CommandContext убивает только
 	// родительский sh, а пайп stdout/stderr продолжат удерживать дочерние
 	// процессы (python/go-компилятор) — cmd.Wait() будет ждать EOF по пайпу
@@ -244,22 +285,50 @@ func (r *Runner) runSubprocess(ctx context.Context, stack, workdir string) ([]by
 	go func() { waitDone <- cmd.Wait() }()
 	select {
 	case err := <-waitDone:
-		exitCode := 0
-		if err != nil {
-			var ee *exec.ExitError
-			if errors.As(err, &ee) {
-				exitCode = ee.ExitCode()
-			} else {
-				return out.Bytes(), -1, err
-			}
+		if err == nil {
+			return out.Bytes(), 0, nil
 		}
-		return out.Bytes(), exitCode, nil
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) {
+			return out.Bytes(), -1, err
+		}
+		if isResourceLimitKill(ee) {
+			// Исчерпан RLIMIT (CPU: SIGXCPU/принудительный SIGKILL ядра после 110%
+			// лимита; память: ядро) — семантически «таймаут»: 124/timeout.
+			return out.Bytes(), 124, context.DeadlineExceeded
+		}
+		return out.Bytes(), ee.ExitCode(), nil
 	case <-ctx.Done():
 		// Убиваем группу (SIGKILL) — пайпы закроются, Wait завершится.
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		<-waitDone
 		return out.Bytes(), 124, context.DeadlineExceeded
 	}
+}
+
+// isResourceLimitKill — процесс убит исчерпанием RLIMIT:
+//   - 128+SIGXCPU: обёртка sh передала код «дочерний убит сигналом» (первый
+//     порог RLIMIT_CPU; CPython перехватывает SIGXCPU и продолжает — тогда
+//     ядро убивает SIGKILL);
+//   - 128+SIGKILL (137): принудительное убийство ядра при превышении лимита
+//     на >10% (RLIMIT_CPU) или OOM; в subprocess-режиме с RLIMIT_AS OOM-killer
+//     маловероятен (аллокации падают MemoryError раньше), поэтому 137 считаем
+//     исчерпанием ресурса. Кандидатский os.kill(self, SIGKILL) тоже даёт 137 —
+//     принимается как «запуск прерван» (known limitation, зафиксировано);
+//   - exit -1 + SIGXCPU: сам cmd (sh) убит сигналом напрямую.
+//
+// Номера сигналов — из syscall (портильно).
+func isResourceLimitKill(ee *exec.ExitError) bool {
+	code := ee.ExitCode()
+	if code == 128+int(syscall.SIGXCPU) || code == 128+int(syscall.SIGKILL) {
+		return true
+	}
+	if code == -1 {
+		if ws, ok := ee.Sys().(syscall.WaitStatus); ok && ws.Signaled() && ws.Signal() == syscall.SIGXCPU {
+			return true
+		}
+	}
+	return false
 }
 
 // runDocker — prod-режим: контейнер на run с лимитами ADR-003.
