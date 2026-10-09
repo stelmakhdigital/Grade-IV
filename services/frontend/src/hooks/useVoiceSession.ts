@@ -333,17 +333,16 @@ export function useVoiceSession(id: number) {
     }
   };
 
-  // «Отправить сейчас» (окно записи): досрочная отправка накопленного;
-  // по умолчанию после отправки микрофон выключается (решение, ADR-009).
-  const sendRecordingNow = useCallback(() => {
-    if (mic === 'running' || mic === 'muted') {
-      micRef.current?.stop();
-      micLevelRef.current = 0;
-      setMic('stopped');
-      setMicDbg(null);
-    }
-    finishRecording();
-  }, [mic, finishRecording]);
+  // «Очистить буфер» (окно записи): сброс накопленного транскрипта, запись
+  // продолжается — кандидат может надиктовать ответ заново (решение 2026-10-09).
+  // Отправка — только кнопкой «Отправить» (эквивалент выключения микрофона).
+  const clearRecording = useCallback(() => {
+    if (!recRef.current.active) return;
+    setRecSegs([]);
+    setRecPartial('');
+    setRecTotalSpeechMs(0);
+    setRecNote(null);
+  }, []);
 
   // Пауза сессии (FR-S7): тарификация останавливается на сервере.
   // Локально: микрофон (остановка отправки PCM), TTS-плеер (stop),
@@ -454,7 +453,7 @@ export function useVoiceSession(id: number) {
     setRecCollapsed,
     recNote,
     finishRecording,
-    sendRecordingNow,
+    clearRecording,
   };
 }
 

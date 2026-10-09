@@ -44,6 +44,7 @@ function fakeVoiceSession(
     recSince?: number | null;
     recCollapsed?: boolean;
     recNote?: string | null;
+    speaking?: boolean;
   } = {},
 ): Record<string, unknown> {
   return {
@@ -58,7 +59,7 @@ function fakeVoiceSession(
     lastAiText: '',
     mic: opts.mic ?? 'running',
     micDbg,
-    speaking: false,
+    speaking: opts.speaking ?? false,
     wsState: 'open',
     error: opts.error ?? null,
     micLevelRef: { current: 0 },
@@ -73,13 +74,13 @@ function fakeVoiceSession(
     recActive: opts.recActive ?? false,
     recSegs: opts.recSegs ?? [],
     recPartial: opts.recPartial ?? '',
-    recTotalSpeechMs: opts.recSince !== null ? 3000 : 0,
+    recTotalSpeechMs: opts.recSince != null ? 3000 : 0,
     recSince: opts.recSince ?? null,
     recCollapsed: opts.recCollapsed ?? false,
     setRecCollapsed: vi.fn(),
     recNote: opts.recNote ?? null,
     finishRecording: vi.fn(),
-    sendRecordingNow: vi.fn(),
+    clearRecording: vi.fn(),
   };
 }
 
@@ -691,6 +692,55 @@ describe('Voice UX: история новые-сверху + режим запи
     vi.stubGlobal('AudioWorkletNode', RecWorkletNode);
     (URL as unknown as { createObjectURL: (b: Blob) => string }).createObjectURL = () => 'blob:fake';
   }
+
+  it('кнопка мика: «Отправить» во время записи, «Ожидание ИИ…» (disabled) пока ИИ говорит', async () => {
+    // Запись активна (мик включён) — кнопка «Отправить».
+    hookMock.fake = fakeVoiceSession(null, {
+      mic: 'running',
+      recActive: true,
+      recSegs: ['Привет'],
+      recSince: Date.now() - 30_000,
+    });
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    expect(screen.getByTestId('mic-toggle')).toHaveTextContent('Отправить');
+    expect(screen.getByTestId('mic-toggle')).not.toBeDisabled();
+    // «Очистить буфер» — есть и активна (буфер не пуст).
+    expect(screen.getByTestId('rec-clear')).toHaveTextContent('Очистить буфер');
+    expect(screen.getByTestId('rec-clear')).not.toBeDisabled();
+    // Пустой буфер — очистка недоступна.
+    cleanup();
+    hookMock.fake = fakeVoiceSession(null, { mic: 'running', recActive: true });
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    expect(screen.getByTestId('rec-clear')).toBeDisabled();
+    // Мик выключен, ИИ говорит — «Ожидание ИИ…», недоступно (не перебиваем).
+    cleanup();
+    hookMock.fake = fakeVoiceSession(null, { mic: 'stopped', speaking: true });
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    expect(screen.getByTestId('mic-toggle')).toHaveTextContent('Ожидание ИИ…');
+    expect(screen.getByTestId('mic-toggle')).toBeDisabled();
+    // Мик выключен, ИИ молчит — «Включить микрофон», доступно.
+    cleanup();
+    hookMock.fake = fakeVoiceSession(null, { mic: 'stopped' });
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    expect(screen.getByTestId('mic-toggle')).toHaveTextContent('Включить микрофон');
+    expect(screen.getByTestId('mic-toggle')).not.toBeDisabled();
+  });
 
   it('режим записи (E2E): сегменты не становятся user-строками и не запускают AI-ход; выключение мика → одно utterance со склеенным текстом', async () => {
     stubMicEnv();

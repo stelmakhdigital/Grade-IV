@@ -48,7 +48,8 @@ export function SessionView({ id }: { id: number }) {
     recCollapsed,
     setRecCollapsed,
     recNote,
-    sendRecordingNow,
+    recTotalSpeechMs,
+    clearRecording,
   } = useVoiceSession(id);
 
   // Окно записи (FR-S8): «мм:сс» — тик каждую секунду, пока запись активна.
@@ -59,6 +60,7 @@ export function SessionView({ id }: { id: number }) {
     return () => window.clearInterval(t);
   }, [recActive]);
   const recText = mergeRecording(recSegs, recPartial);
+  const waitingForAI = live && !paused && speaking && mic !== 'running' && mic !== 'muted';
 
   // История диалога — новые СВЕРХУ (FR-S8): lines хранятся как есть (append,
   // кап 200), рендер — перевёрнутый порядок (interim — последняя — наверху).
@@ -209,8 +211,9 @@ export function SessionView({ id }: { id: number }) {
           )}
 
           {/* Окно записи (FR-S8, ADR-009): склеивающийся транскрипт +
-              длительность + статус; сворачивается; «Отправить сейчас» —
-              досрочная отправка (микрофон по умолчанию выключается). */}
+              длительность + статус; сворачивается; «Очистить буфер» — сброс
+              накопленного, запись продолжается (ответ можно надиктовать заново).
+              Отправка — кнопкой «Отправить» (эквивалент выключения микрофона). */}
           {recActive && (
             <div className="rec-window" data-testid="rec-window">
               <div className="rec-head">
@@ -233,11 +236,12 @@ export function SessionView({ id }: { id: number }) {
                   </p>
                   <button
                     type="button"
-                    className="btn primary small"
-                    onClick={() => void sendRecordingNow()}
-                    data-testid="rec-send"
+                    className="btn ghost small"
+                    onClick={() => clearRecording()}
+                    disabled={recText === '' && recTotalSpeechMs === 0}
+                    data-testid="rec-clear"
                   >
-                    Отправить сейчас
+                    Очистить буфер
                   </button>
                 </>
               )}
@@ -259,12 +263,23 @@ export function SessionView({ id }: { id: number }) {
             )}
             <button
               type="button"
-              className={mic === 'running' || mic === 'muted' ? 'btn danger' : 'btn primary'}
+              className={
+                mic === 'running' || mic === 'muted'
+                  ? 'btn primary'
+                  : waitingForAI
+                    ? 'btn ghost'
+                    : 'btn primary'
+              }
               onClick={() => void toggleMic()}
               data-testid="mic-toggle"
-              disabled={wsState !== 'open' || paused}
+              disabled={wsState !== 'open' || paused || waitingForAI}
+              title={waitingForAI ? 'Дождитесь ответа ИИ-интервьюера' : undefined}
             >
-              {mic === 'running' || mic === 'muted' ? 'Выключить микрофон' : 'Включить микрофон'}
+              {mic === 'running' || mic === 'muted'
+                ? 'Отправить'
+                : waitingForAI
+                  ? 'Ожидание ИИ…'
+                  : 'Включить микрофон'}
             </button>
             {stage === 'voice' && (
               <button type="button" className="btn ghost" onClick={() => onStageAction('livecode')}>

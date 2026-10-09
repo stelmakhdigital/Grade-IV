@@ -144,3 +144,31 @@ func TestRecordingSegmentationOnSilence(t *testing.T) {
 		t.Fatalf("stt-вызовов (final'ов): %d, ожидал 2", got)
 	}
 }
+
+// TestRecordingUIEventsNoUnknown — регресс инцидента 2026-10-09:
+// клиент (новый фронт) шлёт «recording»/«utterance», а запущенный
+// бинарник api — старый (без case "recording" в handleUIEvent) →
+// «unknown_ui_event: неизвестное событие: recording», а PCM идёт по
+// старому авто-пайплайну (ответ на неполную реплику). Страхуем, что
+// текущий сервер понимает события режима записи (error не приходит).
+func TestRecordingUIEventsNoUnknown(t *testing.T) {
+	_, conn, _ := recTestSetup(t)
+	// recording on + utterance — сервер обязан обработать без ошибки.
+	recWriteRecording(t, conn, true)
+	wsWriteJSON(t, conn, map[string]any{"type": "ui", "name": "utterance", "payload": map[string]string{"text": "проверка событий режима записи"}})
+	// Читаем до ai_text (AI-ход от явной отправки) и утверждаем: среди
+	// событий нет error/unknown_ui_event.
+	for i := 0; i < 30; i++ {
+		got := wsReadMixed(t, conn, 1, 5*time.Second)
+		if len(got) == 0 {
+			t.Fatal("ai_text не пришёл")
+		}
+		if strings.Contains(got[0], "unknown_ui_event") || strings.HasPrefix(got[0], "text:error/") {
+			t.Fatalf("ошибка на события режима записи: %v", got[0])
+		}
+		if strings.HasPrefix(got[0], "text:ai_text/") {
+			return // события приняты, AI-ход стартовал — тест пройден
+		}
+	}
+	t.Fatal("ai_text: превышен лимит сообщений")
+}
