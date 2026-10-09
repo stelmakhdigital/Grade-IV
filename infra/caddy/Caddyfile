@@ -5,10 +5,15 @@
 #
 # Переменные (env контейнера caddy, из .env):
 #   GRADE_DOMAIN — публичный домен (Let's Encrypt).
-#   CADDY_TLS    — пустое = автоматический Let's Encrypt;
-#                  internal = встроенный CA Caddy (локальная VPS-проверка
-#                  без публичного IP/имени; CA — /data/caddy/pki/authorities/local/root.crt).
+#   CADDY_TLS    — аргумент директивы tls: ПУСТОЕ = автоматический
+#                  Let's Encrypt (дефолт); internal = встроенный CA Caddy
+#                  (локальная VPS-проверка без публичного IP/имени;
+#                  CA — /data/caddy/pki/authorities/local/root.crt).
+# ВАЖНО: допустимые аргументы tls — пустой | internal | <email> | <cert> <key>
+# (caddyserver.com/docs/caddyfile/directives/tls); «letsencrypt» НЕ валидный
+# аргумент (было: tls {$CADDY_TLS:letsencrypt} — caddy не стартовал при пустом
+# CADDY_TLS, фикс T-20261009133832).
 {$GRADE_DOMAIN:localhost} {
-	tls {$CADDY_TLS:letsencrypt}
+	tls {$CADDY_TLS:}
 	reverse_proxy frontend:80
 }

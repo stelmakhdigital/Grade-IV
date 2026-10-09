@@ -59,6 +59,7 @@ services:
       # ML-модели — каталог ./models в корне репо (scripts/download-models.sh)
       STT_DOWNLOAD_ROOT: /models/stt
       TTS_MODEL_DIR: /models/tts
+      TTS_SPEAKER: "${TTS_SPEAKER:-ru_01}"
     volumes:
       - ../models:/models:ro
     restart: unless-stopped
