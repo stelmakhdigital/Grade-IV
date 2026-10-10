@@ -38,12 +38,18 @@ const S_ACTIVE = {
   started_at: '2026-09-14T11:00:00Z',
 };
 
-function mockApi(opts: { sessions?: unknown; create?: unknown; me?: unknown } = {}): Mock {
+const PROFILES = [
+  { id: 2, name: 'Сбалансированный наставник', tone: 'balanced', difficulty: 'standard', is_preset: true },
+  { id: 1, name: 'Строгий Senior', tone: 'strict', difficulty: 'plus', is_preset: true },
+];
+
+function mockApi(opts: { sessions?: unknown; create?: unknown; me?: unknown; profiles?: unknown } = {}): Mock {
   return vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/auth/me')) return json(200, opts.me ?? ME);
     if (init?.method === 'POST' && url.endsWith('/sessions')) {
       return json(201, opts.create ?? S_ACTIVE);
     }
+    if (url.includes('/profiles')) return json(200, opts.profiles ?? PROFILES);
     if (url.includes('/sessions')) return json(200, opts.sessions ?? []);
     return json(404, {});
   });
@@ -91,9 +97,27 @@ describe('CabinetView (WP-7)', () => {
     await user.selectOptions(screen.getByLabelText('Стек'), 'python');
     await user.click(screen.getByTestId('start-session'));
     expect(window.location.hash).toBe('#/sessions/2');
+    // профиль дефолтный (balanced/standard, id=2) — уходит в body
     expect(JSON.parse((fetchMock.mock.calls.find((c) => c[1]?.method === 'POST')?.[1] as RequestInit).body as string)).toEqual({
       grade: 'junior',
       stack: 'python',
+      profile_id: 2,
+    });
+  });
+
+  it('выбор профиля интервьюера — profile_id в body (итерация B)', async () => {
+    const fetchMock = mockApi({ sessions: [], create: S_ACTIVE });
+    renderCabinet(fetchMock);
+    await screen.findByTestId('user-email');
+    const user = userEvent.setup();
+    // dropdown профилей рендерится из /profiles
+    const profileSelect = screen.getByLabelText('Профиль интервьюера');
+    await user.selectOptions(profileSelect, '1');
+    await user.click(screen.getByTestId('start-session'));
+    expect(JSON.parse((fetchMock.mock.calls.find((c) => c[1]?.method === 'POST')?.[1] as RequestInit).body as string)).toEqual({
+      grade: 'middle',
+      stack: 'go',
+      profile_id: 1,
     });
   });
 

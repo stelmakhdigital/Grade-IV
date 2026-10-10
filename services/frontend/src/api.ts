@@ -171,9 +171,29 @@ export function listTemplates(grade: Grade, stack: Stack): Promise<InterviewTemp
   ).then((d) => d.templates);
 }
 
-export function createSession(grade: Grade, stack: Stack, templateId?: number): Promise<Session> {
+/** Профиль интервьюера (tone × difficulty, итерация B). Влияет только на стиль вопросов. */
+export interface InterviewProfile {
+  id: number;
+  name: string;
+  tone: 'strict' | 'balanced' | 'supportive' | 'playful' | 'socratic';
+  difficulty: 'minus' | 'standard' | 'plus';
+  is_preset: boolean;
+  description?: string;
+}
+
+export function listProfiles(): Promise<InterviewProfile[]> {
+  return request<InterviewProfile[]>('/profiles', { auth: true });
+}
+
+export function createSession(
+  grade: Grade,
+  stack: Stack,
+  templateId?: number,
+  profileId?: number,
+): Promise<Session> {
   const body: Record<string, unknown> = { grade, stack };
   if (templateId) body.template_id = templateId;
+  if (profileId) body.profile_id = profileId;
   return request<Session>('/sessions', { body });
 }
 
@@ -247,16 +267,41 @@ export interface ReportCriterion {
   weight: number;
   score: number;
   comment?: string;
+  /** Итерация B: факты-примеры из ответов кандидата. */
+  evidence?: string[];
+  /** Итерация B: разрыв до целевого грейда (0 = в уровне). */
+  gap_to_grade?: number;
+  /** Итерация B: 2–3 пункта планa развития по критерию. */
+  study_plan?: string[];
 }
 
-/** Итоговый отчёт (WP-11, §12). */
+/** Сравнение с прошлым интервью (итерация B). */
+export interface ReportProgressEntry {
+  session_id: number;
+  date: string;
+  stack: string;
+  grade: string;
+  overall: number;
+  same_stack: boolean;
+  criteria_delta: Record<string, number>;
+}
+
+/** Итоговый отчёт (WP-11, §12; итерация B — детальные поля для кандидата). */
 export interface Report {
   overall: number;
   grade_recommendation: string;
+  /** Итерация B: вывод в 1–2 предложения. */
+  verdict?: string;
   criteria: ReportCriterion[];
   strengths: string[];
   weaknesses: string[];
   recommendations: string[];
+  /** Итерация B: план подготовки на 2 недели. */
+  study_plan_2weeks?: string[];
+  /** Итерация B: разрыв до целевого грейда (текст). */
+  grade_gap?: string;
+  /** Итерация B: прогресс по прошлым интервью. */
+  progress_vs_previous?: ReportProgressEntry[];
 }
 
 /**

@@ -81,6 +81,11 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS }
           <p className="report-grade" data-testid="report-grade">
             {report.grade_recommendation}
           </p>
+          {report.verdict !== undefined && report.verdict !== '' && (
+            <p className="report-verdict" data-testid="report-verdict">
+              {report.verdict}
+            </p>
+          )}
         </div>
       </header>
 
@@ -104,6 +109,23 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS }
             {c.comment !== undefined && c.comment !== '' && (
               <p className="muted">{c.comment}</p>
             )}
+            {c.evidence && c.evidence.length > 0 && (
+              <div className="criterion-evidence" data-testid={`evidence-${c.name}`}>
+                <strong>Примеры из интервью:</strong>
+                <ul>{c.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul>
+              </div>
+            )}
+            {c.gap_to_grade !== undefined && c.gap_to_grade > 0 && (
+              <p className="criterion-gap" data-testid={`gap-${c.name}`}>
+                Разрыв до грейда: {c.gap_to_grade.toFixed(1)} балла
+              </p>
+            )}
+            {c.study_plan && c.study_plan.length > 0 && (
+              <div className="criterion-study">
+                <strong>Что подтянуть:</strong>
+                <ul>{c.study_plan.map((s, i) => <li key={i}>{s}</li>)}</ul>
+              </div>
+            )}
           </li>
         ))}
       </ul>
@@ -123,6 +145,55 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS }
       <ol data-testid="recommendations">
         {report.recommendations.map((s, i) => <li key={i}>{s}</li>)}
       </ol>
+
+      {report.grade_gap !== undefined && report.grade_gap !== '' && (
+        <section className="report-grade-gap" data-testid="report-grade-gap">
+          <h3>Разрыв до целевого грейда</h3>
+          <p>{report.grade_gap}</p>
+        </section>
+      )}
+
+      {report.study_plan_2weeks && report.study_plan_2weeks.length > 0 && (
+        <section className="report-study-2w" data-testid="report-study-2w">
+          <h3>План подготовки на 2 недели</h3>
+          <ol>{report.study_plan_2weeks.map((s, i) => <li key={i}>{s}</li>)}</ol>
+        </section>
+      )}
+
+      {report.progress_vs_previous && report.progress_vs_previous.length > 0 && (
+        <section className="report-progress" data-testid="report-progress">
+          <h3>Прогресс по прошлым интервью</h3>
+          <table className="progress-table">
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th>Грейд</th>
+                <th>Стек</th>
+                <th>Итог</th>
+                <th>Δ к текущему</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.progress_vs_previous.map((p) => (
+                <tr key={p.session_id} className={p.same_stack ? 'same-stack' : ''}>
+                  <td>{new Date(p.date).toLocaleDateString('ru-RU')}</td>
+                  <td>{p.grade}</td>
+                  <td>{p.stack}</td>
+                  <td data-testid={`progress-overall-${p.session_id}`}>{p.overall.toFixed(2)}</td>
+                  <td>
+                    {Object.entries(p.criteria_delta).map(([k, d]) => (
+                      <span key={k} className={`delta ${d > 0 ? 'up' : d < 0 ? 'down' : 'flat'}`}>
+                        {k}: {d > 0 ? '+' : ''}{d.toFixed(1)}
+                      </span>
+                    ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="muted small">Выделенные строки — интервью на том же стеке.</p>
+        </section>
+      )}
     </section>
   );
 }

@@ -85,4 +85,43 @@ describe('ReportView (WP-11)', () => {
       ),
     );
   });
+
+  it('итерация B: verdict, evidence, gap, study plan, 2-недельный план, прогресс', async () => {
+    const REPORT_B = {
+      ...REPORT,
+      verdict: 'Сильное Middle, уверенно в алгоритмах.',
+      criteria: [
+        {
+          name: 'Live-Code (алгоритм, качество кода, тесты)',
+          weight: 0.25,
+          score: 3,
+          comment: 'нужна практика',
+          evidence: ['решил задачу за 15 мин', 'пропущен edge-case с пустым вводом'],
+          gap_to_grade: 1.5,
+          study_plan: ['разбирать 2 задачи в день', 'учить хеш-таблицы'],
+        },
+        { name: 'Коммуникация (ясность, структура, русский язык)', weight: 0.15, score: 4 },
+      ],
+      study_plan_2weeks: ['неделя 1: алгоритмы', 'неделя 2: system design'],
+      grade_gap: 'До Senior не хватает системного дизайна.',
+      progress_vs_previous: [
+        { session_id: 1, date: '2026-09-14T10:00:00Z', stack: 'go', grade: 'middle', overall: 3.8, same_stack: true, criteria_delta: { 'Live-Code (алгоритм, качество кода, тесты)': -0.8 } },
+        { session_id: 2, date: '2026-09-20T10:00:00Z', stack: 'python', grade: 'junior', overall: 4.1, same_stack: false, criteria_delta: {} },
+      ],
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => json(200, REPORT_B)));
+    render(<ReportView sessionId={9} />);
+    expect(await screen.findByTestId('report')).toBeInTheDocument();
+    expect(screen.getByTestId('report-verdict')).toHaveTextContent('Сильное Middle');
+    expect(screen.getByTestId('evidence-Live-Code (алгоритм, качество кода, тесты)')).toHaveTextContent('пропущен edge-case');
+    expect(screen.getByTestId('gap-Live-Code (алгоритм, качество кода, тесты)')).toHaveTextContent('1.5');
+    expect(screen.getByText('разбирать 2 задачи в день')).toBeInTheDocument();
+    expect(screen.getByTestId('report-study-2w')).toHaveTextContent('неделя 1: алгоритмы');
+    expect(screen.getByTestId('report-grade-gap')).toHaveTextContent('До Senior не хватает');
+    expect(screen.getByTestId('report-progress')).toBeInTheDocument();
+    expect(screen.getByTestId('progress-overall-1')).toHaveTextContent('3.80');
+    expect(screen.getByTestId('progress-overall-2')).toHaveTextContent('4.10');
+    // Δ к текущему
+    expect(screen.getByText('Live-Code (алгоритм, качество кода, тесты): -0.8')).toBeInTheDocument();
+  });
 });

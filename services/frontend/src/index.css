@@ -669,3 +669,27 @@ p {
   gap: 16px;
 }
 .report-columns ul, .report ol { margin: 0; padding-left: 18px; }
+
+/* Отчёт — итерация B (детальные поля для кандидата) */
+.report-verdict {
+  margin: 8px 0 0;
+  padding: 10px 14px;
+  border-left: 3px solid #58a6ff;
+  background: rgba(88, 166, 255, 0.08);
+  border-radius: 4px;
+  font-size: 14px;
+}
+.criterion-evidence, .criterion-study {
+  margin-top: 8px;
+  font-size: 13px;
+}
+.criterion-evidence ul, .criterion-study ul { margin: 4px 0 0; padding-left: 18px; }
+.criterion-gap { margin: 6px 0 0; font-size: 13px; color: #d29922; }
+.report-grade-gap p, .report-study-2w ol { font-size: 14px; }
+.progress-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.progress-table th, .progress-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.progress-table tr.same-stack { background: rgba(88, 166, 255, 0.10); }
+.progress-table .delta { display: inline-block; margin: 1px 4px 1px 0; }
+.progress-table .delta.up { color: #3fb950; }
+.progress-table .delta.down { color: #f85149; }
+.progress-table .delta.flat { color: #8b949e; }

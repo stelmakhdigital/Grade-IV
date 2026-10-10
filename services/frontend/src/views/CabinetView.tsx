@@ -7,10 +7,12 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
   createSession,
+  listProfiles,
   listSessions,
   listTemplates,
   ApiError,
   type Grade,
+  type InterviewProfile,
   type InterviewTemplate,
   type Session,
   type Stack,
@@ -44,6 +46,8 @@ export function CabinetView() {
   const [stack, setStack] = useState<Stack>('go');
   const [templates, setTemplates] = useState<InterviewTemplate[]>([]);
   const [templateId, setTemplateId] = useState<number | undefined>(undefined);
+  const [profiles, setProfiles] = useState<InterviewProfile[]>([]);
+  const [profileId, setProfileId] = useState<number | undefined>(undefined);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
 
@@ -75,6 +79,22 @@ export function CabinetView() {
     return () => { cancelled = true; };
   }, [grade, stack]);
 
+  // Профили интервьюера (итерация B): общий список, дефолт — balanced/standard.
+  useEffect(() => {
+    let cancelled = false;
+    listProfiles()
+      .then((p) => {
+        if (cancelled) return;
+        setProfiles(p);
+        const def = p.find((x) => x.tone === 'balanced' && x.difficulty === 'standard');
+        setProfileId(def?.id ?? p[0]?.id);
+      })
+      .catch(() => {
+        if (!cancelled) setProfiles([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
 
   const onStart = async (e: FormEvent) => {
     e.preventDefault();
@@ -82,7 +102,7 @@ export function CabinetView() {
     setStarting(true);
     setStartError(null);
     try {
-      const s = await createSession(grade, stack, templateId);
+      const s = await createSession(grade, stack, templateId, profileId);
       window.location.hash = sessionPath(s.id);
     } catch (err) {
       setStartError(apiErrorMessage(err));
@@ -139,6 +159,19 @@ export function CabinetView() {
                 {templates.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}{t.is_default ? ' (по умолчанию)' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {profiles.length > 0 && (
+            <label className="field">
+              <span>Профиль интервьюера</span>
+              <select value={profileId ?? ''} onChange={(e) => setProfileId(Number(e.target.value))}>
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id} title={p.description ?? ''}>
+                    {p.name} — {p.tone}/{p.difficulty}
+                    {p.tone === 'balanced' && p.difficulty === 'standard' ? ' (по умолчанию)' : ''}
                   </option>
                 ))}
               </select>
