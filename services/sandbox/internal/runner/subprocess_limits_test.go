@@ -79,10 +79,11 @@ func TestSubprocessCPULimit(t *testing.T) {
 	t.Logf("cpu-limit: %v, exit=%d, timeout=%v", d, res.ExitCode, res.Timeout)
 }
 
-// TestBankSubprocessRegression — регресс: все 12 задач банка исполняются в
+// TestBankSubprocessRegression — регресс: все задачи банка исполняются в
 // subprocess-режиме (с rlimit) как раньше: раннер завершается без ошибок,
 // stub-решения проваливаются тестами банка (passed=false), тесты распарсены.
-// Нужен go-интерпретатор и python3.
+// Размер банка не хардкодим (банк расширяется) — проверяем, что он непуст и
+// содержит оба стека (go + python). Нужен go-интерпретатор и python3.
 func TestBankSubprocessRegression(t *testing.T) {
 	if testing.Short() {
 		t.Skip("нужны go/python3 интерпретаторы (не -short)")
@@ -98,9 +99,22 @@ func TestBankSubprocessRegression(t *testing.T) {
 		t.Fatalf("tasks: %v", err)
 	}
 	tasksList := bank.List("", "")
-	if len(tasksList) != 12 {
-		t.Fatalf("банк: %d задач, ожидается 12", len(tasksList))
+	if len(tasksList) == 0 {
+		t.Fatalf("банк пуст")
 	}
+	goN, pyN := 0, 0
+	for _, task := range tasksList {
+		switch task.Stack {
+		case "go":
+			goN++
+		case "python":
+			pyN++
+		}
+	}
+	if goN == 0 || pyN == 0 {
+		t.Fatalf("банк должен содержать и go, и python задачи (go=%d, python=%d)", goN, pyN)
+	}
+	t.Logf("банк: %d задач (go=%d, python=%d)", len(tasksList), goN, pyN)
 	r := New(Config{Mode: "subprocess"})
 	for _, task := range tasksList {
 		res, err := r.Run(t.Context(), task.Stack, task.Files)
