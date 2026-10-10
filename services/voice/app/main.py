@@ -57,10 +57,11 @@ def _build_tts():
     raise ValueError(f"Неизвестный VOICE_TTS_PROVIDER: {name!r}")
 
 
-def build_app(stt=None, tts=None, vad=None) -> FastAPI:
+def build_app(stt=None, tts=None, vad=None, max_speech_s: float | None = None) -> FastAPI:
     """Собирает FastAPI-приложение с заданными (или env-выбранными) провайдерами.
 
     Тесты передают провайдеры явно (fake/реальные), prod — `app` ниже.
+    ``max_speech_s`` — лимит непрерывной речи в реплике (None → VAD_MAX_SPEECH_S из env/константы).
     """
     app = FastAPI(title="Grade Voice", version="0.2.0")
 
@@ -78,7 +79,7 @@ def build_app(stt=None, tts=None, vad=None) -> FastAPI:
 
     # Стриминговый STT (ADR-007): WS /api/v1/stt/stream — PCM-кадры →
     # state/partial/final (Silero VAD, partial каждые ~500 мс).
-    register_stt_stream(app, stt, vad)
+    register_stt_stream(app, stt, vad, max_speech_s=max_speech_s)
     # VAD-стрим без STT (ADR-002, поправка 2026-10-09): WS /api/v1/vad/stream —
     # state-события Silero VAD для batch-пути (pre-STT + batch /stt в api).
     register_vad_stream(app, vad)

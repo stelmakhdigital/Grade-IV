@@ -35,6 +35,11 @@ VAD_MIN_SILENCE_MS = 600     # тишина ≥ 600 мс после речи →
 VAD_MIN_SPEECH_MS = 250      # речь короче 250 мс → всплеск, без final
 VAD_PRE_SILENCE_MS = 400     # тишина ≥ 400 мс в речи (но < min_silence) → pre_end
                              # (сигнал pre-STT для batch-пути, ADR-002 2026-10-09)
+# Максимальная длительность непрерывной речи в одной реплике (сек).
+# Если кандидат говорит дольше без паузы — реплика принудительно режется на
+# сегменты по MAX_SPEECH_S: каждый сегмент → свой final (VAD-состояние не сбрасывается,
+# речь продолжается). Защита от сверхдлинного аудио-буфера (память + задержка STT).
+VAD_MAX_SPEECH_S = 30
 PARTIAL_INTERVAL_S = 0.5     # partial не чаще раза в 500 мс
 WINDOW = 512                 # окно Silero, сэмплы @ 16 кГц (32 мс)
 PREROLL_SAMPLES = 1600       # pre-roll перед стартом слова (100 мс)
@@ -42,7 +47,7 @@ ENERGY_RMS = 0.005           # энергетический VAD: rms-порог 
 
 __all__ = [
     "VAD_THRESHOLD", "VAD_MIN_SILENCE_MS", "VAD_MIN_SPEECH_MS", "VAD_PRE_SILENCE_MS",
-    "PARTIAL_INTERVAL_S", "WINDOW", "PREROLL_SAMPLES", "ENERGY_RMS",
+    "VAD_MAX_SPEECH_S", "PARTIAL_INTERVAL_S", "WINDOW", "PREROLL_SAMPLES", "ENERGY_RMS",
     "SileroVAD", "EnergyVAD", "StreamVAD", "build_vad",
     "register_stt_stream", "register_vad_stream",
 ]
@@ -212,16 +217,29 @@ async def _do_partial(stt: STTProvider, ws: WebSocket, pcm: bytes, cell: dict) -
         cell["busy"] = False
 
 
-def register_stt_stream(app, stt: STTProvider, vad) -> None:
-    """Регистрирует WS /api/v1/stt/stream (контракт — докстрока модуля)."""
+def register_stt_stream(app, stt: STTProvider, vad, max_speech_s: float | None = None) -> None:
+    """Регистрирует WS /api/v1/stt/stream (контракт — докстрока модуля).
+
+    ``max_speech_s`` — лимит непрерывной речи в реплике (сек). None → VAD_MAX_SPEECH_S
+    (из env ``VAD_MAX_SPEECH_S`` или константы). При превышении реплика режется
+    на сегменты, каждый — свой final.
+    """
+    if max_speech_s is None:
+        import os
+        try:
+            max_speech_s = float(os.environ.get("VAD_MAX_SPEECH_S", VAD_MAX_SPEECH_S))
+        except ValueError:
+            max_speech_s = VAD_MAX_SPEECH_S
+    max_speech_samples = int(max_speech_s * SAMPLE_RATE)
 
     @app.websocket("/api/v1/stt/stream")
     async def stt_stream_endpoint(ws: WebSocket) -> None:
         await ws.accept()
         engine = StreamVAD(vad.clone())  # состояние VAD — per-connection
         ring: deque[bytes] = deque(maxlen=4)  # pre-roll: последние кадры (≤1 с)
-        buf = bytearray()  # аудио текущей реплики (от pre-roll)
+        buf = bytearray()  # аудио текущего сегмента реплики (от pre-roll)
         speech = False
+        splits = 0  # число принудительных разрывов в текущей реплике
         cell = {"busy": False, "text": ""}  # состояние partial-воркера
 
         async for msg in ws.iter_bytes():
@@ -233,6 +251,7 @@ def register_stt_stream(app, stt: STTProvider, vad) -> None:
             for kind, a, b in engine.feed(samples):
                 if kind == "start":
                     speech = True
+                    splits = 0
                     # pre-roll: предыдущий кадр (≤250 мс) — чистый старт слова.
                     buf = bytearray(ring[-2] if len(ring) >= 2 else b"")
                     await _send(ws, {"type": "state", "speech": True})
@@ -240,7 +259,12 @@ def register_stt_stream(app, stt: STTProvider, vad) -> None:
                     speech = False
                     audio = bytes(buf) + msg  # весь буфер + кадр с концом (хвост ≤250 мс)
                     buf = bytearray()
-                    speech_ms = round((b - a) * 1000 / SAMPLE_RATE)  # длительность речи по VAD
+                    if splits == 0:
+                        speech_ms = round((b - a) * 1000 / SAMPLE_RATE)  # длительность речи по VAD
+                    else:
+                        # после принудительного разрыва — хвост: длительность по фактическому аудио
+                        speech_ms = round(len(audio) // 2 * 1000 / SAMPLE_RATE)
+                    splits = 0
                     await _send(ws, {"type": "state", "speech": False})
                     res = await asyncio.to_thread(stt.transcribe, audio, SAMPLE_RATE)
                     await _send(ws, {
@@ -252,6 +276,21 @@ def register_stt_stream(app, stt: STTProvider, vad) -> None:
 
             if speech:
                 buf.extend(msg)
+                # Лимит непрерывной речи: сегмент ≥ max_speech_s → принудительный final
+                # (VAD-состояние не сбрасываем — речь продолжается, накапливаем новый сегмент).
+                if len(buf) // 2 >= max_speech_samples:
+                    audio = bytes(buf)
+                    buf = bytearray()
+                    splits += 1
+                    speech_ms = round(len(audio) // 2 * 1000 / SAMPLE_RATE)
+                    res = await asyncio.to_thread(stt.transcribe, audio, SAMPLE_RATE)
+                    await _send(ws, {
+                        "type": "final",
+                        "text": res.text,
+                        "confidence": round(res.confidence, 3),
+                        "speech_ms": speech_ms,
+                        "split": True,
+                    })
                 if not cell["busy"] and (time.monotonic() - cell.get("t", 0.0)) >= PARTIAL_INTERVAL_S:
                     cell["busy"] = True
                     cell["t"] = time.monotonic()

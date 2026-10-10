@@ -155,3 +155,68 @@ def test_health_reports_vad_name() -> None:
 def test_default_vad_is_silero() -> None:
     """Prod-дефолт: Silero VAD (onnx bundled в faster-whisper)."""
     assert build_vad().name == "silero"
+
+
+def _run_collect_all(voice_uri: str, frames: list[bytes], timeout: float, stop_states: int = 1):
+    """Отправка кадров → сборка сообщений до финального state(speech=False) или таймаута.
+
+    В отличие от ``_run``, собирает ВСЕ finals (для проверки принудительного разрыва).
+    """
+    async def scenario():
+        async with websockets.connect(voice_uri, max_size=None) as ws:
+            await _send_frames(ws, frames)
+            msgs: list[dict] = []
+            err = None
+            end_states = 0
+            while True:
+                try:
+                    m = await _recv(ws, timeout)
+                except asyncio.TimeoutError:
+                    err = "timeout"
+                    break
+                msgs.append(m)
+                if m["type"] == "state" and m.get("speech") is False:
+                    end_states += 1
+                # после естественного конца (state False) идёт хвостовой final —
+                # ждём его и завершаем (split-final'ы приходят только во время речи).
+                if end_states >= stop_states and m["type"] == "final":
+                    break
+            return msgs, err
+
+    return asyncio.run(scenario())
+
+
+def test_max_speech_forced_split() -> None:
+    """Лимит непрерывной речи: речь 4 с при max_speech_s=1.5 → ≥2 final (разрыв)."""
+    vad = EnergyVAD(min_silence_ms=150, min_speech_ms=100)
+    app = build_app(stt=LengthSTT(), tts=FakeTTS(), vad=vad, max_speech_s=1.5)
+    port = _free_port()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    th = threading.Thread(target=server.run, daemon=True)
+    th.start()
+    deadline = time.time() + 10
+    while not server.started and time.time() < deadline:
+        time.sleep(0.05)
+    assert server.started, "uvicorn не стартовал"
+    try:
+        uri = f"ws://127.0.0.1:{port}/api/v1/stt/stream"
+        # 4 с непрерывной речи + тишина 1 с (16000 сэмплов, ≥ min_silence) для естественного конца.
+        frames = _frames(_tone(4000)) + _frames(np.zeros(16000))
+        msgs, err = _run_collect_all(uri, frames, timeout=10)
+        assert err is None, f"не дождались конца: {msgs}"
+        finals = [m for m in msgs if m["type"] == "final"]
+        # 4 с / 1.5 с → минимум 2 сегмента; хвост + разрывы.
+        assert len(finals) >= 2, f"ожидал ≥2 final (разрыв), получилось {len(finals)}: {msgs}"
+        # первый финал — принудительный (split=True), его длительность ≈ ≤ 1.5–2 с.
+        assert finals[0].get("split") is True, f"первый final не помечен split: {finals[0]}"
+        first_s = float(finals[0]["text"].removeprefix("[fake ").removesuffix("s]"))
+        assert first_s <= 2.0, f"первый сегмент длиннее лимита: {first_s:.1f} с"
+        # state-пара: первый state — speech true, последний — speech false.
+        states = [m["speech"] for m in msgs if m["type"] == "state"]
+        assert states[0] is True and states[-1] is False
+        # суммарно все сегменты покрывают ~4 с речи (с учётом pre-roll/хвоста).
+        total_s = sum(float(f["text"].removeprefix("[fake ").removesuffix("s]")) for f in finals)
+        assert total_s >= 3.9, f"сегменты не покрывают речь: Σ={total_s:.1f} с из 4 с"
+    finally:
+        server.should_exit = True
+        th.join(timeout=5)
