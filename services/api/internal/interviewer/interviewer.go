@@ -38,10 +38,24 @@ func WithMaxHistory(n int) Option {
 	}
 }
 
+// WithProfiles — профили интервьюера (Итерация B): tone/difficulty сессии
+// попадают в system-промпт. Без опции — default (balanced/standard).
+func WithProfiles(store *db.ProfileStore) Option {
+	return func(i *Interviewer) { i.profiles = store }
+}
+
+// WithReports — хранилище отчётов (Итерация B): для progress vs прошлые интервью
+// в GenerateReport. Без опции — без истории прогресса.
+func WithReports(store *db.ReportStore) Option {
+	return func(i *Interviewer) { i.reports = store }
+}
+
 // Interviewer — ходы ИИ-интервьюера.
 type Interviewer struct {
 	llm        llm.Provider
 	sessions   *db.SessionStore
+	profiles   *db.ProfileStore
+	reports    *db.ReportStore
 	log        *slog.Logger
 	maxHistory int
 }
@@ -285,9 +299,25 @@ func (i *Interviewer) context(ctx context.Context, sessionID int64, userMsg stri
 	return sess, msgs, nil
 }
 
-// buildMessages — system-промпт + последние реплики + текущий ход.
+// profilePrompt — tone/difficulty сессии по профилю (0/ошибка — default).
+// Профиль влияет только на стиль, не на оценку.
+func (i *Interviewer) profilePrompt(sess models.Session) (tone, difficulty string) {
+	tone, difficulty = "balanced", "standard"
+	if i.profiles == nil || sess.ProfileID <= 0 {
+		return tone, difficulty
+	}
+	if p, err := i.profiles.Get(context.Background(), sess.ProfileID); err == nil {
+		return p.Tone, p.Difficulty
+	}
+	return tone, difficulty
+}
+
+// buildMessages — system-промпт (с профилем) + последние реплики + текущий ход.
 func (i *Interviewer) buildMessages(sess models.Session, userMsg string, images ...string) []llm.Message {
-	msgs := []llm.Message{{Role: llm.RoleSystem, Content: SystemPrompt(sess.Grade, string(sess.Stack), sess.Stage)}}
+	tone, difficulty := i.profilePrompt(sess)
+	sys := SystemPromptWithProfile(sess.Grade, string(sess.Stack), sess.Stage,
+		activeVoiceStyle, tone, difficulty)
+	msgs := []llm.Message{{Role: llm.RoleSystem, Content: sys}}
 	msgs = append(msgs, i.transcript(sess.ID, i.maxHistory)...)
 	msg := llm.Message{Role: llm.RoleUser, Content: userMsg}
 	if len(images) > 0 {

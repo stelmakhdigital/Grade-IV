@@ -22,6 +22,21 @@ var schemaSQLite string
 //go:embed schema_postgres.sql
 var schemaPostgres string
 
+//go:embed schema_interviewer_profiles.sql
+var schemaProfilesSQLite string
+
+// schemaPostgresProfiles — профили интервьюера, PostgreSQL (prod): BIGINT/BOOLEAN.
+const schemaPostgresProfiles = `CREATE TABLE IF NOT EXISTS interviewer_profiles (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name TEXT NOT NULL,
+  tone TEXT NOT NULL,
+  difficulty TEXT NOT NULL,
+  is_preset BOOLEAN NOT NULL DEFAULT FALSE,
+  description TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_profiles_preset ON interviewer_profiles(is_preset)`
+
 // Dialect — диалект СУБД.
 type Dialect string
 
@@ -89,11 +104,28 @@ func Open(databaseURL string) (*sql.DB, Dialect, error) {
 // Migrate применяет схему (идемпотентно: CREATE ... IF NOT EXISTS).
 func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 	var raw string
+	var alters []string
 	switch d {
 	case DialectSQLite:
-		raw = schemaSQLite
+		raw = schemaSQLite + "\n" + schemaProfilesSQLite
+		// sqlite: ADD COLUMN IF NOT EXISTS отсутствует — дубликат колонки
+		// игнорируем (повторный запуск миграции).
+		alters = []string{
+			"ALTER TABLE sessions ADD COLUMN profile_id INTEGER REFERENCES interviewer_profiles(id)",
+			"ALTER TABLE reports ADD COLUMN verdict TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE reports ADD COLUMN grade_gap TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE reports ADD COLUMN study_plan_2weeks TEXT NOT NULL DEFAULT '[]'",
+			"ALTER TABLE reports ADD COLUMN progress_vs_previous TEXT NOT NULL DEFAULT '[]'",
+		}
 	case DialectPostgres:
-		raw = schemaPostgres
+		raw = schemaPostgres + "\n" + schemaPostgresProfiles
+		alters = []string{
+			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS profile_id BIGINT REFERENCES interviewer_profiles(id)",
+			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS verdict TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS grade_gap TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS study_plan_2weeks TEXT NOT NULL DEFAULT '[]'",
+			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS progress_vs_previous TEXT NOT NULL DEFAULT '[]'",
+		}
 	default:
 		return fmt.Errorf("неподдерживаемый диалект: %q", d)
 	}
@@ -103,6 +135,15 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 			continue
 		}
 		if _, err := dbx.ExecContext(ctx, s); err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+	}
+	for _, alter := range alters {
+		if _, err := dbx.ExecContext(ctx, alter); err != nil {
+			// sqlite: повторный запуск — колонка уже есть.
+			if d == DialectSQLite && strings.Contains(err.Error(), "duplicate column name") {
+				continue
+			}
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}

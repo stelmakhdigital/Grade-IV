@@ -10,8 +10,25 @@ import (
 	"nhooyr.io/websocket"
 )
 
+// CreateOption — опциональный параметр создания сессии.
+type CreateOption func(*createParams)
+
+type createParams struct {
+	profileID int64
+}
+
+// WithProfile — профиль интервьюера (tone × difficulty, Итерация B);
+// влияет только на стиль, не на оценку.
+func WithProfile(profileID int64) CreateOption {
+	return func(p *createParams) { p.profileID = profileID }
+}
+
 // Create создаёт сессию: проверка минут (402-условие), вставка, старт в статусе active.
-func (e *Engine) Create(ctx context.Context, userID int64, grade models.Grade, stack models.Stack) (models.Session, error) {
+func (e *Engine) Create(ctx context.Context, userID int64, grade models.Grade, stack models.Stack, opts ...CreateOption) (models.Session, error) {
+	var cp createParams
+	for _, o := range opts {
+		o(&cp)
+	}
 	if !grade.Valid() {
 		return models.Session{}, fmt.Errorf("%w: грейд %q", ErrInvalidParams, grade)
 	}
@@ -41,6 +58,7 @@ func (e *Engine) Create(ctx context.Context, userID int64, grade models.Grade, s
 		Status:         models.StatusActive,
 		DurationLimitS: limit,
 		StartedAt:      now,
+		ProfileID:      cp.profileID,
 	})
 	if err != nil {
 		return models.Session{}, err

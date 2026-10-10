@@ -90,6 +90,9 @@ type Session struct {
 	PausedAt       *time.Time
 	StartedAt      time.Time
 	FinishedAt     *time.Time
+	// ProfileID — профиль интервьюера (tone × difficulty, Итерация B);
+	// 0 — default (balanced/standard). Влияет только на стиль, не на оценку.
+	ProfileID int64
 }
 
 // SessionEvent — событие сессии (транскрипт, смена стадии и т.д.).

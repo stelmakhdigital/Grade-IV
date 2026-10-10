@@ -32,10 +32,10 @@ func parseTS(s string) (time.Time, error) { return time.Parse(time.RFC3339, s) }
 func (s *SessionStore) Create(ctx context.Context, m models.Session) (models.Session, error) {
 	res, err := s.db.ExecContext(ctx, s.d.q(`
 		INSERT INTO sessions (user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, started_at)
-		VALUES (?, ?, ?, ?, ?, ?, 0, ?)`),
+			active_seconds, started_at, profile_id)
+		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`),
 		m.UserID, m.Grade, m.Stack, m.Stage, m.Status, m.DurationLimitS,
-		m.StartedAt.UTC().Format(time.RFC3339))
+		m.StartedAt.UTC().Format(time.RFC3339), m.ProfileID)
 	if err != nil {
 		return models.Session{}, fmt.Errorf("create session: %w", err)
 	}
@@ -50,7 +50,7 @@ func (s *SessionStore) Create(ctx context.Context, m models.Session) (models.Ses
 func (s *SessionStore) Get(ctx context.Context, id int64) (models.Session, error) {
 	return s.scanSession(s.db.QueryRowContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at
+			active_seconds, paused_at, started_at, finished_at, profile_id
 			FROM sessions WHERE id = ?`), id))
 }
 
@@ -58,7 +58,7 @@ func (s *SessionStore) Get(ctx context.Context, id int64) (models.Session, error
 func (s *SessionStore) GetOwned(ctx context.Context, id, userID int64) (models.Session, error) {
 	m, err := s.scanSession(s.db.QueryRowContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at
+			active_seconds, paused_at, started_at, finished_at, profile_id
 			FROM sessions WHERE id = ? AND user_id = ?`), id, userID))
 	if errors.Is(err, ErrSessionNotFound) {
 		return m, err
@@ -70,7 +70,7 @@ func (s *SessionStore) GetOwned(ctx context.Context, id, userID int64) (models.S
 func (s *SessionStore) ListByUser(ctx context.Context, userID int64) ([]models.Session, error) {
 	rows, err := s.db.QueryContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at
+			active_seconds, paused_at, started_at, finished_at, profile_id
 			FROM sessions WHERE user_id = ? ORDER BY id DESC`), userID)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
@@ -140,7 +140,7 @@ func (s *SessionStore) Finalize(ctx context.Context, id int64, status models.Sta
 func (s *SessionStore) ListByStatus(ctx context.Context, status models.Status) ([]models.Session, error) {
 	rows, err := s.db.QueryContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at
+			active_seconds, paused_at, started_at, finished_at, profile_id
 			FROM sessions WHERE status = ?`), status)
 	if err != nil {
 		return nil, fmt.Errorf("list by status: %w", err)
@@ -211,8 +211,9 @@ func (s *SessionStore) scanSession(row rowScanner) (models.Session, error) {
 	var grade, stack, stage, status string
 	var startedAt string
 	var pausedAt, finishedAt sql.NullString
+	var profileID sql.NullInt64
 	err := row.Scan(&m.ID, &m.UserID, &grade, &stack, &stage, &status,
-		&m.DurationLimitS, &m.ActiveSeconds, &pausedAt, &startedAt, &finishedAt)
+		&m.DurationLimitS, &m.ActiveSeconds, &pausedAt, &startedAt, &finishedAt, &profileID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Session{}, ErrSessionNotFound
 	}
@@ -237,6 +238,9 @@ func (s *SessionStore) scanSession(row rowScanner) (models.Session, error) {
 			return models.Session{}, fmt.Errorf("parse finished_at: %w", err)
 		}
 		m.FinishedAt = &t
+	}
+	if profileID.Valid {
+		m.ProfileID = profileID.Int64
 	}
 	return m, nil
 }

@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -32,6 +33,7 @@ type Server struct {
 	submissions *db.SubmissionStore
 	whiteboards *db.WhiteboardStore
 	reports     *db.ReportStore
+	profiles    *db.ProfileStore
 	engine      *session.Engine
 	interviewer *interviewer.Interviewer
 	voice       *voicesvc.Client
@@ -63,10 +65,17 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 	submissions := db.NewSubmissionStore(database, dialect)
 	whiteboards := db.NewWhiteboardStore(database, dialect)
 	reports := db.NewReportStore(database, dialect)
+	profiles := db.NewProfileStore(database, dialect)
+	// Пресеты профилей интервьюера (идемпотентно, Итерация B).
+	if err := profiles.EnsurePresets(context.Background(), db.PresetProfiles()); err != nil {
+		log.Warn("profiles: пресеты не сидированы", "err", err)
+	}
 	engine := session.New(sessions, users, log,
 		session.WithPauseTimeout(time.Duration(cfg.PauseTimeoutS)*time.Second),
 		session.WithSessionLimit(cfg.SessionLimitS))
-	interviewer := interviewer.New(provider, sessions, log)
+	interviewer := interviewer.New(provider, sessions, log,
+		interviewer.WithProfiles(profiles),
+		interviewer.WithReports(reports))
 	voice := voicesvc.NewClient(cfg.VoiceURL)
 	return &Server{
 		cfg:         cfg,
@@ -75,6 +84,7 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		submissions: submissions,
 		whiteboards: whiteboards,
 		reports:     reports,
+		profiles:    profiles,
 		engine:      engine,
 		interviewer: interviewer,
 		voice:       voice,
@@ -127,6 +137,8 @@ func (s *Server) Handler() http.Handler {
 
 	// Сессии (WP-3, ARCHITECTURE.md §4.1).
 	mux.Handle("POST /api/v1/sessions", s.requireAuth(http.HandlerFunc(s.handleSessionsCreate)))
+	mux.Handle("GET /api/v1/profiles", s.requireAuth(http.HandlerFunc(s.handleProfilesList)))
+	mux.Handle("GET /api/v1/profiles/{id}", s.requireAuth(http.HandlerFunc(s.handleProfileGet)))
 	mux.Handle("GET /api/v1/sessions", s.requireAuth(http.HandlerFunc(s.handleSessionsList)))
 	mux.Handle("GET /api/v1/sessions/{id}", s.requireAuth(http.HandlerFunc(s.handleSessionGet)))
 	mux.Handle("POST /api/v1/sessions/{id}/{action}", s.requireAuth(http.HandlerFunc(s.handleSessionAction)))
