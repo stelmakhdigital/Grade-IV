@@ -34,6 +34,7 @@ type sessionDTO struct {
 	StartedAt      time.Time  `json:"started_at"`
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`
 	PausedAt       *time.Time `json:"paused_at,omitempty"`
+	ProfileID      int64      `json:"profile_id"`
 }
 
 func toDTO(m models.Session, snap *session.Snapshot) sessionDTO {
@@ -49,6 +50,7 @@ func toDTO(m models.Session, snap *session.Snapshot) sessionDTO {
 		StartedAt:      m.StartedAt,
 		FinishedAt:     m.FinishedAt,
 		PausedAt:       m.PausedAt,
+		ProfileID:      m.ProfileID,
 	}
 	if snap != nil {
 		d.Stage = string(snap.Stage)
@@ -59,19 +61,39 @@ func toDTO(m models.Session, snap *session.Snapshot) sessionDTO {
 	return d
 }
 
-// handleSessionsCreate — POST /api/v1/sessions {grade, stack}.
-// 201: {id, ws_url, duration_limit_s}; 402 — нет доступных минут (ARCHITECTURE §4.1).
+// handleSessionsCreate — POST /api/v1/sessions {grade, stack, profile_id?}.
+// 201: {id, ws_url, duration_limit_s}; 402 — нет доступных минут (ARCHITECTURE §4.1);
+// 404 — profile_id не найден (Итерация B).
 func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Grade      models.Grade `json:"grade"`
 		Stack      models.Stack `json:"stack"`
 		TemplateID int64        `json:"template_id,omitempty"` // итерация A: 0 = дефолтный шаблон грейда
+		ProfileID  int64        `json:"profile_id,omitempty"`  // итерация B: 0 = balanced/standard
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "ожидается JSON {grade, stack}")
 		return
 	}
-	m, err := s.engine.CreateWithTemplate(r.Context(), userIDFromContext(r.Context()), body.Grade, body.Stack, body.TemplateID)
+	var opts []session.CreateOption
+	if body.TemplateID > 0 {
+		opts = append(opts, session.WithTemplate(body.TemplateID))
+	}
+	if body.ProfileID > 0 {
+		p, err := s.profiles.Get(r.Context(), body.ProfileID)
+		if err == nil {
+			opts = append(opts, session.WithProfile(p.ID))
+		} else if errors.Is(err, db.ErrProfileNotFound) {
+			writeError(w, http.StatusNotFound, "profile_not_found",
+				"профиль интервьюера не найден: "+strconv.FormatInt(body.ProfileID, 10))
+			return
+		} else {
+			s.log.Error("get profile", "err", err)
+			writeError(w, http.StatusInternalServerError, "internal", "не удалось получить профиль")
+			return
+		}
+	}
+	m, err := s.engine.Create(r.Context(), userIDFromContext(r.Context()), body.Grade, body.Stack, opts...)
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusCreated, map[string]any{
@@ -360,7 +382,7 @@ func (s *Server) handleReportGet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "invalid_state", "отчёт доступен после завершения сессии")
 		return
 	}
-	overall, gradeRec, criteria, strengths, weaknesses, recommendations, err :=
+	overall, gradeRec, criteria, strengths, weaknesses, recommendations, extra, err :=
 		s.reports.Get(r.Context(), id)
 	if errors.Is(err, db.ErrReportNotFound) {
 		writeJSON(w, http.StatusAccepted, map[string]any{"status": "generating"})
@@ -379,6 +401,11 @@ func (s *Server) handleReportGet(w http.ResponseWriter, r *http.Request) {
 		"strengths":            json.RawMessage(strengths),
 		"weaknesses":           json.RawMessage(weaknesses),
 		"recommendations":      json.RawMessage(recommendations),
+		// Подробный отчёт (Итерация B).
+		"verdict":              extra.Verdict,
+		"grade_gap":            extra.GradeGap,
+		"study_plan_2weeks":    json.RawMessage(extra.StudyPlan2Weeks),
+		"progress_vs_previous": json.RawMessage(extra.ProgressVsPrevious),
 	})
 }
 
@@ -397,8 +424,15 @@ func (s *Server) startReportGeneration(id int64) {
 		strJSON, _ := json.Marshal(data.Strengths)
 		weakJSON, _ := json.Marshal(data.Weaknesses)
 		recJSON, _ := json.Marshal(data.Recommendations)
+		sp2wJSON, _ := json.Marshal(data.StudyPlan2Weeks)
+		progJSON, _ := json.Marshal(data.ProgressVsPrevious)
 		if err := s.reports.Save(ctx, id, data.Overall, data.GradeRecommendation,
-			critJSON, strJSON, weakJSON, recJSON); err != nil {
+			critJSON, strJSON, weakJSON, recJSON, db.ReportExtra{
+				Verdict:            data.Verdict,
+				GradeGap:           data.GradeGap,
+				StudyPlan2Weeks:    string(sp2wJSON),
+				ProgressVsPrevious: string(progJSON),
+			}); err != nil {
 			s.log.Error("report save", "session", id, "err", err)
 			return
 		}

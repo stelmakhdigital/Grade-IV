@@ -111,19 +111,80 @@ const (
 // выдаёт реплики 41–62 слова).
 const activeVoiceStyle = voiceStyleB
 
-// systemPrompt — полный system-промпт хода (voiceStyle — вариант формата).
-func systemPrompt(grade models.Grade, stack string, stage models.Stage, voiceStyle string) string {
-	return strings.Join([]string{persona, gradeFocus[grade], stagePrompt(grade, stack, stage, voiceStyle, "")}, "\n\n")
+// toneBlocks — стиль речи интервьюера по профилю (Итерация B): влияет только
+// на стиль реплик, не на оценку.
+var toneBlocks = map[string]string{
+	"strict":     "Отвечай кратко (1-2 предложения). Минимум поощрения. Больше challenging follow-up (\"а почему не X?\", \"а что если нагрузка ×10?\"). Менее терпим к неточностям — уточняй, если кандидат уходит в сторону.",
+	"balanced":   "Отвечай развёрнуто (2-3 предложения). Баланс поощрения и challenging. Уточняй \"почему так, а не иначе\".",
+	"supportive": "Отвечай развёрнуто (2-3 предложения). Больше поощрения (\"хорошо\", \"верное направление\"). Давать подсказки раньше, если кандидат затрудняется. Меньше стресс-вопросов.",
+	"playful":    "Отвечай живо (2-3 предложения). Больше метафор, аналогий, \"расскажи как в команде\". Меньше формальностей. Больше soft-skills и мотивации.",
+	"socratic":   "Отвечай вопросами (1-2 вопроса за раз). Меньше прямых ответов. \"А почему не X?\", \"А что если...?\", \"А как бы ты объяснил коллеге?\". Deep-dive на каждый ответ.",
 }
 
-// SystemPrompt — полный system-промпт хода (активный вариант A/B, дефолтная программа).
+// difficultyBlocks — сложность вопросов по профилю (Итерация B): влияет только
+// на глубину вопросов, не на оценку.
+var difficultyBlocks = map[string]string{
+	"minus":    "Вопросы проще, чем типичный уровень грейда. Больше подсказок. Меньше стресс-вопросов. Давай кандидату время подумать.",
+	"standard": "Вопросы по уровню грейда. Стандартная частота подсказок и стресс-вопросов.",
+	"plus":     "Вопросы сложнее, чем типичный уровень грейда. Больше edge-cases, стресс-вопросов (\"а что если ×10?\", \"а как масштабировать?\"). Меньше подсказок.",
+}
+
+// systemPromptWithStyle — полный system-промпт хода (voiceStyle + профиль: tone/difficulty).
+func systemPromptWithStyle(grade models.Grade, stack string, stage models.Stage, voiceStyle, tone, difficulty string) string {
+	if _, ok := toneBlocks[tone]; !ok {
+		tone = "balanced"
+	}
+	if _, ok := difficultyBlocks[difficulty]; !ok {
+		difficulty = "standard"
+	}
+	return strings.Join([]string{
+		persona,
+		gradeFocus[grade],
+		toneBlocks[tone],
+		difficultyBlocks[difficulty],
+		stagePrompt(grade, stack, stage, voiceStyle, ""),
+	}, "\n\n")
+}
+
+// SystemPromptWithProfile — полный system-промпт хода с профилем интервьюера
+// (Итерация B). Неизвестные tone/difficulty — default (balanced/standard).
+func SystemPromptWithProfile(grade models.Grade, stack string, stage models.Stage, voiceStyle, tone, difficulty string) string {
+	return systemPromptWithStyle(grade, stack, stage, voiceStyle, tone, difficulty)
+}
+
+// systemPrompt — полный system-промпт хода (voiceStyle — вариант формата).
+func systemPrompt(grade models.Grade, stack string, stage models.Stage, voiceStyle string) string {
+	return systemPromptWithStyle(grade, stack, stage, voiceStyle, "balanced", "standard")
+}
+
+// SystemPrompt — полный system-промпт хода (активный вариант A/B, default-профиль
+// balanced/standard; backward-compat, Итерация B).
 func SystemPrompt(grade models.Grade, stack string, stage models.Stage) string {
 	return systemPrompt(grade, stack, stage, activeVoiceStyle)
 }
 
 // SystemPromptWithProgram — system-промпт с программой из шаблона (итерация A).
+// Профиль (tone/difficulty) — из сессии; пустая программа — дефолтная gradeProgram.
 func SystemPromptWithProgram(grade models.Grade, stack string, stage models.Stage, program string) string {
-	return strings.Join([]string{persona, gradeFocus[grade], stagePrompt(grade, stack, stage, activeVoiceStyle, program)}, "\n\n")
+	return SystemPromptWithProfileProgram(grade, stack, stage, "balanced", "standard", program)
+}
+
+// SystemPromptWithProfileProgram — полный промпт: профиль (tone/difficulty) +
+// программа из шаблона. program="" — дефолтная gradeProgram.
+func SystemPromptWithProfileProgram(grade models.Grade, stack string, stage models.Stage, tone, difficulty, program string) string {
+	if _, ok := toneBlocks[tone]; !ok {
+		tone = "balanced"
+	}
+	if _, ok := difficultyBlocks[difficulty]; !ok {
+		difficulty = "standard"
+	}
+	return strings.Join([]string{
+		persona,
+		gradeFocus[grade],
+		toneBlocks[tone],
+		difficultyBlocks[difficulty],
+		stagePrompt(grade, stack, stage, activeVoiceStyle, program),
+	}, "\n\n")
 }
 
 // ProgramFor — программа грейда (для сидирования дефолтных шаблонов).

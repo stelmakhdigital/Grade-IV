@@ -64,6 +64,10 @@ CREATE TABLE IF NOT EXISTS reports (
   strengths TEXT NOT NULL DEFAULT '[]',
   weaknesses TEXT NOT NULL DEFAULT '[]',
   recommendations TEXT NOT NULL DEFAULT '[]',
+  verdict TEXT NOT NULL DEFAULT '',
+  grade_gap TEXT NOT NULL DEFAULT '',
+  study_plan_2weeks TEXT NOT NULL DEFAULT '[]',
+  progress_vs_previous TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL
 );
 

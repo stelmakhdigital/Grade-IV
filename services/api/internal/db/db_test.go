@@ -8,7 +8,7 @@ import (
 
 var wantedTables = []string{
 	"users", "sessions", "session_events", "submissions",
-	"whiteboards", "reports", "minutes_ledger",
+	"whiteboards", "reports", "minutes_ledger", "interviewer_profiles",
 }
 
 func TestMigrateSqlite(t *testing.T) {

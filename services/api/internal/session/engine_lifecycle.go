@@ -11,15 +11,43 @@ import (
 	"nhooyr.io/websocket"
 )
 
+// CreateOption — опциональный параметр создания сессии.
+type CreateOption func(*createParams)
+
+type createParams struct {
+	templateID int64
+	profileID  int64
+}
+
+// WithProfile — профиль интервьюера (tone × difficulty, итерация B);
+// влияет только на стиль, не на оценку.
+func WithProfile(profileID int64) CreateOption {
+	return func(p *createParams) { p.profileID = profileID }
+}
+
+// WithTemplate — шаблон интервью (итерация A); 0 — дефолтный шаблон грейда.
+func WithTemplate(templateID int64) CreateOption {
+	return func(p *createParams) { p.templateID = templateID }
+}
+
 // Create создаёт сессию: проверка минут (402-условие), вставка, старт в статусе active.
-func (e *Engine) Create(ctx context.Context, userID int64, grade models.Grade, stack models.Stack) (models.Session, error) {
-	return e.CreateWithTemplate(ctx, userID, grade, stack, 0)
+func (e *Engine) Create(ctx context.Context, userID int64, grade models.Grade, stack models.Stack, opts ...CreateOption) (models.Session, error) {
+	var cp createParams
+	for _, o := range opts {
+		o(&cp)
+	}
+	return e.create(ctx, userID, grade, stack, &cp)
 }
 
 // CreateWithTemplate — создание сессии с шаблоном (итерация A).
 // templateID=0 → дефолтный шаблон грейда (если templates задан); без templates
 // — программа gradeProgram (как раньше). Program фиксируется в сессии.
 func (e *Engine) CreateWithTemplate(ctx context.Context, userID int64, grade models.Grade, stack models.Stack, templateID int64) (models.Session, error) {
+	return e.Create(ctx, userID, grade, stack, WithTemplate(templateID))
+}
+
+func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, stack models.Stack, cp *createParams) (models.Session, error) {
+	templateID := cp.templateID
 	if !grade.Valid() {
 		return models.Session{}, fmt.Errorf("%w: грейд %q", ErrInvalidParams, grade)
 	}
@@ -74,6 +102,7 @@ func (e *Engine) CreateWithTemplate(ctx context.Context, userID int64, grade mod
 		StartedAt:      now,
 		TemplateID:     templateID,
 		Program:        program,
+		ProfileID:      cp.profileID,
 	})
 	if err != nil {
 		return models.Session{}, err
