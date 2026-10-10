@@ -156,6 +156,15 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 		if s == "" {
 			continue
 		}
+		// Комментарии перед ALTER ломают HasPrefix — убираем строки «-- ...».
+		var lines []string
+		for _, ln := range strings.Split(s, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(ln), "--") {
+				continue
+			}
+			lines = append(lines, ln)
+		}
+		s = strings.TrimSpace(strings.Join(lines, "\n"))
 		if strings.HasPrefix(s, "ALTER TABLE") {
 			// SQLite: ADD COLUMN (идемпотентность — проверка колонки); Postgres: IF NOT EXISTS.
 			col := "template_id"

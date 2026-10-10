@@ -4,6 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 )
 
 var wantedTables = []string{
@@ -84,6 +87,55 @@ func TestUserStore(t *testing.T) {
 	}
 	if remaining != 3600 {
 		t.Fatalf("remaining = %d, want 3600", remaining)
+	}
+}
+
+func TestSessionCreateDefaultProfileNoFKViolation(t *testing.T) {
+	conn, dialect, err := Open("sqlite://:memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer conn.Close()
+	if err := Migrate(context.Background(), conn, dialect); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	ctx := context.Background()
+	users := NewUserStore(conn, dialect)
+	u, err := users.CreateUser(ctx, "fk@test.dev", "hash-fk")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	sessions := NewSessionStore(conn, dialect)
+
+	// profile_id=0 / template_id=0 — дефолты, должны стать NULL (без FK-нарушения).
+	m, err := sessions.Create(ctx, models.Session{
+		UserID: u.ID, Grade: models.Grade("middle"), Stack: models.Stack("go"),
+		Stage: models.Stage("voice"), Status: models.Status("active"), StartedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("create с дефолтным profile_id (0): %v", err)
+	}
+	if m.ProfileID != 0 || m.TemplateID != 0 {
+		t.Fatalf("дефолты: ProfileID=%d TemplateID=%d, want 0/0 (NULL)", m.ProfileID, m.TemplateID)
+	}
+
+	// Реальный профиль — должен сохраниться.
+	p, err := NewProfileStore(conn, dialect).Create(ctx, Profile{
+		Name: "Тест", Tone: "strict", Difficulty: "plus", IsPreset: false, CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	m2, err := sessions.Create(ctx, models.Session{
+		UserID: u.ID, Grade: models.Grade("middle"), Stack: models.Stack("go"),
+		Stage: models.Stage("voice"), Status: models.Status("active"),
+		StartedAt: time.Now(), ProfileID: p.ID,
+	})
+	if err != nil {
+		t.Fatalf("create с profile: %v", err)
+	}
+	if m2.ProfileID != p.ID {
+		t.Fatalf("ProfileID = %d, want %d", m2.ProfileID, p.ID)
 	}
 }
 

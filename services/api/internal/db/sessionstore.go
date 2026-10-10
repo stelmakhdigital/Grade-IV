@@ -36,12 +36,16 @@ func (s *SessionStore) Create(ctx context.Context, m models.Session) (models.Ses
 	if m.TemplateID != 0 {
 		templateID = m.TemplateID
 	}
+	var profileID any
+	if m.ProfileID != 0 {
+		profileID = m.ProfileID
+	}
 	res, err := s.db.ExecContext(ctx, s.d.q(`
 		INSERT INTO sessions (user_id, grade, stack, stage, status, duration_limit_s,
 			active_seconds, started_at, template_id, program, profile_id)
 		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`),
 		m.UserID, m.Grade, m.Stack, m.Stage, m.Status, m.DurationLimitS,
-		m.StartedAt.UTC().Format(time.RFC3339), templateID, m.Program, m.ProfileID)
+		m.StartedAt.UTC().Format(time.RFC3339), templateID, m.Program, profileID)
 	if err != nil {
 		return models.Session{}, fmt.Errorf("create session: %w", err)
 	}
