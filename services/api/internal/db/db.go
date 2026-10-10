@@ -22,6 +22,9 @@ var schemaSQLite string
 //go:embed schema_postgres.sql
 var schemaPostgres string
 
+//go:embed schema_interview_templates.sql
+var schemaInterviewTemplates string
+
 // Dialect — диалект СУБД.
 type Dialect string
 
@@ -106,7 +109,58 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	// Шаблоны интервью: общая таблица (оба диалекта) + колонка sessions.template_id.
+	for _, stmt := range strings.Split(schemaInterviewTemplates, ";\n") {
+		s := strings.TrimSpace(stmt)
+		if s == "" {
+			continue
+		}
+		if strings.HasPrefix(s, "ALTER TABLE") {
+			// SQLite: ADD COLUMN (идемпотентность — проверка колонки); Postgres: IF NOT EXISTS.
+			col := "template_id"
+			if strings.Contains(s, "program") {
+				col = "program"
+			}
+			if d == DialectPostgres {
+				s = strings.Replace(s, "ADD COLUMN "+col, "ADD COLUMN IF NOT EXISTS "+col, 1)
+				s = strings.Replace(s, "INTEGER REFERENCES", "BIGINT REFERENCES", 1)
+			} else if columnExists(ctx, dbx, "sessions", col, d) {
+				continue
+			}
+		}
+		if _, err := dbx.ExecContext(ctx, s); err != nil {
+			return fmt.Errorf("migrate interview_templates: %w", err)
+		}
+	}
 	return nil
+}
+
+// columnExists — есть ли колонка в таблице (SQLite: PRAGMA, Postgres: information_schema).
+func columnExists(ctx context.Context, dbx *sql.DB, table, col string, d Dialect) bool {
+	if d == DialectSQLite {
+		rows, err := dbx.QueryContext(ctx, "PRAGMA table_info("+table+")")
+		if err != nil {
+			return false
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var cid int
+			var name, ctype string
+			var notnull, pk int
+			var dflt sql.NullString
+			if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+				return false
+			}
+			if name == col {
+				return true
+			}
+		}
+		return false
+	}
+	var n int
+	err := dbx.QueryRowContext(ctx,
+		"SELECT 1 FROM information_schema.columns WHERE table_name=$1 AND column_name=$2", table, col).Scan(&n)
+	return err == nil
 }
 
 // q переписывает плейсхолдеры ? → $1..$n для postgres.

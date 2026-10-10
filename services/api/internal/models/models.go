@@ -90,6 +90,8 @@ type Session struct {
 	PausedAt       *time.Time
 	StartedAt      time.Time
 	FinishedAt     *time.Time
+	TemplateID     int64 // NULL — дефолтный шаблон грейда (итерация A)
+	Program        string // программа интервью из шаблона (в system-промпт)
 }
 
 // SessionEvent — событие сессии (транскрипт, смена стадии и т.д.).

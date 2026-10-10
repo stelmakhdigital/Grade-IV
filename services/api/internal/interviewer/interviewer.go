@@ -286,8 +286,9 @@ func (i *Interviewer) context(ctx context.Context, sessionID int64, userMsg stri
 }
 
 // buildMessages — system-промпт + последние реплики + текущий ход.
+// Программа — из сессии (шаблон, итерация A); пустая — дефолтная gradeProgram.
 func (i *Interviewer) buildMessages(sess models.Session, userMsg string, images ...string) []llm.Message {
-	msgs := []llm.Message{{Role: llm.RoleSystem, Content: SystemPrompt(sess.Grade, string(sess.Stack), sess.Stage)}}
+	msgs := []llm.Message{{Role: llm.RoleSystem, Content: SystemPromptWithProgram(sess.Grade, string(sess.Stack), sess.Stage, sess.Program)}}
 	msgs = append(msgs, i.transcript(sess.ID, i.maxHistory)...)
 	msg := llm.Message{Role: llm.RoleUser, Content: userMsg}
 	if len(images) > 0 {

@@ -155,8 +155,26 @@ export function me(): Promise<MeResult> {
 
 // ---------------------------------------------------------------- sessions
 
-export function createSession(grade: Grade, stack: Stack): Promise<Session> {
-  return request<Session>('/sessions', { body: { grade, stack } });
+export interface InterviewTemplate {
+  id: number;
+  name: string;
+  grade: string;
+  stack: string;
+  duration_s: number;
+  blocks: { title: string; focus: string; question_count: number }[];
+  is_default: boolean;
+}
+
+export function listTemplates(grade: Grade, stack: Stack): Promise<InterviewTemplate[]> {
+  return request<{ templates: InterviewTemplate[] }>(
+    `/templates?grade=${grade}&stack=${stack}`, { auth: true },
+  ).then((d) => d.templates);
+}
+
+export function createSession(grade: Grade, stack: Stack, templateId?: number): Promise<Session> {
+  const body: Record<string, unknown> = { grade, stack };
+  if (templateId) body.template_id = templateId;
+  return request<Session>('/sessions', { body });
 }
 
 export function listSessions(): Promise<Session[]> {

@@ -8,8 +8,10 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
   createSession,
   listSessions,
+  listTemplates,
   ApiError,
   type Grade,
+  type InterviewTemplate,
   type Session,
   type Stack,
 } from '../api';
@@ -40,6 +42,8 @@ export function CabinetView() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [grade, setGrade] = useState<Grade>('middle');
   const [stack, setStack] = useState<Stack>('go');
+  const [templates, setTemplates] = useState<InterviewTemplate[]>([]);
+  const [templateId, setTemplateId] = useState<number | undefined>(undefined);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
 
@@ -56,6 +60,21 @@ export function CabinetView() {
     void load();
   }, [load]);
 
+  // Шаблоны интервью (итерация A): грузим для выбранного грейда/стека.
+  useEffect(() => {
+    let cancelled = false;
+    listTemplates(grade, stack)
+      .then((t) => {
+        if (cancelled) return;
+        setTemplates(t);
+        setTemplateId(t.find((x) => x.is_default)?.id ?? t[0]?.id);
+      })
+      .catch(() => {
+        if (!cancelled) setTemplates([]);
+      });
+    return () => { cancelled = true; };
+  }, [grade, stack]);
+
 
   const onStart = async (e: FormEvent) => {
     e.preventDefault();
@@ -63,7 +82,7 @@ export function CabinetView() {
     setStarting(true);
     setStartError(null);
     try {
-      const s = await createSession(grade, stack);
+      const s = await createSession(grade, stack, templateId);
       window.location.hash = sessionPath(s.id);
     } catch (err) {
       setStartError(apiErrorMessage(err));
@@ -113,6 +132,18 @@ export function CabinetView() {
               ))}
             </select>
           </label>
+          {templates.length > 1 && (
+            <label className="field">
+              <span>Шаблон интервью</span>
+              <select value={templateId ?? ''} onChange={(e) => setTemplateId(Number(e.target.value))}>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}{t.is_default ? ' (по умолчанию)' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {startError !== null && (
             <p className="form-error" role="alert">
               {startError}

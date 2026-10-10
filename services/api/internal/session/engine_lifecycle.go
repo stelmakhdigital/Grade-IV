@@ -6,12 +6,20 @@ import (
 	"math"
 	"time"
 
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 	"nhooyr.io/websocket"
 )
 
 // Create создаёт сессию: проверка минут (402-условие), вставка, старт в статусе active.
 func (e *Engine) Create(ctx context.Context, userID int64, grade models.Grade, stack models.Stack) (models.Session, error) {
+	return e.CreateWithTemplate(ctx, userID, grade, stack, 0)
+}
+
+// CreateWithTemplate — создание сессии с шаблоном (итерация A).
+// templateID=0 → дефолтный шаблон грейда (если templates задан); без templates
+// — программа gradeProgram (как раньше). Program фиксируется в сессии.
+func (e *Engine) CreateWithTemplate(ctx context.Context, userID int64, grade models.Grade, stack models.Stack, templateID int64) (models.Session, error) {
 	if !grade.Valid() {
 		return models.Session{}, fmt.Errorf("%w: грейд %q", ErrInvalidParams, grade)
 	}
@@ -33,6 +41,29 @@ func (e *Engine) Create(ctx context.Context, userID int64, grade models.Grade, s
 	case e.sessionLimitS < 0:
 		limit = 0 // SESSION_LIMIT_S=0/off — без ограничения по времени
 	}
+	// Шаблон: явный id или дефолтный грейда (итерация A).
+	var program string
+	if e.templates != nil {
+		var tpl *db.Template
+		if templateID > 0 {
+			tpl, err = e.templates.Get(ctx, templateID)
+			if err != nil {
+				return models.Session{}, err
+			}
+			if tpl == nil || tpl.Grade != grade {
+				return models.Session{}, fmt.Errorf("%w: шаблон %d не для грейда %s", ErrInvalidParams, templateID, grade)
+			}
+		} else {
+			tpl, err = e.templates.Default(ctx, grade, string(stack))
+			if err != nil {
+				return models.Session{}, err
+			}
+		}
+		if tpl != nil {
+			program = tpl.ProgramString()
+			templateID = tpl.ID
+		}
+	}
 	m, err := e.store.Create(ctx, models.Session{
 		UserID:         userID,
 		Grade:          grade,
@@ -41,6 +72,8 @@ func (e *Engine) Create(ctx context.Context, userID int64, grade models.Grade, s
 		Status:         models.StatusActive,
 		DurationLimitS: limit,
 		StartedAt:      now,
+		TemplateID:     templateID,
+		Program:        program,
 	})
 	if err != nil {
 		return models.Session{}, err

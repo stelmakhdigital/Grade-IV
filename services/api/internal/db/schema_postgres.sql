@@ -76,3 +76,20 @@ CREATE TABLE IF NOT EXISTS minutes_ledger (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ledger_user ON minutes_ledger(user_id);
+
+-- Шаблоны интервью (настраиваемые планы под грейды, 2026-10-09).
+CREATE TABLE IF NOT EXISTS interview_templates (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name TEXT NOT NULL,
+  grade TEXT NOT NULL,
+  stack TEXT NOT NULL,
+  duration_s INTEGER NOT NULL,
+  blocks TEXT NOT NULL,
+  is_default BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_templates_grade_stack ON interview_templates(grade, stack);
+
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS template_id BIGINT REFERENCES interview_templates(id);
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS program TEXT NOT NULL DEFAULT '';

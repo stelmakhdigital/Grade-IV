@@ -165,5 +165,302 @@
       "solution.py": "import time\n\n\nclass RateLimiter:\n    \"\"\"Ограничитель «bucket с токенами» ёмкости 1.\n\n    Args:\n        rate_per_sec: токенов в секунду.\n        now: источник времени (по умолчанию time.monotonic) — для тестов.\n    \"\"\"\n\n    def __init__(self, rate_per_sec: float, now=None):\n        # TODO: реализуйте\n        raise NotImplementedError\n\n    def allow(self) -> bool:\n        \"\"\"Try consume a token.\"\"\"\n        raise NotImplementedError  # TODO: реализуйте\n",
       "test_solution.py": "from solution import RateLimiter\n\n\nclass Clock:\n    def __init__(self):\n        self.t = 0.0\n\n    def __call__(self):\n        return self.t\n\n    def advance(self, dt):\n        self.t += dt\n\n\ndef test_rate_limiter():\n    clk = Clock()\n    rl = RateLimiter(rate_per_sec=2.0, now=clk)\n    assert rl.allow() is True      # стартовый токен\n    assert rl.allow() is False     # бакет пуст\n    clk.advance(0.5)               # 2.0 * 0.5 = 1 токен\n    assert rl.allow() is True\n    assert rl.allow() is False\n    clk.advance(10.0)              # переполнение ограничен ёмкостью 1\n    assert rl.allow() is True\n    assert rl.allow() is False\n"
     }
+  },
+  {
+    "id": "go-longest-common-prefix",
+    "stack": "go",
+    "grades": [
+      "junior"
+    ],
+    "title": "Наибольший общий префикс",
+    "statement": "Реализуйте LongestCommonPrefix(strs): наибольший общий префикс набора строк; если префикса нет или набор пуст — пустая строка.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// LongestCommonPrefix возвращает наибольший общий префикс набора строк.\n// Если общего префикса нет или набор пуст — пустая строка.\nfunc LongestCommonPrefix(strs []string) string {\n\treturn \"\" // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport \"testing\"\n\nfunc TestLongestCommonPrefix(t *testing.T) {\n\tcases := []struct {\n\t\tin   []string\n\t\twant string\n\t}{\n\t\t{nil, \"\"},\n\t\t{[]string{}, \"\"},\n\t\t{[]string{\"a\"}, \"a\"},\n\t\t{[]string{\"flower\", \"flow\", \"flight\"}, \"fl\"},\n\t\t{[]string{\"dog\", \"racecar\", \"car\"}, \"\"},\n\t\t{[]string{\"ab\", \"a\"}, \"a\"},\n\t\t{[]string{\"abc\", \"abc\", \"abc\"}, \"abc\"},\n\t\t{[]string{\"привет\", \"привет2\", \"прив\"}, \"прив\"},\n\t}\n\tfor i, c := range cases {\n\t\tif got := LongestCommonPrefix(c.in); got != c.want {\n\t\t\tt.Errorf(\"case %d: LongestCommonPrefix(%v) = %q, want %q\", i, c.in, got, c.want)\n\t\t}\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-most-frequent-word",
+    "stack": "go",
+    "grades": [
+      "junior"
+    ],
+    "title": "Самое частое слово",
+    "statement": "Реализуйте MostFrequentWord(text): самое частое слово (регистр игнорируется, словом считается последовательность букв, всё остальное — разделители); при равенстве частот — лексикографически меньшее; если слов нет — пустая строка.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// MostFrequentWord возвращает самое частое слово в тексте: регистр игнорируется,\n// словом считается последовательность латинских или кириллических букв (все прочие символы — разделители).\n// При равенстве частот возвращает слово, меньшее в лексикографическом порядке.\n// Если слов нет — пустая строка.\nfunc MostFrequentWord(text string) string {\n\treturn \"\" // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport \"testing\"\n\nfunc TestMostFrequentWord(t *testing.T) {\n\tcases := []struct {\n\t\tin   string\n\t\twant string\n\t}{\n\t\t{\"\", \"\"},\n\t\t{\"!!! ???\", \"\"},\n\t\t{\"the cat and the dog and the cat\", \"the\"},\n\t\t{\"Go, go! GO. go\", \"go\"},\n\t\t{\"apple banana apple cherry banana\", \"apple\"},\n\t\t{\"кот СОН КоТ сон\", \"кот\"},\n\t\t{\"a b a B\", \"a\"},\n\t}\n\tfor i, c := range cases {\n\t\tif got := MostFrequentWord(c.in); got != c.want {\n\t\t\tt.Errorf(\"case %d: MostFrequentWord(%q) = %q, want %q\", i, c.in, got, c.want)\n\t\t}\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-parse-kv",
+    "stack": "go",
+    "grades": [
+      "junior"
+    ],
+    "title": "Парсинг ключ=значение",
+    "statement": "Реализуйте ParseKV(s): разбор токенов «ключ=значение», разделённых пробелами, в мапу; токены без «=» и с пустым ключом пропускаются, значение — после ПЕРВОГО «=», при повторе ключа побеждает последнее; без токенов — пустая не-nil мапа.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// ParseKV разбирает строку из токенов вида \"ключ=значение\", разделённых пробелами (одним или несколькими).\n// Токены без символа \"=\" и токены с пустым ключом пропускаются. Значение — всё после ПЕРВОГО \"=\".\n// При повторе ключа последнее значение побеждает. Возвращает пустую (не nil) мапу, если токенов не было.\nfunc ParseKV(s string) map[string]string {\n\treturn nil // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport (\n\t\"reflect\"\n\t\"testing\"\n)\n\nfunc TestParseKV(t *testing.T) {\n\tcases := []struct {\n\t\tin   string\n\t\twant map[string]string\n\t}{\n\t\t{\"\", map[string]string{}},\n\t\t{\"   \", map[string]string{}},\n\t\t{\"a=1 b=2\", map[string]string{\"a\": \"1\", \"b\": \"2\"}},\n\t\t{\"a=1 a=2\", map[string]string{\"a\": \"2\"}},\n\t\t{\"a=1 b c=2\", map[string]string{\"a\": \"1\", \"c\": \"2\"}},\n\t\t{\"=v a=\", map[string]string{\"a\": \"\"}},\n\t\t{\"a==b\", map[string]string{\"a\": \"=b\"}},\n\t\t{\"  x=  y=3  \", map[string]string{\"x\": \"\", \"y\": \"3\"}},\n\t}\n\tfor i, c := range cases {\n\t\tgot := ParseKV(c.in)\n\t\tif !reflect.DeepEqual(got, c.want) {\n\t\t\tt.Errorf(\"case %d: ParseKV(%q) = %#v, want %#v\", i, c.in, got, c.want)\n\t\t}\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-merge-k-sorted",
+    "stack": "go",
+    "grades": [
+      "middle"
+    ],
+    "title": "Слияние k отсортированных слайсов",
+    "statement": "Реализуйте MergeKSorted(lists): объедините k отсортированных по возрастанию слайсов в один отсортированный слайс (k может быть большим — перебором по O(n²) не считается); без элементов — пустой не-nil слайс.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// MergeKSorted объединяет k отсортированных (по возрастанию) слайсов в один отсортированный слайс.\n// Если элементов нет, возвращает пустой (не nil) слайс.\nfunc MergeKSorted(lists [][]int) []int {\n\treturn nil // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport (\n\t\"reflect\"\n\t\"sort\"\n\t\"testing\"\n)\n\nfunc TestMergeKSorted(t *testing.T) {\n\tcases := []struct {\n\t\tin   [][]int\n\t\twant []int\n\t}{\n\t\t{nil, []int{}},\n\t\t{[][]int{}, []int{}},\n\t\t{[][]int{nil}, []int{}},\n\t\t{[][]int{[]int{1, 3, 5}}, []int{1, 3, 5}},\n\t\t{[][]int{[]int{1, 4, 7}, []int{2, 5}, []int{3, 6, 8, 9}}, []int{1, 2, 3, 4, 5, 6, 7, 8, 9}},\n\t\t{[][]int{[]int{-5, -1}, []int{-3, 0}, []int{}}, []int{-5, -3, -1, 0}},\n\t\t{[][]int{[]int{2, 2}, []int{1, 2, 3}}, []int{1, 2, 2, 2, 3}},\n\t}\n\tfor i, c := range cases {\n\t\tgot := MergeKSorted(c.in)\n\t\tif !reflect.DeepEqual(got, c.want) {\n\t\t\tt.Errorf(\"case %d: MergeKSorted(%v) = %v, want %v\", i, c.in, got, c.want)\n\t\t}\n\t\t// страховка: результат обязан быть отсортирован\n\t\tif !sort.IntsAreSorted(got) {\n\t\t\tt.Errorf(\"case %d: result not sorted: %v\", i, got)\n\t\t}\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-top-k-freq",
+    "stack": "go",
+    "grades": [
+      "middle"
+    ],
+    "title": "Top-K частых элементов",
+    "statement": "Реализуйте TopKFrequent(nums, k): k наиболее частых элементов, отсортированных по убыванию частоты, при равенстве частот — по возрастанию значения; k не превышает число уникальных элементов.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// TopKFrequent возвращает k наиболее частых элементов nums, отсортированных по убыванию частоты.\n// При равенстве частот — по возрастанию значения. Гарантировано, что k не превышает число уникальных элементов.\nfunc TopKFrequent(nums []int, k int) []int {\n\treturn nil // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport (\n\t\"reflect\"\n\t\"testing\"\n)\n\nfunc TestTopKFrequent(t *testing.T) {\n\tcases := []struct {\n\t\tnums []int\n\t\tk    int\n\t\twant []int\n\t}{\n\t\t{[]int{1, 1, 1, 2, 2, 3}, 2, []int{1, 2}},\n\t\t{[]int{1}, 1, []int{1}},\n\t\t{[]int{4, 3, 2, 1}, 2, []int{1, 2}},\n\t\t{[]int{5, 5, 2, 2, 3, 3, 4}, 3, []int{2, 3, 5}},\n\t\t{[]int{2, 2, 2, 1, 1, 3}, 1, []int{2}},\n\t\t{[]int{-3, -3, -3, 7, 7, 0}, 2, []int{-3, 7}},\n\t}\n\tfor i, c := range cases {\n\t\tgot := TopKFrequent(c.nums, c.k)\n\t\tif !reflect.DeepEqual(got, c.want) {\n\t\t\tt.Errorf(\"case %d: TopKFrequent(%v, %d) = %v, want %v\", i, c.nums, c.k, got, c.want)\n\t\t}\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-token-bucket",
+    "stack": "go",
+    "grades": [
+      "middle"
+    ],
+    "title": "Rate-limiter: ведро с токенами",
+    "statement": "Реализуйте TokenBucketAllow(capacity, refillPerSec, events): ведро на capacity токенов, пополнение refillPerSec/сек (сначала полное); для каждого времени запроса (неубывающие) — true, если токенов ≥ 1 (запрос забирает 1), иначе false.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// TokenBucketAllow моделирует rate-limiter «ведро с токенами» (token bucket).\n// Вместимость — capacity, пополнение — refillPerSec токенов в секунду; ведро изначально полное.\n// events — времена запросов в секундах, строго неубывающие. Ответ true, если на момент запроса\n// в ведре было не менее 1 токена (запрос забирает 1 токен), иначе false.\nfunc TokenBucketAllow(capacity int, refillPerSec float64, events []float64) []bool {\n\treturn nil // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport (\n\t\"reflect\"\n\t\"testing\"\n)\n\nfunc TestTokenBucketAllow(t *testing.T) {\n\tcases := []struct {\n\t\tcap   int\n\t\trate  float64\n\t\tevents []float64\n\t\twant  []bool\n\t}{\n\t\t{2, 1.0, []float64{0, 0, 0.5, 1.0, 1.5}, []bool{true, true, false, true, false}},\n\t\t{1, 0.0, []float64{0, 1, 2}, []bool{true, false, false}},\n\t\t{3, 4.0, []float64{0, 0.1, 0.2, 0.3}, []bool{true, true, true, true}},\n\t\t{2, 0.0, []float64{0, 0, 0, 0, 0}, []bool{true, true, false, false, false}},\n\t\t{4, 2.0, []float64{0, 1, 2, 3, 4}, []bool{true, true, true, true, true}},\n\t}\n\tfor i, c := range cases {\n\t\tgot := TokenBucketAllow(c.cap, c.rate, c.events)\n\t\tif !reflect.DeepEqual(got, c.want) {\n\t\t\tt.Errorf(\"case %d: TokenBucketAllow(%d, %v, %v) = %v, want %v\", i, c.cap, c.rate, c.events, got, c.want)\n\t\t}\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-worker-pool",
+    "stack": "go",
+    "grades": [
+      "senior"
+    ],
+    "title": "Пул воркеров: MapParallel",
+    "statement": "Реализуйте MapParallel(items, n, f): примените f к каждому элементу items пулом не более чем из n горутины (n ≥ 1) и верните результаты в исходном порядке; f чистая.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// MapParallel применяет f к каждому элементу items с пулом из n воркеров и возвращает\n// результаты в исходном порядке. n ≥ 1. Функция f чистая (без побочных эффектов).\nfunc MapParallel[T any](items []T, n int, f func(T) T) []T {\n\treturn nil // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport (\n\t\"reflect\"\n\t\"testing\"\n)\n\nfunc square(x int) int { return x * x }\n\nfunc TestMapParallel(t *testing.T) {\n\tin := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}\n\twant := []int{0, 1, 4, 9, 16, 25, 36, 49, 64, 81}\n\tfor _, n := range []int{1, 3, 10, 100} {\n\t\tgot := MapParallel(in, n, square)\n\t\tif !reflect.DeepEqual(got, want) {\n\t\t\tt.Errorf(\"n=%d: MapParallel = %v, want %v\", n, got, want)\n\t\t}\n\t}\n\tif got := MapParallel([]int{}, 4, square); !reflect.DeepEqual(got, []int{}) {\n\t\tt.Errorf(\"empty: got %v, want []\", got)\n\t}\n\t// f с эффектом порядка не проверяем; проверяем, что порядок именно исходный\n\trev := func(x int) int { return -x }\n\tif got := MapParallel([]int{5, -3, 0}, 2, rev); !reflect.DeepEqual(got, []int{-5, 3, 0}) {\n\t\tt.Errorf(\"signs: got %v\", got)\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-ttl-cache",
+    "stack": "go",
+    "grades": [
+      "senior"
+    ],
+    "title": "Кэш с TTL",
+    "statement": "Реализуйте TTLCache (NewTTLCache, Put(key, value, now, ttlSec), Get(key, now)): запись живёт, пока now < putTime + ttlSec (ttl=0 — сразу мёртва); Put обновляет запись; валидность определяется ТОЛЬКО по putTime и ttlSec — без удаления при чтении и при «откате» now.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// TTLCache — кэш с временем жизни записей. Время — «внешние» секунды (float), передаётся явно.\ntype TTLCache struct {\n\t// TODO: поля по вашему усмотрению\n}\n\n// NewTTLCache создаёт пустой кэш.\nfunc NewTTLCache() *TTLCache {\n\treturn &TTLCache{} // TODO\n}\n\n// Put сохраняет значение под ключом на ttlSec секунд, начиная с момента now (повторный Put обновляет).\nfunc (c *TTLCache) Put(key string, value string, now, ttlSec float64) {\n\t// TODO: реализуйте\n}\n\n// Get возвращает значение и true, если запись существует и НЕ просрочена (живёт, пока now < putTime + ttlSec),\n// иначе \"\", false.\nfunc (c *TTLCache) Get(key string, now float64) (string, bool) {\n\treturn \"\", false // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport \"testing\"\n\nfunc mustGet(t *testing.T, c *TTLCache, key string, now float64, want string) {\n\tt.Helper()\n\tgot, ok := c.Get(key, now)\n\tif !ok || got != want {\n\t\tt.Fatalf(\"Get(%q, %v) = (%q, %v), want (%q, true)\", key, now, got, ok, want)\n\t}\n}\n\nfunc mustMiss(t *testing.T, c *TTLCache, key string, now float64) {\n\tt.Helper()\n\tif got, ok := c.Get(key, now); ok {\n\t\tt.Fatalf(\"Get(%q, %v) = (%q, true), want miss\", key, now, got)\n\t}\n}\n\nfunc TestTTLCache(t *testing.T) {\n\tc := NewTTLCache()\n\tc.Put(\"a\", \"1\", 0, 1)\n\tmustGet(t, c, \"a\", 0, \"1\")\n\tmustGet(t, c, \"a\", 0.99, \"1\")\n\tmustMiss(t, c, \"a\", 1)      // ровно putTime+ttl — уже просрочено\n\tmustGet(t, c, \"a\", 0.9, \"1\") // время может не монотонить в тесте: валидность — точечно\n\tc.Put(\"a\", \"2\", 0.5, 2)\n\tmustGet(t, c, \"a\", 1, \"2\") // refresh победил\n\tmustMiss(t, c, \"a\", 2.5)\n\tc.Put(\"b\", \"x\", 10, 5)\n\tmustGet(t, c, \"b\", 12, \"x\")\n\tmustMiss(t, c, \"b\", 15)\n\tmustMiss(t, c, \"нет\", 100) // ключа не было\n\tc.Put(\"c\", \"0ttl\", 5, 0)\n\tmustMiss(t, c, \"c\", 5) // ttl=0 — сразу мёртв\n}\n"
+    }
+  },
+  {
+    "id": "go-circuit-breaker",
+    "stack": "go",
+    "grades": [
+      "senior"
+    ],
+    "title": "Circuit breaker",
+    "statement": "Реализуйте Breaker (NewBreaker(threshold, openSec), Record(success, now) bool): closed → open после threshold последовательных неудач; open → half-open, когда now - openedAt ≥ openSec (один пробный запрос: успех → closed, неудача → снова open с новым openedAt); в open запросы отклоняются.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// Breaker — circuit breaker с состояниями: closed (обычный режим), open (отказы),\n// half-open (один пробный запрос).\ntype Breaker struct {\n\t// TODO: поля по вашему усмотрению\n}\n\n// NewBreaker создаёт breaker в closed: threshold — сколько ПОСЛЕДОВАТЕЛЬНЫХ неудач переводит\n// в open, openSec — сколько секунд проведённых в open нужно для перехода в half-open.\nfunc NewBreaker(threshold int, openSec float64) *Breaker {\n\treturn &Breaker{} // TODO\n}\n\n// Record регистрирует запрос в момент now и возвращает, ДОПУЩЕН ли он:\n//   - closed: разрешён; успех сбрасывает счётчик неудач, неудача прибавляет;\n//     при threshold-й последовательной неудаче переходим в open (openedAt = now);\n//   - open: если now - openedAt >= openSec — переходим в half-open и разрешаем пробный запрос\n//     (успех → closed, неудача → снова open с openedAt = now); иначе запрос отклоняется;\n//   - half-open: разрешён только один пробный запрос (см. open).\nfunc (b *Breaker) Record(success bool, now float64) bool {\n\treturn false // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport (\n\t\"reflect\"\n\t\"testing\"\n)\n\nfunc runBreaker(threshold int, openSec float64, calls []struct {\n\tsuccess bool\n\tnow     float64\n}) []bool {\n\tb := NewBreaker(threshold, openSec)\n\tout := make([]bool, len(calls))\n\tfor i, c := range calls {\n\t\tout[i] = b.Record(c.success, c.now)\n\t}\n\treturn out\n}\n\nfunc TestCircuitBreaker(t *testing.T) {\n\ttype call = struct {\n\t\tsuccess bool\n\t\tnow     float64\n\t}\n\tcases := []struct {\n\t\tthresh   int\n\t\topenSec  float64\n\t\tcalls    []call\n\t\twant     []bool\n\t}{\n\t\t{\n\t\t\t2, 1.0,\n\t\t\t[]call{{true, 0}, {true, 0}, {false, 0}, {false, 0}},\n\t\t\t[]bool{true, true, true, true},\n\t\t},\n\t\t{\n\t\t\t2, 1.0,\n\t\t\t[]call{{false, 0}, {false, 0}, {false, 0.5}, {false, 1.0}, {false, 1.5}, {true, 2.0}, {false, 2.0}, {false, 2.0}},\n\t\t\t[]bool{true, true, false, true, false, true, true, true},\n\t\t},\n\t\t{\n\t\t\t1, 0.5,\n\t\t\t[]call{{false, 0}, {true, 0.4}, {true, 0.5}, {false, 0.5}},\n\t\t\t[]bool{true, false, true, true},\n\t\t},\n\t\t{\n\t\t\t3, 2.0,\n\t\t\t[]call{{false, 0}, {true, 1}, {false, 2}, {false, 3}, {false, 4}, {false, 5.9}, {false, 6.0}},\n\t\t\t[]bool{true, true, true, true, true, false, true},\n\t\t},\n\t}\n\tfor i, c := range cases {\n\t\tgot := runBreaker(c.thresh, c.openSec, c.calls)\n\t\tif !reflect.DeepEqual(got, c.want) {\n\t\t\tt.Errorf(\"case %d: got %v, want %v\", i, got, c.want)\n\t\t}\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-consistent-hash",
+    "stack": "go",
+    "grades": [
+      "staff"
+    ],
+    "title": "Кольцо согласованного хеширования",
+    "statement": "Реализуйте Ring (NewRing(vnodesPerNode), Add(node), Get(key)): кольцо consistent hashing с виртуальными узлами; Get — детерминирован, не зависит от порядка Add, при добавлении узла менять владельца должен только заметный меньшинство ключей; пустое кольцо — \"\".",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// Ring — кольцо согласованного хеширования (consistent hashing) с виртуальными узлами:\n// каждый реальный узел занимает vnodesPerNode виртуальных позиций, равномерно покрывающих кольцо.\ntype Ring struct {\n\t// TODO: поля по вашему усмотрению\n}\n\n// NewRing создаёт пустое кольцо: vnodesPerNode виртуальных узлов на каждый реальный.\nfunc NewRing(vnodesPerNode int) *Ring {\n\treturn &Ring{} // TODO\n}\n\n// Add регистрирует узел (повторный Add узла игнорируется).\nfunc (r *Ring) Add(node string) {\n\t// TODO: реализуйте\n}\n\n// Get возвращает узел, отвечающий за key (первая виртуальная позиция кольца не меньше хэша key).\n// Кольцо пустое — \"\". Гарантии: результат детерминирован, НЕ зависит от порядка Add;\n// добавление нового узела должно менять владельца только части ключей.\nfunc (r *Ring) Get(key string) string {\n\treturn \"\" // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport (\n\t\"testing\"\n)\n\nfunc TestConsistentHashEmpty(t *testing.T) {\n\tr := NewRing(50)\n\tif got := r.Get(\"anything\"); got != \"\" {\n\t\tt.Errorf(\"empty ring: Get = %q, want \\\"\\\"\", got)\n\t}\n}\n\nfunc TestConsistentHashSingleNode(t *testing.T) {\n\tr := NewRing(50)\n\tr.Add(\"n1\")\n\tfor i := 0; i < 100; i++ {\n\t\tif got := r.Get(\"key\" + itoa(i)); got != \"n1\" {\n\t\t\tt.Fatalf(\"single node: Get(key%d) = %q, want n1\", i, got)\n\t\t}\n\t}\n}\n\nfunc itoa(i int) string {\n\tif i == 0 {\n\t\treturn \"0\"\n\t}\n\ts := \"\"\n\tfor i > 0 {\n\t\ts = string(rune('0'+i%10)) + s\n\t\ti /= 10\n\t}\n\treturn s\n}\n\nfunc TestConsistentHashMapping(t *testing.T) {\n\tr := NewRing(100)\n\tnodes := map[string]bool{\"a\": true, \"b\": true, \"c\": true}\n\tfor n := range nodes {\n\t\tr.Add(n)\n\t}\n\tseen := map[string]int{}\n\tfor i := 0; i < 1000; i++ {\n\t\tg := r.Get(\"key-\" + itoa(i))\n\t\tif !nodes[g] {\n\t\t\tt.Fatalf(\"key %d mapped to unknown node %q\", i, g)\n\t\t}\n\t\tseen[g]++\n\t}\n\tfor n := range nodes {\n\t\tif seen[n] == 0 {\n\t\t\tt.Fatalf(\"node %q got no keys, distribution: %v\", n, seen)\n\t\t}\n\t}\n}\n\nfunc TestConsistentHashStability(t *testing.T) {\n\tr := NewRing(100)\n\tfor _, n := range []string{\"a\", \"b\", \"c\"} {\n\t\tr.Add(n)\n\t}\n\tbefore := make(map[string]string, 1000)\n\tfor i := 0; i < 1000; i++ {\n\t\tk := \"key-\" + itoa(i)\n\t\tbefore[k] = r.Get(k)\n\t}\n\tr.Add(\"d\")\n\tchanged := 0\n\tfor k, old := range before {\n\t\tif r.Get(k) != old {\n\t\t\tchanged++\n\t\t}\n\t}\n\t// при добавлении 4-го узла «справедливо» меняет владельца ~1/4 ключей; требуем заметно меньше половины\n\tif changed > 500 {\n\t\tt.Errorf(\"rebalancing moved %d/1000 keys, want <= 500\", changed)\n\t}\n\tif changed == 0 {\n\t\tt.Errorf(\"no key changed owner after adding node — impl suspicious\")\n\t}\n}\n\nfunc TestConsistentHashOrderIndependent(t *testing.T) {\n\tr1, r2 := NewRing(64), NewRing(64)\n\tfor _, n := range []string{\"x\", \"y\", \"z\"} {\n\t\tr1.Add(n)\n\t}\n\tfor _, n := range []string{\"z\", \"y\", \"x\"} {\n\t\tr2.Add(n)\n\t}\n\tfor i := 0; i < 500; i++ {\n\t\tk := \"k\" + itoa(i)\n\t\tif r1.Get(k) != r2.Get(k) {\n\t\t\tt.Fatalf(\"order matters: %s -> %q vs %q\", k, r1.Get(k), r2.Get(k))\n\t\t}\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-shard-scheduler",
+    "stack": "go",
+    "grades": [
+      "staff"
+    ],
+    "title": "Плановик задач с зависимостями",
+    "statement": "Реализуйте SchedulePlan(jobs): бесконечные воркеры, каждая задача 1 такт; на каждом такте запускаются ВСЕ готовые задачи (все Deps уже запущены) — сначала по убыванию Priority, при равенстве по возрастанию ID; верните последовательность ID запусков. Циклов в зависимостях нет.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// Job — задача: ID (уникален), Priority (больше — важнее), Deps — ID задач,\n// которые должны ЗАПУСТИТЬСЯ перед ней. Циклов в зависимостях нет.\ntype Job struct {\n\tID       int\n\tPriority int\n\tDeps     []int\n}\n\n// SchedulePlan возвращает порядок ЗАПУСКА всех задач. Работают воркеры без ограничений:\n// на каждом такте (все задачи занимают 1 такт) запускаются ВСЕ готовые задачи\n// (все зависимости уже запущены) — начиная с наибольшего Priority, при равенстве — с меньшим ID.\n// Возвращаемый слайс — последовательность ID по тактам, в порядке запуска внутри такта.\nfunc SchedulePlan(jobs []Job) []int {\n\treturn nil // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport (\n\t\"reflect\"\n\t\"testing\"\n)\n\nfunc TestSchedulePlan(t *testing.T) {\n\tjobs := []Job{\n\t\t{ID: 1, Priority: 1},\n\t\t{ID: 2, Priority: 0, Deps: []int{1}},\n\t\t{ID: 3, Priority: 10},\n\t\t{ID: 4, Priority: 0, Deps: []int{3}},\n\t}\n\t// такт 1: готовы 1(p1), 3(p10) → [3, 1]; такт 2: 2, 4 готовы → [2, 4]\n\tif got := SchedulePlan(jobs); !reflect.DeepEqual(got, []int{3, 1, 2, 4}) {\n\t\tt.Errorf(\"case1: %v, want [3 1 2 4]\", got)\n\t}\n\t// все независимы, одинаковый приоритет → по возрастанию ID\n\tjobs = []Job{{ID: 5}, {ID: 2, Priority: 7}, {ID: 9}}\n\tif got := SchedulePlan(jobs); !reflect.DeepEqual(got, []int{2, 5, 9}) {\n\t\tt.Errorf(\"case2: %v, want [2 5 9]\", got)\n\t}\n\t// цепочка\n\tjobs = []Job{{ID: 1}, {ID: 2, Deps: []int{1}}, {ID: 3, Deps: []int{2}}}\n\tif got := SchedulePlan(jobs); !reflect.DeepEqual(got, []int{1, 2, 3}) {\n\t\tt.Errorf(\"case3: %v, want [1 2 3]\", got)\n\t}\n\t// алмаз: 1 → {2, 3} → 4; 3 важнее 2\n\tjobs = []Job{\n\t\t{ID: 1},\n\t\t{ID: 2, Priority: 1, Deps: []int{1}},\n\t\t{ID: 3, Priority: 5, Deps: []int{1}},\n\t\t{ID: 4, Deps: []int{2, 3}},\n\t}\n\tif got := SchedulePlan(jobs); !reflect.DeepEqual(got, []int{1, 3, 2, 4}) {\n\t\tt.Errorf(\"case4: %v, want [1 3 2 4]\", got)\n\t}\n\t// готовность зависит от ЗАПУСКА всех деппов: 5 ждёт и 2, и 3\n\tjobs = []Job{\n\t\t{ID: 1},\n\t\t{ID: 2, Priority: 9, Deps: []int{1}},\n\t\t{ID: 3, Deps: []int{1}},\n\t\t{ID: 5, Priority: 100, Deps: []int{2, 3}},\n\t}\n\t// такт 1: [1]; такт 2: 2(p9), 3(p0) → [2,3]; такт 3: [5]\n\tif got := SchedulePlan(jobs); !reflect.DeepEqual(got, []int{1, 2, 3, 5}) {\n\t\tt.Errorf(\"case5: %v, want [1 2 3 5]\", got)\n\t}\n\tif got := SchedulePlan(nil); !reflect.DeepEqual(got, []int{}) {\n\t\tt.Errorf(\"empty: %v, want []\", got)\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "py-rle",
+    "stack": "python",
+    "grades": [
+      "junior"
+    ],
+    "title": "Кодирование с повтором (RLE)",
+    "statement": "Реализуйте rle_encode(s) (\"aaabbc\" → \"a3b2c1\", блоки: символ + счётчик) и rle_decode(s) — обратное преобразование корректной кодированной строки; входные символы блоков не являются цифрами.",
+    "files": {
+      "solution.py": "def rle_encode(s: str) -> str:\n    \"\"\"Кодирование: последовательность одинаковых символов -> символ + счётчик.\n\n    Пример: \"aaabbc\" -> \"a3b2c1\". Строка -> кодирование одной блока.\n    Символы в блоке гарантированно не являются цифрами.\n    \"\"\"\n    return \"\"  # TODO\n\n\ndef rle_decode(s: str) -> str:\n    \"\"\"Обратное преобразование: \"a3b2c1\" -> \"aaabbc\".\n\n    Вход гарантированно является корректным rle_encode-строкой\n    (блоки: нецифровой символ + одно или несколько цифр).\n    \"\"\"\n    return \"\"  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import rle_decode, rle_encode\n\n\nclass TestRLE(unittest.TestCase):\n    def test_encode(self):\n        self.assertEqual(rle_encode(\"\"), \"\")\n        self.assertEqual(rle_encode(\"a\"), \"a1\")\n        self.assertEqual(rle_encode(\"aaabbc\"), \"a3b2c1\")\n        self.assertEqual(rle_encode(\"abcdef\"), \"a1b1c1d1e1f1\")\n        self.assertEqual(rle_encode(\"zzz\"), \"z3\")\n\n    def test_decode(self):\n        self.assertEqual(rle_decode(\"\"), \"\")\n        self.assertEqual(rle_decode(\"a1\"), \"a\")\n        self.assertEqual(rle_decode(\"a3b2c1\"), \"aaabbc\")\n        self.assertEqual(rle_decode(\"k12\"), \"k\" * 12)\n\n    def test_roundtrip(self):\n        for s in [\"\", \"a\", \"aab\", \"ababab\", \"xxxxy\"]:\n            self.assertEqual(rle_decode(rle_encode(s)), s)\n            self.assertEqual(rle_encode(rle_decode(rle_encode(s))), rle_encode(s))\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-parse-log-line",
+    "stack": "python",
+    "grades": [
+      "junior"
+    ],
+    "title": "Парсинг строки лога",
+    "statement": "Реализуйте parse_log_line(line): строка «ГГГГ-ММ-ДД ЧЧ:ММ:СС УРОВЕНЬ сообщение» → dict {time: ISO-8601, level, message (может быть пустым)}; уровень — слово из заглавных латинских букв; при несовпадении формата — None.",
+    "files": {
+      "solution.py": "def parse_log_line(line: str):\n    \"\"\"Разбор строки лога вида \"ГГГГ-ММ-ДД ЧЧ:ММ:СС УРОВЕНЬ сообщение...\".\n\n    УРОВЕНЬ — слово из заглавных латинских букв (INFO, ERROR и т.п.).\n    Сообщение — всё после уровня (может быть пустым).\n    Возвращает dict: {\"time\": \"ГГГГ-ММ-ДДТЧЧ:ММ:СС\", \"level\": \"...\", \"message\": \"...\"},\n    или None, если строка не соответствует формату.\n    \"\"\"\n    return None  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import parse_log_line\n\n\nclass TestParseLogLine(unittest.TestCase):\n    def test_valid(self):\n        self.assertEqual(\n            parse_log_line(\"2024-01-15 10:30:45 INFO Started\"),\n            {\"time\": \"2024-01-15T10:30:45\", \"level\": \"INFO\", \"message\": \"Started\"},\n        )\n        self.assertEqual(\n            parse_log_line(\"2024-02-28 23:59:59 ERROR db: timeout after 30s\"),\n            {\"time\": \"2024-02-28T23:59:59\", \"level\": \"ERROR\", \"message\": \"db: timeout after 30s\"},\n        )\n        self.assertEqual(\n            parse_log_line(\"2025-12-31 00:00:00 WARN\"),\n            {\"time\": \"2025-12-31T00:00:00\", \"level\": \"WARN\", \"message\": \"\"},\n        )\n\n    def test_invalid(self):\n        self.assertIsNone(parse_log_line(\"\"))\n        self.assertIsNone(parse_log_line(\"not a log line\"))\n        self.assertIsNone(parse_log_line(\"24-01-15 10:30:45 INFO x\"))\n        self.assertIsNone(parse_log_line(\"2024-01-15 10:30 INFO x\"))\n        self.assertIsNone(parse_log_line(\"2024-01-15 10:30:45 info x\"))\n        self.assertIsNone(parse_log_line(\"2024-01-15 INFO x\"))\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-group-anagrams",
+    "stack": "python",
+    "grades": [
+      "junior"
+    ],
+    "title": "Группировка анаграмм",
+    "statement": "Реализуйте group_anagrams(words): группы анаграмм (регистр игнорируется); слова внутри группы — в порядке ввода, группы — по первому появлению первого слова; дубликаты попадают в группу.",
+    "files": {
+      "solution.py": "def group_anagrams(words: list) -> list:\n    \"\"\"Группировка слов в группы анаграмм.\n\n    Слово — анаграмма, если состоит из тех же букв (в нижнем регистре, латиница)\n    в каком-то порядке. Порядок слов внутри группы — как во входном списке;\n    порядок групп — по первому появлению их первого слова.\n    Дубликаты слов попадают в ту же группу.\n    \"\"\"\n    return []  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import group_anagrams\n\n\nclass TestGroupAnagrams(unittest.TestCase):\n    def test_groups(self):\n        self.assertEqual(\n            group_anagrams([\"eat\", \"tea\", \"tan\", \"ate\", \"nat\", \"bat\"]),\n            [[\"eat\", \"tea\", \"ate\"], [\"tan\", \"nat\"], [\"bat\"]],\n        )\n        self.assertEqual(group_anagrams([]), [])\n        self.assertEqual(group_anagrams([\"solo\"]), [[\"solo\"]])\n\n    def test_order_and_duplicates(self):\n        self.assertEqual(group_anagrams([\"b\", \"a\", \"ab\", \"ba\", \"a\"]), [[\"b\"], [\"a\", \"a\"], [\"ab\", \"ba\"]])\n        self.assertEqual(group_anagrams([\"Ab\", \"ba\", \"aB\"]), [[\"Ab\", \"ba\", \"aB\"]])\n\n    def test_single_letters(self):\n        self.assertEqual(group_anagrams([\"c\", \"b\", \"c\", \"a\"]), [[\"c\", \"c\"], [\"b\"], [\"a\"]])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-merge-intervals",
+    "stack": "python",
+    "grades": [
+      "middle"
+    ],
+    "title": "Слияние интервалов",
+    "statement": "Реализуйте merge_intervals(intervals): объедините пересекающиеся и прилегающие интервалы [start,end] (касание [1,4]+[4,5] → [1,5]); результат — по возрастанию start, в виде списков [start,end].",
+    "files": {
+      "solution.py": "def merge_intervals(intervals: list) -> list:\n    \"\"\"Объединение пересекающихся и прилегающих интервалов.\n\n    intervals — список [start, end] (start <= end). Интервалы объединяются,\n    если пересекаются или касаются: [1,4] и [4,5] -> [1,5].\n    Возвращает список [start, end] в порядке возрастания start.\n    \"\"\"\n    return []  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import merge_intervals\n\n\nclass TestMergeIntervals(unittest.TestCase):\n    def test_basic(self):\n        self.assertEqual(\n            merge_intervals([[1, 3], [2, 6], [8, 10], [15, 18]]),\n            [[1, 6], [8, 10], [15, 18]],\n        )\n\n    def test_touching(self):\n        self.assertEqual(merge_intervals([[1, 4], [4, 5]]), [[1, 5]])\n\n    def test_nested(self):\n        self.assertEqual(merge_intervals([[1, 10], [2, 3], [4, 5]]), [[1, 10]])\n\n    def test_order_and_edge(self):\n        self.assertEqual(merge_intervals([]), [])\n        self.assertEqual(merge_intervals([[5, 6]]), [[5, 6]])\n        self.assertEqual(merge_intervals([[9, 10], [1, 3], [2, 6]]), [[1, 6], [9, 10]])\n        self.assertEqual(merge_intervals([[1, 4], [0, 0]]), [[0, 0], [1, 4]])\n        self.assertEqual(\n            merge_intervals([[1, 4], [0, 2], [3, 5]]),\n            [[0, 5]],\n        )\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-top-k-smallest",
+    "stack": "python",
+    "grades": [
+      "middle"
+    ],
+    "title": "Top-K наименьших",
+    "statement": "Реализуйте top_k_smallest(nums, k): k наименьших элементов (с дубликатами), отсортированных по возрастанию; 0 <= k <= len(nums); сортировать весь массив целиком не требуется.",
+    "files": {
+      "solution.py": "def top_k_smallest(nums: list, k: int) -> list:\n    \"\"\"k наименьших элементов nums, отсортированных по возрастанию (с учётом дубликатов).\n\n    Гарантировано: 0 <= k <= len(nums). Сортировать весь массив целиком не требуется.\n    \"\"\"\n    return []  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import top_k_smallest\n\n\nclass TestTopKSmallest(unittest.TestCase):\n    def test_basic(self):\n        self.assertEqual(top_k_smallest([3, 1, 4, 1, 5, 9], 3), [1, 1, 3])\n        self.assertEqual(top_k_smallest([5, 1, 2], 2), [1, 2])\n\n    def test_bounds(self):\n        self.assertEqual(top_k_smallest([7], 1), [7])\n        self.assertEqual(top_k_smallest([7, 2, 9, 1], 4), [1, 2, 7, 9])\n        self.assertEqual(top_k_smallest([4, 4, 4], 2), [4, 4])\n\n    def test_negatives(self):\n        self.assertEqual(top_k_smallest([-3, 10, -1, 0, -10, 7], 4), [-10, -3, -1, 0])\n        self.assertEqual(top_k_smallest([-5, -5, -5, 1], 1), [-5])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-sliding-window-limit",
+    "stack": "python",
+    "grades": [
+      "middle"
+    ],
+    "title": "Rate-limiter: скользящее окно",
+    "statement": "Реализуйте check_limits(timestamps, limit, window_sec): запрос в момент t разрешён, если среди РАНЕЕ РАЗРЕШЁННЫХ запросов в окне (t-window_sec, t] (граница не считается) их < limit; отвергнутые не учитываются; верните список bool.",
+    "files": {
+      "solution.py": "def check_limits(timestamps: list, limit: int, window_sec: int) -> list:\n    \"\"\"Sliding-window rate-limiter.\n\n    timestamps — моменты запросов в секундах, строго неубывающие. Запрос в момент t\n    разрешён (True), если среди РАНЕЕ РАЗРЕШЁННЫХ запросов в окне (t - window_sec, t]\n    (момент ровно t - window_sec не считается) их меньше limit; иначе False.\n    Возвращает список bool по каждому запросу.\n    \"\"\"\n    return []  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import check_limits\n\n\nclass TestSlidingWindowLimit(unittest.TestCase):\n    def test_basic(self):\n        self.assertEqual(check_limits([0, 1, 2, 3, 4], 2, 3), [True, True, False, True, True])\n\n    def test_single_per_window(self):\n        self.assertEqual(check_limits([0, 5, 10, 15, 25], 1, 10), [True, False, True, False, True])\n\n    def test_boundary_excluded(self):\n        # t=2: запросы в (0, 2] — только разрешённые после 0; границы t-window не считаются\n        self.assertEqual(check_limits([0, 0, 1, 2, 3, 4], 2, 2), [True, True, False, True, True, True])\n\n    def test_deny_does_not_count(self):\n        self.assertEqual(check_limits([0, 0, 0, 100], 1, 5), [True, False, False, True])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-ttl-cache",
+    "stack": "python",
+    "grades": [
+      "senior"
+    ],
+    "title": "Кэш с TTL",
+    "statement": "Реализуйте TTLCache (put(key, value, now, ttl_sec), get(key, now)): запись жива, пока now < put_time + ttl_sec (ttl=0 — сразу мёртва); put обновляет; get возвращает (value, True)/(None, False); валидность — ТОЛЬКО по put_time и ttl_sec, без удаления при чтении и при «откате» now.",
+    "files": {
+      "solution.py": "class TTLCache:\n    \"\"\"Кэш с временем жизни записей. Время — «внешние» секунды (float), передаётся явно.\"\"\"\n\n    def put(self, key: str, value: str, now: float, ttl_sec: float) -> None:\n        \"\"\"Сохранить значение под key на ttl_sec секунд от момента now (повторный put обновляет).\"\"\"\n        raise NotImplementedError  # TODO\n\n    def get(self, key: str, now: float):\n        \"\"\"Вернуть (value, True), если запись существует и жива (now < put_time + ttl_sec), иначе (None, False).\n\n        Валидность — ТОЛЬКО по put_time и ttl_sec записи: без удаления при чтении и при «откате» now.\n        ttl_sec = 0 — запись сразу мёртва.\n        \"\"\"\n        raise NotImplementedError  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import TTLCache\n\n\nclass TestTTLCache(unittest.TestCase):\n    def test_lifecycle(self):\n        c = TTLCache()\n        c.put(\"a\", \"1\", 0, 1)\n        self.assertEqual(c.get(\"a\", 0), (\"1\", True))\n        self.assertEqual(c.get(\"a\", 0.99), (\"1\", True))\n        self.assertEqual(c.get(\"a\", 1), (None, False))  # ровно put+ttl — уже мёртв\n        self.assertEqual(c.get(\"a\", 0.9), (\"1\", True))  # «откат» now: решение точечно\n\n    def test_refresh(self):\n        c = TTLCache()\n        c.put(\"a\", \"1\", 0, 1)\n        c.put(\"a\", \"2\", 0.5, 2)\n        self.assertEqual(c.get(\"a\", 1), (\"2\", True))\n        self.assertEqual(c.get(\"a\", 2.5), (None, False))\n\n    def test_zero_ttl_and_missing(self):\n        c = TTLCache()\n        c.put(\"c\", \"x\", 5, 0)\n        self.assertEqual(c.get(\"c\", 5), (None, False))\n        self.assertEqual(c.get(\"nope\", 100), (None, False))\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-circuit-breaker",
+    "stack": "python",
+    "grades": [
+      "senior"
+    ],
+    "title": "Circuit breaker",
+    "statement": "Реализуйте Breaker(threshold, open_sec) с record(success, now) -> bool: closed → open после threshold последовательных неудач; open → через open_sec секунд один пробный запрос (успех → closed, неудача → снова open с новым opened_at); в open запросы отклоняются.",
+    "files": {
+      "solution.py": "class Breaker:\n    \"\"\"Circuit breaker: closed -> open (после threshold последовательных неудач)\n    -> half-open (через open_sec секунд; один пробный запрос: успех -> closed,\n    неудача -> снова open).\"\"\"\n\n    def __init__(self, threshold: int, open_sec: float):\n        raise NotImplementedError  # TODO\n\n    def record(self, success: bool, now: float) -> bool:\n        \"\"\"Зарегистрировать запрос в момент now и вернуть, ДОПУЩЕН ли он.\n\n        closed: разрешён; успех сбрасывает счётчик, неудача прибавляет.\n        open: если now - opened_at >= open_sec — разрешить один пробный (см. выше), иначе отклонить.\n        \"\"\"\n        raise NotImplementedError  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import Breaker\n\n\ndef run(threshold, open_sec, calls):\n    b = Breaker(threshold, open_sec)\n    return [b.record(s, t) for s, t in calls]\n\n\nclass TestCircuitBreaker(unittest.TestCase):\n    def test_open_after_threshold(self):\n        self.assertEqual(run(2, 1.0, [(True, 0), (True, 0), (False, 0), (False, 0)]),\n                         [True, True, True, True])\n\n    def test_open_halfopen_cycle(self):\n        self.assertEqual(\n            run(2, 1.0, [(False, 0), (False, 0), (False, 0.5), (False, 1.0),\n                         (False, 1.5), (True, 2.0), (False, 2.0), (False, 2.0)]),\n            [True, True, False, True, False, True, True, True],\n        )\n\n    def test_threshold_one(self):\n        self.assertEqual(run(1, 0.5, [(False, 0), (True, 0.4), (True, 0.5), (False, 0.5)]),\n                         [True, False, True, True])\n\n    def test_reset_counter_on_success(self):\n        self.assertEqual(\n            run(3, 2.0, [(False, 0), (True, 1), (False, 2), (False, 3), (False, 4),\n                         (False, 5.9), (False, 6.0)]),\n            [True, True, True, True, True, False, True],\n        )\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-topological-order",
+    "stack": "python",
+    "grades": [
+      "senior"
+    ],
+    "title": "Топологическая сортировка",
+    "statement": "Реализуйте topological_order(n, edges): порядок вершин 0..n-1, где (u,v) — «u раньше v»; среди доступных вершин выбираем МЕНЬШУЮ; при цикле — []; изолированные вершины участвуют.",
+    "files": {
+      "solution.py": "def topological_order(n: int, edges: list) -> list:\n    \"\"\"Тополопорядок вершин 0..n-1.\n\n    edges — список (u, v): ребро u -> v означает «u раньше v».\n    Среди доступных (без невыполненных входящих рёбер) выбираем МЕНЬШУЮ вершину.\n    Если есть цикл — []. Если есть изолированные вершины — они участвуют так же.\n    \"\"\"\n    return []  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import topological_order\n\n\nclass TestTopologicalOrder(unittest.TestCase):\n    def test_basic(self):\n        self.assertEqual(topological_order(4, [(1, 0), (1, 2), (2, 3)]), [1, 0, 2, 3])\n\n    def test_lexicographic_choice(self):\n        # 0, 2 доступны одновременно -> берём 0, затем 1, затем 2\n        self.assertEqual(topological_order(3, [(0, 2), (1, 2)]), [0, 1, 2])\n\n    def test_disconnected(self):\n        self.assertEqual(topological_order(5, [(4, 3)]), [0, 1, 2, 4, 3])\n\n    def test_cycle(self):\n        self.assertEqual(topological_order(3, [(0, 1), (1, 2), (2, 0)]), [])\n        self.assertEqual(topological_order(4, [(0, 1), (1, 0), (2, 3)]), [])\n\n    def test_empty(self):\n        self.assertEqual(topological_order(0, []), [])\n        self.assertEqual(topological_order(3, []), [0, 1, 2])\n\n    def test_chain(self):\n        self.assertEqual(topological_order(5, [(4, 3), (3, 2), (2, 1), (1, 0)]), [4, 3, 2, 1, 0])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-consistent-hash",
+    "stack": "python",
+    "grades": [
+      "staff"
+    ],
+    "title": "Кольцо согласованного хеширования",
+    "statement": "Реализуйте Ring(vnodes_per_node) с add(node), get(key): кольцо consistent hashing с виртуальными узлами; get — детерминирован, не зависит от порядка add, добавление узела меняет владельца только части ключей; пустое кольцо — \"\".",
+    "files": {
+      "solution.py": "class Ring:\n    \"\"\"Кольцо согласованного хеширования (consistent hashing) с виртуальными узлами:\n    каждый реальный узел занимает vnodes_per_node виртуальных позиций на кольце.\"\"\"\n\n    def __init__(self, vnodes_per_node: int):\n        raise NotImplementedError  # TODO\n\n    def add(self, node: str) -> None:\n        \"\"\"Зарегистрировать узел (повторный add игнорируется).\"\"\"\n        raise NotImplementedError  # TODO\n\n    def get(self, key: str) -> str:\n        \"\"\"Узел, отвечающий за key (первая виртуальная позиция кольца >= хэша key,\n        по кругу). Пустое кольцо — \"\".\n\n        Гарантии: результат детерминирован, НЕ зависит от порядка add;\n        добавление нового узела меняет владельца только части ключей.\n        \"\"\"\n        raise NotImplementedError  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import Ring\n\n\nclass TestConsistentHash(unittest.TestCase):\n    def test_empty(self):\n        self.assertEqual(Ring(50).get(\"anything\"), \"\")\n\n    def test_single_node(self):\n        r = Ring(50)\n        r.add(\"n1\")\n        for i in range(100):\n            self.assertEqual(r.get(\"key\" + str(i)), \"n1\")\n\n    def test_mapping(self):\n        r = Ring(100)\n        for n in (\"a\", \"b\", \"c\"):\n            r.add(n)\n        seen = {}\n        for i in range(1000):\n            g = r.get(\"key-\" + str(i))\n            self.assertIn(g, {\"a\", \"b\", \"c\"})\n            seen[g] = seen.get(g, 0) + 1\n        for n in (\"a\", \"b\", \"c\"):\n            self.assertGreater(seen.get(n, 0), 0, f\"node {n} got no keys: {seen}\")\n\n    def test_stability(self):\n        r = Ring(100)\n        for n in (\"a\", \"b\", \"c\"):\n            r.add(n)\n        before = {f\"key-{i}\": r.get(f\"key-{i}\") for i in range(1000)}\n        r.add(\"d\")\n        changed = sum(1 for k, old in before.items() if r.get(k) != old)\n        self.assertLessEqual(changed, 500, f\"moved {changed}/1000 keys\")\n        self.assertGreater(changed, 0, \"no key moved after adding node\")\n\n    def test_order_independent(self):\n        r1, r2 = Ring(64), Ring(64)\n        for n in (\"x\", \"y\", \"z\"):\n            r1.add(n)\n        for n in (\"z\", \"y\", \"x\"):\n            r2.add(n)\n        for i in range(500):\n            self.assertEqual(r1.get(\"k\" + str(i)), r2.get(\"k\" + str(i)))\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-lease-lock",
+    "stack": "python",
+    "grades": [
+      "staff"
+    ],
+    "title": "Лизинг-лок с fencing-токенами",
+    "statement": "Реализуйте LockService (acquire(key, client, now, lease) -> int, release(key, client, now) -> bool): лок живёт до now < expire_at; при новом выдаче fencing-токен растёт (с 1); продление тем же client — тот же токен; занятый чужим неистёкшим локом — отказ (0); release — только владельцу.",
+    "files": {
+      "solution.py": "class LockService:\n    \"\"\"Лизинг-лок (lease lock) с fencing-токенами — логика координатора.\n\n    Лок живёт до момента expire_at (now >= expire_at — лок считается свободным).\n    При КАЖДОМ новом выдаче (grant) fencing-токен увеличивается на 1, начиная с 1.\n    Продление текущего владельцем НЕ создаёт новый токен.\n    \"\"\"\n\n    def acquire(self, key: str, client: str, now: float, lease: float) -> int:\n        \"\"\"Попытка взять (или продлить свой) лок.\n\n        Успех: лок свободен (не занят ИЛИ истёк), либо уже принадлежит этому же\n        client (продление до now + lease, тот же токен). Возвращает fencing-токен.\n        Отказ (занят другим client и не истёк): 0.\n        \"\"\"\n        raise NotImplementedError  # TODO\n\n    def release(self, key: str, client: str, now: float) -> bool:\n        \"\"\"Отпуск лoka. True, если client был владельцем (лок свободен теперь),\n        иначе False (чужой лок не трогаем).\"\"\"\n        raise NotImplementedError  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import LockService\n\n\nclass TestLockService(unittest.TestCase):\n    def test_basic_lease(self):\n        ls = LockService()\n        self.assertEqual(ls.acquire(\"k\", \"A\", 0, 5), 1)\n        # продление тем же client: токен не меняется\n        self.assertEqual(ls.acquire(\"k\", \"A\", 2, 5), 1)\n        # другой client — отказ\n        self.assertEqual(ls.acquire(\"k\", \"B\", 3, 5), 0)\n        # истёк (до 7, A продлил до 2+5=7) — B получает, токен +1\n        self.assertEqual(ls.acquire(\"k\", \"B\", 7, 3), 2)\n        self.assertEqual(ls.acquire(\"k\", \"A\", 8, 3), 0)\n\n    def test_release(self):\n        ls = LockService()\n        self.assertEqual(ls.acquire(\"k\", \"A\", 0, 10), 1)\n        self.assertFalse(ls.release(\"k\", \"B\", 1))\n        self.assertTrue(ls.release(\"k\", \"A\", 1))\n        self.assertFalse(ls.release(\"k\", \"A\", 2))  # уже свободен\n        # после освобождения — новый grant, новый токен\n        self.assertEqual(ls.acquire(\"k\", \"C\", 2, 5), 2)\n\n    def test_expire_without_release(self):\n        ls = LockService()\n        self.assertEqual(ls.acquire(\"k\", \"A\", 0, 2), 1)\n        self.assertEqual(ls.acquire(\"k\", \"B\", 2, 1), 2)  # ровно 0+2 — истёк\n        self.assertEqual(ls.acquire(\"k\", \"C\", 3, 1), 3)  # 2+1 — истёк\n        self.assertEqual(ls.acquire(\"k\", \"A\", 3, 1), 0)  # занят C\n\n    def test_independent_keys(self):\n        ls = LockService()\n        self.assertEqual(ls.acquire(\"k1\", \"A\", 0, 5), 1)\n        self.assertEqual(ls.acquire(\"k2\", \"B\", 0, 5), 2)  # токены глобально растут\n        self.assertEqual(ls.acquire(\"k1\", \"B\", 0, 5), 0)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
   }
 ]

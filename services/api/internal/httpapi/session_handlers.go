@@ -63,19 +63,20 @@ func toDTO(m models.Session, snap *session.Snapshot) sessionDTO {
 // 201: {id, ws_url, duration_limit_s}; 402 — нет доступных минут (ARCHITECTURE §4.1).
 func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Grade models.Grade `json:"grade"`
-		Stack models.Stack `json:"stack"`
+		Grade      models.Grade `json:"grade"`
+		Stack      models.Stack `json:"stack"`
+		TemplateID int64        `json:"template_id,omitempty"` // итерация A: 0 = дефолтный шаблон грейда
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "ожидается JSON {grade, stack}")
 		return
 	}
-	m, err := s.engine.Create(r.Context(), userIDFromContext(r.Context()), body.Grade, body.Stack)
+	m, err := s.engine.CreateWithTemplate(r.Context(), userIDFromContext(r.Context()), body.Grade, body.Stack, body.TemplateID)
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"id": m.ID, "ws_url": "/ws/session/" + strconv.FormatInt(m.ID, 10),
-			"duration_limit_s": m.DurationLimitS,
+			"duration_limit_s": m.DurationLimitS, "template_id": m.TemplateID,
 		})
 	case errors.Is(err, session.ErrNoMinutes):
 		writeError(w, http.StatusPaymentRequired, "out_of_minutes",

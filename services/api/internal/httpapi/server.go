@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -32,6 +33,7 @@ type Server struct {
 	submissions *db.SubmissionStore
 	whiteboards *db.WhiteboardStore
 	reports     *db.ReportStore
+	templates   *db.TemplateStore // итерация A: настраиваемые планы
 	engine      *session.Engine
 	interviewer *interviewer.Interviewer
 	voice       *voicesvc.Client
@@ -63,9 +65,14 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 	submissions := db.NewSubmissionStore(database, dialect)
 	whiteboards := db.NewWhiteboardStore(database, dialect)
 	reports := db.NewReportStore(database, dialect)
+	templates := db.NewTemplateStore(database, dialect)
+	if err := templates.EnsureDefaults(context.Background(), interviewer.DefaultPrograms()); err != nil {
+		log.Warn("сид дефолтных шаблонов не удался (используется gradeProgram)", "err", err)
+	}
 	engine := session.New(sessions, users, log,
 		session.WithPauseTimeout(time.Duration(cfg.PauseTimeoutS)*time.Second),
-		session.WithSessionLimit(cfg.SessionLimitS))
+		session.WithSessionLimit(cfg.SessionLimitS),
+		session.WithTemplates(templates))
 	interviewer := interviewer.New(provider, sessions, log)
 	voice := voicesvc.NewClient(cfg.VoiceURL)
 	return &Server{
@@ -75,6 +82,7 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		submissions: submissions,
 		whiteboards: whiteboards,
 		reports:     reports,
+		templates:   templates,
 		engine:      engine,
 		interviewer: interviewer,
 		voice:       voice,
@@ -124,6 +132,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/register", s.handleRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.Handle("GET /api/v1/auth/me", s.requireAuth(http.HandlerFunc(s.handleMe)))
+
+	// Шаблоны интервью (итерация A).
+	mux.Handle("GET /api/v1/templates", s.requireAuth(http.HandlerFunc(s.handleTemplatesList)))
 
 	// Сессии (WP-3, ARCHITECTURE.md §4.1).
 	mux.Handle("POST /api/v1/sessions", s.requireAuth(http.HandlerFunc(s.handleSessionsCreate)))

@@ -67,9 +67,10 @@ type runtime struct {
 
 // Engine — оркестратор сессий: машина состояний, тарификация, таймер, WS-регистрация.
 type Engine struct {
-	store *db.SessionStore
-	users *db.UserStore
-	log   *slog.Logger
+	store     *db.SessionStore
+	users     *db.UserStore
+	templates *db.TemplateStore // итерация A: настраиваемые планы (может быть nil)
+	log       *slog.Logger
 
 	now           func() time.Time
 	pauseTimeout  time.Duration
@@ -101,6 +102,11 @@ func WithPauseTimeout(d time.Duration) Opt {
 		}
 	}
 }
+
+// WithTemplates — хранилище настраиваемых шаблонов (итерация A).
+// При Create с templateID≠0 сессия получает программу шаблона; при templateID=0
+// — дефолтный шаблон грейда (если хранилище задано).
+func WithTemplates(ts *db.TemplateStore) Opt { return func(e *Engine) { e.templates = ts } }
 
 // New создаёт движок.
 func New(store *db.SessionStore, users *db.UserStore, log *slog.Logger, opts ...Opt) *Engine {

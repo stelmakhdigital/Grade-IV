@@ -61,10 +61,14 @@ var gradeProgram = map[models.Grade]string{
 
 // stagePrompt — system-промпт по стадии. voiceStyle — блок формата голосовой
 // реплики (варианты A/B, T-20261009121144; пустая строка — без ограничения).
-func stagePrompt(grade models.Grade, stack string, stage models.Stage, voiceStyle string) string {
+// program — программа интервью (из шаблона или gradeProgram); пустая — gradeProgram[grade].
+func stagePrompt(grade models.Grade, stack string, stage models.Stage, voiceStyle, program string) string {
 	switch stage {
 	case models.StageVoice:
-		prog := gradeProgram[grade]
+		prog := program
+		if prog == "" {
+			prog = gradeProgram[grade]
+		}
 		if prog == "" {
 			prog = gradeProgram["middle"]
 		}
@@ -109,12 +113,25 @@ const activeVoiceStyle = voiceStyleB
 
 // systemPrompt — полный system-промпт хода (voiceStyle — вариант формата).
 func systemPrompt(grade models.Grade, stack string, stage models.Stage, voiceStyle string) string {
-	return strings.Join([]string{persona, gradeFocus[grade], stagePrompt(grade, stack, stage, voiceStyle)}, "\n\n")
+	return strings.Join([]string{persona, gradeFocus[grade], stagePrompt(grade, stack, stage, voiceStyle, "")}, "\n\n")
 }
 
-// SystemPrompt — полный system-промпт хода (активный вариант A/B).
+// SystemPrompt — полный system-промпт хода (активный вариант A/B, дефолтная программа).
 func SystemPrompt(grade models.Grade, stack string, stage models.Stage) string {
 	return systemPrompt(grade, stack, stage, activeVoiceStyle)
+}
+
+// SystemPromptWithProgram — system-промпт с программой из шаблона (итерация A).
+func SystemPromptWithProgram(grade models.Grade, stack string, stage models.Stage, program string) string {
+	return strings.Join([]string{persona, gradeFocus[grade], stagePrompt(grade, stack, stage, activeVoiceStyle, program)}, "\n\n")
+}
+
+// ProgramFor — программа грейда (для сидирования дефолтных шаблонов).
+func ProgramFor(grade models.Grade) string {
+	if p := gradeProgram[grade]; p != "" {
+		return p
+	}
+	return gradeProgram["middle"]
 }
 
 // FallbackText — стандартная реплика ИИ, когда LLM-эндпоинт недоступен
