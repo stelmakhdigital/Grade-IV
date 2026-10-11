@@ -26,7 +26,12 @@ export function CodeEditor({ language, value, onChange, onReady }: CodeEditorPro
       value={value}
       onChange={(v) => onChange(v ?? '')}
       onMount={handleMount}
-      loading={<div className="muted">Загрузка редактора…</div>}
+      loading={
+        <div className="code-loading" role="status" aria-label="Загрузка редактора">
+          <span className="code-loading-spinner" aria-hidden />
+          Загрузка редактора…
+        </div>
+      }
       options={{
         fontSize: 14,
         minimap: { enabled: false },

@@ -4,7 +4,7 @@
  * Редактор инжинирится (prop `editor`), чтобы логику можно было
  * тестировать в jsdom без Monaco.
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ApiError, runTests, type RunResult, type Stack } from '../../api';
 import { apiErrorMessage } from '../LoginView';
 import { CodeEditor } from './CodeEditor';
@@ -38,6 +38,33 @@ export const LANGUAGE_BY_STACK: Record<Stack, string> = {
   go: 'go',
   python: 'python',
 };
+
+/**
+ * Код кандидата + результат последнего запуска в рамках SPA. Переживает смену
+ * стадий (перезаход в livecode): без этого панель размонтируется при уходе на
+ * design и заново инициализируется шаблоном задачи, стирая правки. Ключ кодирует
+ * сессию + стек + набор файлов задачи: повторный вход в ту же задачу восстанавливает
+ * код, другая задача/стек — нет (своё ключевое пространство, без чужого кода).
+ */
+interface CodeCacheEntry {
+  files: Record<string, string>;
+  result: RunResult | null;
+}
+const codeCache = new Map<string, CodeCacheEntry>();
+
+function cacheKeyFor(
+  sessionId: number,
+  stack: Stack,
+  taskFiles?: Record<string, string> | null,
+): string {
+  const keySet =
+    taskFiles !== undefined && taskFiles !== null && Object.keys(taskFiles).length > 0
+      ? Object.keys(taskFiles)
+          .sort()
+          .join('\u0000')
+      : 'default';
+  return `${sessionId}|${stack}|${keySet}`;
+}
 
 export interface LiveCodePanelProps {
   sessionId: number;
@@ -78,24 +105,38 @@ export function LiveCodePanel({
   editor,
   review,
 }: LiveCodePanelProps) {
-  const [files, setFiles] = useState<Record<string, string>>(() =>
-    taskFiles !== undefined && taskFiles !== null && Object.keys(taskFiles).length > 0
-      ? taskFiles
-      : { [MAIN_FILE[stack]]: DEFAULT_CODE[stack] },
-  );
-  const [activeFile, setActiveFile] = useState<string>(() => solutionFile(stack, taskFiles));
+  // Код кандидата + результат последнего запуска восстанавливаем из SPA-кэша при
+  // перезаходе (смена стадий); иначе — файлы задачи/шаблон.
+  const cacheKey = cacheKeyFor(sessionId, stack, taskFiles);
+  const cached = useRef(codeCache.get(cacheKeyFor(sessionId, stack, taskFiles))).current;
+  const restored = cached !== undefined && Object.keys(cached.files).length > 0;
+  const hasTaskFiles =
+    taskFiles !== undefined && taskFiles !== null && Object.keys(taskFiles).length > 0;
+  const initialFiles: Record<string, string> = restored
+    ? cached.files
+    : hasTaskFiles
+      ? (taskFiles as Record<string, string>)
+      : { [MAIN_FILE[stack]]: DEFAULT_CODE[stack] };
+  const [files, setFiles] = useState<Record<string, string>>(initialFiles);
+  const [activeFile, setActiveFile] = useState<string>(() => solutionFile(stack, initialFiles));
 
-  // stage.task может прийти по WS после монтирования панели (REST уже дал
-  // стадию) — синхронизируем файлы задачи, не трогая кандидата при отсутствии taskFiles.
+  // stage.task может прийти по WS после монтирования панели (REST уже дал стадию)
+  // — синхронизируем файлы задачи, НЕ затирая восстановленный код кандидата.
   useEffect(() => {
-    if (taskFiles !== undefined && taskFiles !== null && Object.keys(taskFiles).length > 0) {
-      setFiles(taskFiles);
+    if (restored) return; // восстановили код кандидата из кэша — не затираем
+    if (hasTaskFiles) {
+      setFiles(taskFiles as Record<string, string>);
       setActiveFile(solutionFile(stack, taskFiles));
     }
-  }, [taskFiles, stack]);
+  }, [taskFiles, stack, restored, hasTaskFiles]);
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<RunResult | null>(null);
+  const [result, setResult] = useState<RunResult | null>(() => (restored ? cached.result : null));
   const [error, setError] = useState<string | null>(null);
+
+  // Сохраняем код + результат в кэш (текущий ключ): переживает смену стадий.
+  useEffect(() => {
+    codeCache.set(cacheKey, { files, result });
+  }, [cacheKey, files, result]);
 
   const onRun = useCallback(async () => {
     if (running) return;

@@ -536,6 +536,31 @@ p {
   margin-top: 4px;
 }
 
+/* Скелетон/спиннер при ленивой загрузке Monaco (CDN). */
+.code-loading {
+  height: 320px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #8b95a7;
+  font-size: 14px;
+  background: #0d1119;
+  border-radius: 8px;
+}
+.code-loading-spinner {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border: 2px solid #2a3140;
+  border-top-color: #7aa2f7;
+  border-radius: 50%;
+  animation: code-loading-spin 0.8s linear infinite;
+}
+@keyframes code-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
 .task-title {
   color: #e5c07b;
   font-size: 14px;
