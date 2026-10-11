@@ -24,6 +24,7 @@ export interface User {
   id: number;
   email: string;
   created_at: string;
+  is_admin: boolean;
 }
 
 export interface AuthResult {
@@ -201,6 +202,63 @@ export interface TTSVoiceRegistry {
 /** F1 (Итерация 10): реестр голосов интервьюера (GET /api/v1/tts-voices). */
 export function listTTSVoices(): Promise<TTSVoiceRegistry> {
   return request<TTSVoiceRegistry>('/tts-voices', { auth: true });
+}
+
+// ------------------------------------------------------------------ Admin (итерация 11)
+
+export interface TemplateBlock {
+  title: string;
+  focus: string;
+  question_count: number;
+}
+
+/** Шаблон интервью (admin, итерация 11): соответствует db.Template. */
+export interface AdminTemplate {
+  id: number;
+  name: string;
+  grade: Grade;
+  stack: string;
+  duration_s: number;
+  is_default: boolean;
+  blocks: TemplateBlock[];
+}
+
+/** Реплика-начало (admin, итерация 11). grade: junior|middle|senior|staff|*. */
+export interface AdminOpening {
+  grade: string;
+  prompt: string;
+}
+
+export function adminListTemplates(): Promise<AdminTemplate[]> {
+  return request<AdminTemplate[]>('/admin/templates', { auth: true });
+}
+
+export function adminCreateTemplate(t: Omit<AdminTemplate, 'id'>): Promise<AdminTemplate> {
+  return request<AdminTemplate>('/admin/templates', { method: 'POST', body: t, auth: true });
+}
+
+export function adminUpdateTemplate(id: number, t: Omit<AdminTemplate, 'id'>): Promise<AdminTemplate> {
+  return request<AdminTemplate>(`/admin/templates/${id}`, { method: 'PUT', body: t, auth: true });
+}
+
+export function adminDeleteTemplate(id: number): Promise<void> {
+  return request<void>(`/admin/templates/${id}`, { method: 'DELETE', auth: true });
+}
+
+export function adminListOpenings(): Promise<AdminOpening[]> {
+  return request<AdminOpening[]>('/admin/openings', { auth: true });
+}
+
+export function adminPutOpenings(list: AdminOpening[]): Promise<AdminOpening[]> {
+  return request<AdminOpening[]>('/admin/openings', { method: 'PUT', body: list, auth: true });
+}
+
+export function adminListTTSVoices(): Promise<TTSVoiceRegistry> {
+  return request<TTSVoiceRegistry>('/admin/tts-voices', { auth: true });
+}
+
+export function adminPutTTSVoices(reg: TTSVoiceRegistry): Promise<TTSVoiceRegistry> {
+  return request<TTSVoiceRegistry>('/admin/tts-voices', { method: 'PUT', body: reg, auth: true });
 }
 
 export function createSession(

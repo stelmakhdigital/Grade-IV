@@ -146,11 +146,17 @@ export function CabinetView() {
             <strong data-testid="minutes">{minutesRemainingMin}</strong>
           </p>
         </div>
-        <button type="button" className="btn ghost" onClick={logout}>
-          Выйти
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {user?.is_admin && (
+            <a className="btn ghost" href="#/admin" data-testid="admin-nav">
+              Админ
+            </a>
+          )}
+          <button type="button" className="btn ghost" onClick={logout}>
+            Выйти
+          </button>
+        </div>
       </header>
-
       <section className="card" aria-labelledby="new-interview">
         <h2 id="new-interview">Новое интервью</h2>
         <form className="start-form" onSubmit={onStart}>

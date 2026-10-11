@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from './auth';
 import { CabinetView } from './views/CabinetView';
 import { LoginView } from './views/LoginView';
 import { SessionView } from './views/SessionView';
+import { AdminView } from './views/AdminView';
 
 function useHashRoute(): string {
   const [hash, setHash] = useState(() => window.location.hash || '#/');
@@ -25,6 +26,11 @@ function parseSessionId(hash: string): number | null {
   return m !== null ? Number(m[1]) : null;
 }
 
+// #/admin — admin-UI (итерация 11): редактирование шаблонов/начал/голосов.
+function isAdminRoute(hash: string): boolean {
+  return hash === '#/admin' || hash === '#/admin/';
+}
+
 function Routes() {
   const { status } = useAuth();
   const hash = useHashRoute();
@@ -40,6 +46,9 @@ function Routes() {
   }
   if (status === 'guest') {
     return <LoginView />;
+  }
+  if (isAdminRoute(hash)) {
+    return <AdminView />;
   }
   if (sessionId !== null) {
     return <SessionView id={sessionId} />;
