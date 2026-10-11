@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 )
@@ -54,7 +55,10 @@ func LoadOpenings(path string) (*Openings, error) {
 	if len(f.Openings) == 0 {
 		return nil, nil
 	}
-	return &Openings{list: f.Openings, last: map[int64]string{}, rnd: rand.New(rand.NewSource(0))}, nil
+	// Сид от времени (не фиксированный 0): «первый» выбор различается между
+	// запусками api (истинная рандомность после рестарта). Конкурентный доступ
+	// к rnd защищён o.mu (см. RandomFor).
+	return &Openings{list: f.Openings, last: map[int64]string{}, rnd: rand.New(rand.NewSource(time.Now().UnixNano()))}, nil
 }
 
 // RandomFor — случайный вариант начала для грейда (учитывая userID для
