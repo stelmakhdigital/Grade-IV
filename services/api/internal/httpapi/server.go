@@ -96,10 +96,15 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 	} else {
 		openings = o
 	}
+	// F7 (итерация 12): реестр tts-voices создаём ДО interviewer — резолвер рода
+	// (speaker→gender) читает текущее значение; после admin-Reload род обновляется без
+	// рестарта (тот же объект реестра, что у admin-эндпоинтов).
+	ttsVoices := newTTSVoiceRegistry()
 	interviewer := interviewer.New(provider, sessions, log,
 		interviewer.WithProfiles(profiles),
 		interviewer.WithReports(reports),
 		interviewer.WithOpenings(openings),
+		interviewer.WithGenderResolver(ttsVoices.GenderOf),
 		interviewer.WithVacancyResolver(func(ctx context.Context, userID int64) string {
 			if t, err := users.GetVacancy(ctx, userID); err == nil {
 				return t
@@ -116,7 +121,7 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		reports:      reports,
 		templates:    templates,
 		profiles:     profiles,
-		ttsVoices:    newTTSVoiceRegistry(),
+		ttsVoices:    ttsVoices,
 		openingsPath: openingsPath,
 		engine:       engine,
 		interviewer:  interviewer,

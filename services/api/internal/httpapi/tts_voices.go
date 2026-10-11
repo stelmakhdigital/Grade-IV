@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -98,6 +99,26 @@ func (r *ttsVoiceRegistry) Path() string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.path
+}
+
+// GenderOf — род голоса по спикеру (F7, итерация 12): speaker (или id) → gender.
+// Неизвестный/пустой спикер или ошибка — "" (→ male в промпте, текущее поведение).
+// Читает текущее значение реестра — после Reload (admin-UI) род обновляется без рестарта.
+func (r *ttsVoiceRegistry) GenderOf(speaker string) string {
+	sp := strings.TrimSpace(speaker)
+	if sp == "" {
+		return ""
+	}
+	data, err := r.Get()
+	if err != nil {
+		return ""
+	}
+	for _, v := range data.Voices {
+		if v.Speaker == sp || v.ID == sp {
+			return v.Gender
+		}
+	}
+	return ""
 }
 
 // handleTTSVoices — GET /api/v1/tts-voices (публичный, F1): реестр голосов.
