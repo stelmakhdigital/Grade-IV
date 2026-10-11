@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
@@ -53,7 +54,18 @@ func WithReports(store *db.ReportStore) Option {
 // WithOpenings — настраиваемые случайные начала собеседования (F2, Итерация 10).
 // Без опции (или пустой набор) — стартовое приветствие по-старому (backward-compat).
 func WithOpenings(o *Openings) Option {
-	return func(i *Interviewer) { i.openings = o }
+	return func(i *Interviewer) { i.openings.Store(o) }
+}
+
+// SetOpenings — замена набора начал вживую (итерация 11: admin-reload).
+func (i *Interviewer) SetOpenings(o *Openings) { i.openings.Store(o) }
+
+// CurrentOpenings — текущий набор начал (admin, итерация 11). Пусто — nil.
+func (i *Interviewer) CurrentOpenings() []Opening {
+	if op := i.openings.Load(); op != nil {
+		return op.List()
+	}
+	return nil
 }
 
 // Interviewer — ходы ИИ-интервьюера.
@@ -62,7 +74,7 @@ type Interviewer struct {
 	sessions   *db.SessionStore
 	profiles   *db.ProfileStore
 	reports    *db.ReportStore
-	openings   *Openings // F2: случайные начала (настраиваемый набор)
+	openings   atomic.Pointer[Openings] // F2: случайные начала (настраиваемый набор); итерация 11 — atomic swap при admin-reload
 	log        *slog.Logger
 	maxHistory int
 }
@@ -169,8 +181,8 @@ func (i *Interviewer) OnStageChanged(ctx context.Context, sessionID int64, stage
 	// набора (по грейду, '*' — любой; не повторяем последний для пользователя).
 	// LLM адаптирует формулировку под живую речь (история диалога в контексте —
 	// не задаст повторно уже решённое). Без набора (openings==nil) — по-старому.
-	if sess.Stage == models.StageVoice && i.openings != nil {
-		if opening := i.openings.RandomFor(sess.Grade, sess.UserID); opening != "" {
+	if op := i.openings.Load(); sess.Stage == models.StageVoice && op != nil {
+		if opening := op.RandomFor(sess.Grade, sess.UserID); opening != "" {
 			msgs[len(msgs)-1].Content += "\nНачни именно с этого вопроса (адаптируй формулировку под живую речь, не дословно): " + opening
 		}
 	}

@@ -2,18 +2,16 @@ package httpapi
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 )
 
-// F1 (Итерация 10): настраиваемый реестр голосов интервьюера.
-// Файл config/tts-voices.json (env TTS_VOICES_FILE — override). UI строит список
-// выбора из ответа GET /api/v1/tts-voices (не хардкод). Каждый голос: id (ключ для
-// UI), name (подпись), gender, speaker (реальный спикер voice-сервиса). speaker
-// уходит в сессию при создании (tts_speaker) и в контекст TTS (voicesvc).
+// F1 (Итерация 10) + Admin (итерация 11): настраиваемый реестр голосов
+// интервьюера. Файл config/tts-voices.json (env TTS_VOICES_FILE — override).
+// Итерация 11: вместо sync.Once — mutex-защищённый регистр с Reload(path), чтобы
+// admin-правка (PUT /api/v1/admin/tts-voices) применялась без рестарта api.
+
 type ttsVoiceEntry struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
@@ -21,46 +19,90 @@ type ttsVoiceEntry struct {
 	Speaker string `json:"speaker"`
 }
 
-type ttsVoiceRegistry struct {
+type ttsVoiceRegistryData struct {
 	Default string          `json:"default"`
 	Voices  []ttsVoiceEntry `json:"voices"`
 }
 
-var (
-	ttsVoicesOnce sync.Once
-	ttsVoicesVal  ttsVoiceRegistry
-	ttsVoicesErr  error
-)
-
-func loadTTSVoices() (ttsVoiceRegistry, error) {
-	ttsVoicesOnce.Do(func() {
-		candidates := []string{}
-		if p := os.Getenv("TTS_VOICES_FILE"); p != "" {
-			candidates = []string{p}
-		} else {
-			// CWD-независимо: запуск из services/api (make run-api) и из корня
-			// репо (scripts/run-all.sh). BUG-20261011-012.
-			candidates = configCandidates("config/tts-voices.json")
-		}
-		for _, p := range candidates {
-			b, err := os.ReadFile(p)
-			if err != nil {
-				continue
-			}
-			if err := json.Unmarshal(b, &ttsVoicesVal); err != nil {
-				ttsVoicesErr = fmt.Errorf("tts-voices: разбор %s: %w", p, err)
-				return
-			}
-			return
-		}
-		ttsVoicesErr = fmt.Errorf("tts-voices: не найден файл реестра (пробовал: %s)", strings.Join(candidates, ", "))
-	})
-	return ttsVoicesVal, ttsVoicesErr
+// ttsVoiceRegistry — реестр в памяти + путь к файлу (mutex; итерация 11).
+type ttsVoiceRegistry struct {
+	mu     sync.RWMutex
+	path   string
+	value  ttsVoiceRegistryData
+	loaded bool
+	err    error
 }
 
-// handleTTSVoices — GET /api/v1/tts-voices (F1): реестр голосов интервьюера.
+// resolveConfigPath — путь к config-файлу: env, иначе первый существующий
+// кандидат (BUG-012), иначе базовый путь (цель для записи при admin-правке).
+func resolveConfigPath(envVar, base string) string {
+	if p := os.Getenv(envVar); p != "" {
+		return p
+	}
+	if p := firstExistingConfig(configCandidates(base)); p != "" {
+		return p
+	}
+	return base
+}
+
+func newTTSVoiceRegistry() *ttsVoiceRegistry {
+	return &ttsVoiceRegistry{path: resolveConfigPath("TTS_VOICES_FILE", "config/tts-voices.json")}
+}
+
+// Get — текущий реестр (ленивая загрузка при первом чтении).
+func (r *ttsVoiceRegistry) Get() (ttsVoiceRegistryData, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.loaded {
+		return r.value, r.err
+	}
+	raw, err := os.ReadFile(r.path)
+	if err != nil {
+		r.err = err
+		return ttsVoiceRegistryData{}, err
+	}
+	var v ttsVoiceRegistryData
+	if err := json.Unmarshal(raw, &v); err != nil {
+		r.err = err
+		return ttsVoiceRegistryData{}, err
+	}
+	r.value, r.loaded, r.err = v, true, nil
+	return r.value, nil
+}
+
+// Reload — перечитать файл (итерация 11: после admin-правки). path=="" — тот же.
+func (r *ttsVoiceRegistry) Reload(path string) (ttsVoiceRegistryData, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if path != "" {
+		r.path = path
+	}
+	r.loaded = false
+	r.err = nil
+	raw, err := os.ReadFile(r.path)
+	if err != nil {
+		r.err = err
+		return ttsVoiceRegistryData{}, err
+	}
+	var v ttsVoiceRegistryData
+	if err := json.Unmarshal(raw, &v); err != nil {
+		r.err = err
+		return ttsVoiceRegistryData{}, err
+	}
+	r.value, r.loaded, r.err = v, true, nil
+	return r.value, nil
+}
+
+// Path — текущий путь к файлу (для admin-записи).
+func (r *ttsVoiceRegistry) Path() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.path
+}
+
+// handleTTSVoices — GET /api/v1/tts-voices (публичный, F1): реестр голосов.
 func (s *Server) handleTTSVoices(w http.ResponseWriter, _ *http.Request) {
-	reg, err := loadTTSVoices()
+	reg, err := s.ttsVoices.Get()
 	if err != nil {
 		s.log.Error("tts-voices: не удалось загрузить реестр", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal", "не удалось загрузить реестр голосов")

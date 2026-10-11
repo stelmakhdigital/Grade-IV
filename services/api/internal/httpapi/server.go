@@ -28,18 +28,20 @@ import (
 
 // Server — HTTP-сервер: хендлеры + зависимости.
 type Server struct {
-	cfg         *config.Config
-	users       *db.UserStore
-	sessions    *db.SessionStore
-	submissions *db.SubmissionStore
-	whiteboards *db.WhiteboardStore
-	reports     *db.ReportStore
-	templates   *db.TemplateStore // итерация A: настраиваемые планы
-	profiles    *db.ProfileStore  // итерация B: профили интервьюера
-	engine      *session.Engine
-	interviewer *interviewer.Interviewer
-	voice       *voicesvc.Client
-	log         *slog.Logger
+	cfg          *config.Config
+	users        *db.UserStore
+	sessions     *db.SessionStore
+	submissions  *db.SubmissionStore
+	whiteboards  *db.WhiteboardStore
+	reports      *db.ReportStore
+	templates    *db.TemplateStore // итерация A: настраиваемые планы
+	profiles     *db.ProfileStore  // итерация B: профили интервьюера
+	ttsVoices    *ttsVoiceRegistry // F1 + admin (итерация 11): реестр голосов + reload
+	openingsPath string            // итерация 11: путь к openings.json (admin-запись)
+	engine       *session.Engine
+	interviewer  *interviewer.Interviewer
+	voice        *voicesvc.Client
+	log          *slog.Logger
 	// orch — DI-оркестратор голосового хода (A1): LLM→TTS (pacing, ordered-
 	// синтез), barge-in. Стабильные зависимости в New; voice — параметр методов.
 	orch *voiceorchestrator.Orchestrator
@@ -83,20 +85,16 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		session.WithPauseTimeout(time.Duration(cfg.PauseTimeoutS)*time.Second),
 		session.WithSessionLimit(cfg.SessionLimitS),
 		session.WithTemplates(templates))
-	// F2 (Итерация 10): настраиваемые случайные начала собеседования (по грейду).
-	// Путь — env INTRO_OPENINGS_FILE, дефолт config/openings.json (файл в репо).
-	openingsPath := os.Getenv("INTRO_OPENINGS_FILE")
-	if openingsPath == "" {
-		// CWD-независимо (make run-api / scripts/run-all.sh). BUG-20261011-012.
-		openingsPath = firstExistingConfig(configCandidates("config/openings.json"))
-	}
+	// F2 (Итерация 10) + Admin (итерация 11): настраиваемые случайные начала
+	// (по грейду). Путь — env INTRO_OPENINGS_FILE, дефолт config/openings.json
+	// (CWD-независимо, BUG-012). Итерация 11: путь хранится для admin-записи.
+	openingsPath := resolveConfigPath("INTRO_OPENINGS_FILE", "config/openings.json")
 	var openings *interviewer.Openings
-	if openingsPath != "" {
-		var loadErr error
-		openings, loadErr = interviewer.LoadOpenings(openingsPath)
-		if loadErr != nil {
-			log.Error("openings: файл набора начал не загружен — дефолтное начало", "err", loadErr)
-		}
+	if o, loadErr := interviewer.LoadOpenings(openingsPath); loadErr != nil {
+		log.Error("openings: файл набора начал не загружен — дефолтное начало", "err", loadErr)
+		openings = nil
+	} else {
+		openings = o
 	}
 	interviewer := interviewer.New(provider, sessions, log,
 		interviewer.WithProfiles(profiles),
@@ -104,19 +102,21 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		interviewer.WithOpenings(openings))
 	voice := voicesvc.NewClient(cfg.VoiceURL)
 	s := &Server{
-		cfg:         cfg,
-		users:       users,
-		sessions:    sessions,
-		submissions: submissions,
-		whiteboards: whiteboards,
-		reports:     reports,
-		templates:   templates,
-		profiles:    profiles,
-		engine:      engine,
-		interviewer: interviewer,
-		voice:       voice,
-		log:         log,
-		wsSessions:  make(map[int64]*wsSession),
+		cfg:          cfg,
+		users:        users,
+		sessions:     sessions,
+		submissions:  submissions,
+		whiteboards:  whiteboards,
+		reports:      reports,
+		templates:    templates,
+		profiles:     profiles,
+		ttsVoices:    newTTSVoiceRegistry(),
+		openingsPath: openingsPath,
+		engine:       engine,
+		interviewer:  interviewer,
+		voice:        voice,
+		log:          log,
+		wsSessions:   make(map[int64]*wsSession),
 	}
 	// DI-оркестратор голосового хода (A1): стабильные зависимости (engine,
 	// interviewer, лог, колбэки событий/текста). Voice передаётся в методы как
@@ -197,6 +197,10 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/admin/templates", s.requireAdmin(http.HandlerFunc(s.handleAdminTemplateCreate)))
 	mux.Handle("PUT /api/v1/admin/templates/{id}", s.requireAdmin(http.HandlerFunc(s.handleAdminTemplateUpdate)))
 	mux.Handle("DELETE /api/v1/admin/templates/{id}", s.requireAdmin(http.HandlerFunc(s.handleAdminTemplateDelete)))
+	mux.Handle("GET /api/v1/admin/openings", s.requireAdmin(http.HandlerFunc(s.handleAdminOpenings)))
+	mux.Handle("PUT /api/v1/admin/openings", s.requireAdmin(http.HandlerFunc(s.handleAdminOpeningsPut)))
+	mux.Handle("GET /api/v1/admin/tts-voices", s.requireAdmin(http.HandlerFunc(s.handleAdminTTSVoices)))
+	mux.Handle("PUT /api/v1/admin/tts-voices", s.requireAdmin(http.HandlerFunc(s.handleAdminTTSVoicesPut)))
 
 	// Голосовой канал (WP-3, ADR-001): auth — токен в query/заголовке.
 	mux.HandleFunc("GET /ws/session/{id}", s.handleSessionWS)

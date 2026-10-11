@@ -61,6 +61,25 @@ func LoadOpenings(path string) (*Openings, error) {
 	return &Openings{list: f.Openings, last: map[int64]string{}, rnd: rand.New(rand.NewSource(time.Now().UnixNano()))}, nil
 }
 
+// OpeningsFromList — набор из списка (admin-запись, итерация 11). Пустой — nil
+// (вызов RandomFor вернёт "" — дефолтное начало, backward-compat).
+func OpeningsFromList(list []Opening) *Openings {
+	if len(list) == 0 {
+		return nil
+	}
+	return &Openings{list: list, last: map[int64]string{}, rnd: rand.New(rand.NewSource(time.Now().UnixNano()))}
+}
+
+// List — текущий набор (admin, итерация 11). Копия.
+func (o *Openings) List() []Opening {
+	if o == nil {
+		return nil
+	}
+	out := make([]Opening, len(o.list))
+	copy(out, o.list)
+	return out
+}
+
 // RandomFor — случайный вариант начала для грейда (учитывая userID для
 // анти-повтора). Возвращает "" если подходящих нет (вызовчик идёт по-старому).
 func (o *Openings) RandomFor(grade models.Grade, userID int64) string {
