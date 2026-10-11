@@ -324,6 +324,12 @@ export async function getReport(id: number): Promise<Report | 'generating'> {
   return (await res.json()) as Report;
 }
 
+/** Состояние холста Excalidraw (elements + appState) для PUT/GET whiteboard. */
+export interface WhiteboardState {
+  elements: unknown[];
+  appState: unknown;
+}
+
 /** Сохранение холста System Design (PUT /sessions/{id}/whiteboard, ADR-004). */
 export function saveWhiteboard(
   id: number,
@@ -335,6 +341,14 @@ export function saveWhiteboard(
     method: 'PUT',
     body: { state, structure, ...(pngB64 ? { png: pngB64 } : {}) },
   });
+}
+
+/** Чтение сохранённого холста System Design (GET /sessions/{id}/whiteboard, ADR-004):
+    восстановление схемы при возврате на стадию. 404 — схема не сохранялась. */
+export function getWhiteboard(
+  id: number,
+): Promise<{ state: WhiteboardState; structure: DesignStructure }> {
+  return request(`/sessions/${id}/whiteboard`);
 }
 
 /** Проверка доступности grade-api (GET /healthz, без авторизации). */

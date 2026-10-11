@@ -367,6 +367,40 @@ func (s *Server) handleWhiteboardPut(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "structure": structure})
 }
 
+// handleWhiteboardGet — GET /api/v1/sessions/{id}/whiteboard (ADR-004): ранее
+// сохранённая схема (state Excalidraw + структура) для восстановления холста при
+// возврате на стадию design. 200 — схема; 404 — не сохранялась.
+func (s *Server) handleWhiteboardGet(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseSessionID(w, r)
+	if !ok {
+		return
+	}
+	m, ok := s.ownedSession(w, r, id)
+	if !ok {
+		return
+	}
+	if session.IsTerminalStatus(m.Status) {
+		writeError(w, http.StatusConflict, "invalid_state", "сессия завершена")
+		return
+	}
+	state, blocks, _, err := s.whiteboards.Get(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, db.ErrWhiteboardNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "схема ещё не сохранялась")
+			return
+		}
+		s.log.Error("whiteboard get", "session", id, "err", err)
+		writeError(w, http.StatusInternalServerError, "internal", "ошибка чтения холста")
+		return
+	}
+	var structure any
+	_ = json.Unmarshal(blocks, &structure)
+	if structure == nil {
+		structure = map[string]any{"blocks": []string{}, "links": 0}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"state": json.RawMessage(state), "structure": structure})
+}
+
 // handleReportGet — GET /api/v1/sessions/{id}/report (WP-11).
 // 200 — отчёт; 202 — сессия завершена, отчёт генерируется; 409 — сессия не завершена.
 func (s *Server) handleReportGet(w http.ResponseWriter, r *http.Request) {

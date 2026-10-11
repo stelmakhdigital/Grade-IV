@@ -4,6 +4,7 @@
  * загрузка — тяжёлый бандл не попадает в критический путь кабинета.
  */
 import { Suspense, lazy, useEffect, useId, useRef } from 'react';
+import type { WhiteboardState } from '../../api';
 import type { DesignCanvasApi } from './DesignCanvasApi';
 
 const Excalidraw = lazy(() =>
@@ -44,6 +45,8 @@ async function exportCanvasPng(
 
 export interface ExcalidrawCanvasProps {
   apiRef: { current: DesignCanvasApi | null };
+  /** Ранее сохранённая схема (GET whiteboard) — восстанавливается в холст. */
+  initialState?: WhiteboardState | null;
 }
 
 // Цвета блоков палитры (ADR-004).
@@ -111,11 +114,13 @@ function blockElements(name: string, x: number, y: number): SceneElement[] {
   return [rect, text];
 }
 
-export function ExcalidrawCanvas({ apiRef }: ExcalidrawCanvasProps) {
+export function ExcalidrawCanvas({ apiRef, initialState }: ExcalidrawCanvasProps) {
   const label = useId();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const excalidraw = useRef<any>(null);
   const slot = useRef(0);
+  // Схема, которую нужно загрузить, пока ленивый Excalidraw ещё не готов.
+  const pendingRestore = useRef<WhiteboardState | null>(null);
 
   useEffect(() => {
     apiRef.current = {
@@ -148,6 +153,23 @@ export function ExcalidrawCanvas({ apiRef }: ExcalidrawCanvasProps) {
     };
   }, [apiRef]);
 
+  // Восстановление сохранённой схемы (GET whiteboard → холст): применяем, когда
+  // Excalidraw готов; иначе держим в pendingRestore (применит excalidrawAPI-колбэк).
+  useEffect(() => {
+    if (initialState === null || initialState === undefined) return;
+    const api = excalidraw.current;
+    if (api !== null) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (api as any).updateScene({
+        elements: initialState.elements ?? [],
+        appState: initialState.appState ?? {},
+      });
+      pendingRestore.current = null;
+    } else {
+      pendingRestore.current = initialState;
+    }
+  }, [initialState]);
+
   return (
     <div className="design-canvas">
       <Suspense fallback={<div className="muted">Загрузка холста…</div>}>
@@ -156,6 +178,14 @@ export function ExcalidrawCanvas({ apiRef }: ExcalidrawCanvasProps) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           excalidrawAPI={(api: any) => {
             excalidraw.current = api;
+            // Холст готов — применяем накопленное восстановление (если было).
+            if (pendingRestore.current !== null) {
+              api.updateScene({
+                elements: pendingRestore.current.elements ?? [],
+                appState: pendingRestore.current.appState ?? {},
+              });
+              pendingRestore.current = null;
+            }
           }}
           theme="dark"
           langCode="ru"

@@ -628,6 +628,12 @@ p {
   flex-direction: column;
   gap: 12px;
 }
+.design-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted, #9aa4b2);
+}
 .palette {
   display: flex;
   gap: 6px;

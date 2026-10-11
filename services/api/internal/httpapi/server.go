@@ -171,6 +171,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/sessions/{id}/runs", s.requireAuth(http.HandlerFunc(s.handleSessionRuns)))
 	mux.Handle("GET /api/v1/sessions/{id}/events", s.requireAuth(http.HandlerFunc(s.handleSessionEvents)))
 	mux.Handle("PUT /api/v1/sessions/{id}/whiteboard", s.requireAuth(http.HandlerFunc(s.handleWhiteboardPut)))
+	mux.Handle("GET /api/v1/sessions/{id}/whiteboard", s.requireAuth(http.HandlerFunc(s.handleWhiteboardGet)))
 	mux.Handle("GET /api/v1/sessions/{id}/report", s.requireAuth(http.HandlerFunc(s.handleReportGet)))
 
 	// Голосовой канал (WP-3, ADR-001): auth — токен в query/заголовке.
