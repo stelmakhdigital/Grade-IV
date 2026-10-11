@@ -191,6 +191,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/sessions/{id}/whiteboard", s.requireAuth(http.HandlerFunc(s.handleWhiteboardGet)))
 	mux.Handle("GET /api/v1/sessions/{id}/report", s.requireAuth(http.HandlerFunc(s.handleReportGet)))
 
+	// Admin (итерация 11): редактирование ВСЕХ шаблонов проекта. Только is_admin
+	// (requireAdmin = requireAuth + 403 для не-admin).
+	mux.Handle("GET /api/v1/admin/templates", s.requireAdmin(http.HandlerFunc(s.handleAdminTemplates)))
+	mux.Handle("POST /api/v1/admin/templates", s.requireAdmin(http.HandlerFunc(s.handleAdminTemplateCreate)))
+	mux.Handle("PUT /api/v1/admin/templates/{id}", s.requireAdmin(http.HandlerFunc(s.handleAdminTemplateUpdate)))
+	mux.Handle("DELETE /api/v1/admin/templates/{id}", s.requireAdmin(http.HandlerFunc(s.handleAdminTemplateDelete)))
+
 	// Голосовой канал (WP-3, ADR-001): auth — токен в query/заголовке.
 	mux.HandleFunc("GET /ws/session/{id}", s.handleSessionWS)
 	return s.withLogging(mux)

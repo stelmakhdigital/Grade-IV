@@ -114,6 +114,7 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 		// sqlite: ADD COLUMN IF NOT EXISTS отсутствует — дубликат колонки
 		// игнорируем (повторный запуск миграции).
 		alters = []string{
+			"ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0",
 			"ALTER TABLE sessions ADD COLUMN profile_id INTEGER REFERENCES interviewer_profiles(id)",
 			"ALTER TABLE sessions ADD COLUMN tts_speaker TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE reports ADD COLUMN verdict TEXT NOT NULL DEFAULT ''",
@@ -124,6 +125,7 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 	case DialectPostgres:
 		raw = schemaPostgres + "\n" + schemaPostgresProfiles
 		alters = []string{
+			"ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE",
 			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS profile_id BIGINT REFERENCES interviewer_profiles(id)",
 			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS tts_speaker TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS verdict TEXT NOT NULL DEFAULT ''",
@@ -183,6 +185,36 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 		if _, err := dbx.ExecContext(ctx, s); err != nil {
 			return fmt.Errorf("migrate interview_templates: %w", err)
 		}
+	}
+	// Первый зарегистрированный пользователь = admin (итерация 11). Идемпотентно:
+	// только если admin ещё нет.
+	if err := ensureFirstAdmin(ctx, dbx, d); err != nil {
+		return fmt.Errorf("first admin: %w", err)
+	}
+	return nil
+}
+
+// ensureFirstAdmin — пользователь с минимальным id получает is_admin=true
+// (решение пользователя: admin = первый зарегистрированный). Идемпотентно:
+// если admin уже есть — не трогаем. Работает на обоих диалектах (boolean-параметр).
+func ensureFirstAdmin(ctx context.Context, dbx *sql.DB, d Dialect) error {
+	var adminCount int
+	if err := dbx.QueryRowContext(ctx, d.q(`SELECT COUNT(*) FROM users WHERE is_admin`)).
+		Scan(&adminCount); err != nil {
+		return fmt.Errorf("count admins: %w", err)
+	}
+	if adminCount > 0 {
+		return nil
+	}
+	var minID sql.NullInt64
+	if err := dbx.QueryRowContext(ctx, d.q(`SELECT MIN(id) FROM users`)).Scan(&minID); err != nil {
+		return fmt.Errorf("min id: %w", err)
+	}
+	if !minID.Valid {
+		return nil // пользователей нет
+	}
+	if _, err := dbx.ExecContext(ctx, d.q(`UPDATE users SET is_admin = ? WHERE id = ?`), true, minID.Int64); err != nil {
+		return fmt.Errorf("update: %w", err)
 	}
 	return nil
 }

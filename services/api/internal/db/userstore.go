@@ -56,20 +56,20 @@ func (s *UserStore) CreateUser(ctx context.Context, email, passwordHash string) 
 
 // GetUserByEmail — по email (в любом регистре).
 func (s *UserStore) GetUserByEmail(ctx context.Context, email string) (models.User, error) {
-	return s.scanUser(ctx, s.d.q(`SELECT id, email, password_hash, created_at FROM users WHERE email = ?`),
+	return s.scanUser(ctx, s.d.q(`SELECT id, email, password_hash, created_at, is_admin FROM users WHERE email = ?`),
 		strings.ToLower(strings.TrimSpace(email)))
 }
 
 // GetUserByID — по идентификатору.
 func (s *UserStore) GetUserByID(ctx context.Context, id int64) (models.User, error) {
-	return s.scanUser(ctx, s.d.q(`SELECT id, email, password_hash, created_at FROM users WHERE id = ?`), id)
+	return s.scanUser(ctx, s.d.q(`SELECT id, email, password_hash, created_at, is_admin FROM users WHERE id = ?`), id)
 }
 
 func (s *UserStore) scanUser(ctx context.Context, query string, arg any) (models.User, error) {
 	var u models.User
 	var createdAt string
 	err := s.db.QueryRowContext(ctx, query, arg).
-		Scan(&u.ID, &u.Email, &u.PasswordHash, &createdAt)
+		Scan(&u.ID, &u.Email, &u.PasswordHash, &createdAt, &u.IsAdmin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.User{}, ErrUserNotFound
 	}

@@ -75,6 +75,7 @@ type User struct {
 	Email        string
 	PasswordHash string
 	CreatedAt    time.Time
+	IsAdmin      bool // итерация 11: admin (первый зарегистрированный) — доступ к /api/v1/admin/*
 }
 
 // Session — сессия мок-интервью.

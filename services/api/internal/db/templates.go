@@ -196,3 +196,81 @@ func (s *TemplateStore) Create(ctx context.Context, t *Template) error {
 	t.CreatedAt, t.UpdatedAt = time.Now().UTC(), time.Now().UTC()
 	return nil
 }
+
+// ListAll — ВСЕ шаблоны (admin, итерация 11): по грейду, стеку, дефолтные первыми.
+func (s *TemplateStore) ListAll(ctx context.Context) ([]*Template, error) {
+	rows, err := s.db.QueryContext(ctx, s.d.q(
+		"SELECT "+templateCols+" FROM interview_templates "+
+			"ORDER BY grade ASC, stack ASC, is_default DESC, id ASC"))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Template
+	for rows.Next() {
+		t, err := s.scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, &t)
+	}
+	return out, rows.Err()
+}
+
+// Update — изменение шаблона (admin, итерация 11). Смена is_default атомарна в
+// рамках grade+stack: если ставим is_default=true — снимаем с других в
+// (grade, stack OR '*').
+func (s *TemplateStore) Update(ctx context.Context, t *Template) error {
+	blocksJSON, err := json.Marshal(t.Blocks)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	isDefault := 0
+	if t.IsDefault {
+		isDefault = 1
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if isDefault == 1 {
+		if _, err := tx.ExecContext(ctx, s.d.q(
+			"UPDATE interview_templates SET is_default = 0, updated_at = ? "+
+				"WHERE grade = ? AND (stack = ? OR stack = '*') AND id != ?"),
+			now, t.Grade, t.Stack, t.ID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, s.d.q(
+		"UPDATE interview_templates SET name = ?, grade = ?, stack = ?, duration_s = ?, "+
+			"blocks = ?, is_default = ?, updated_at = ? WHERE id = ?"),
+		t.Name, t.Grade, t.Stack, t.DurationS, string(blocksJSON), isDefault, now, t.ID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	t.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+// Delete — удаление шаблона (admin, итерация 11).
+func (s *TemplateStore) Delete(ctx context.Context, id int64) error {
+	if _, err := s.db.ExecContext(ctx, s.d.q(
+		"DELETE FROM interview_templates WHERE id = ?"), id); err != nil {
+		return err
+	}
+	return nil
+}
+
+// CountDefaults — число дефолтных шаблонов грейда (любой стек; admin, итерация 11).
+// Для защиты: нельзя удалить единственный дефолт грейда (оставит без дефолта).
+func (s *TemplateStore) CountDefaults(ctx context.Context, grade models.Grade) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, s.d.q(
+		"SELECT COUNT(*) FROM interview_templates WHERE grade = ? AND is_default = 1"),
+		grade).Scan(&n)
+	return n, err
+}

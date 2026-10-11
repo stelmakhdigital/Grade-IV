@@ -22,6 +22,7 @@ type userOut struct {
 	ID        int64  `json:"id"`
 	Email     string `json:"email"`
 	CreatedAt string `json:"created_at"`
+	IsAdmin   bool   `json:"is_admin"` // итерация 11
 }
 
 type tokenResp struct {
@@ -32,7 +33,7 @@ type tokenResp struct {
 }
 
 func toUserOut(u models.User) userOut {
-	return userOut{ID: u.ID, Email: u.Email, CreatedAt: u.CreatedAt.UTC().Format(time.RFC3339)}
+	return userOut{ID: u.ID, Email: u.Email, CreatedAt: u.CreatedAt.UTC().Format(time.RFC3339), IsAdmin: u.IsAdmin}
 }
 
 // completeAuth — выпуск токена и финальный ответ аутентификации.
