@@ -42,6 +42,9 @@ LLM_MOCK="${LLM_MOCK:-0}"
 STT_MODEL="${STT_MODEL:-large-v3}"
 STT_DEVICE="${STT_DEVICE:-cuda}"
 STT_COMPUTE_TYPE="${STT_COMPUTE_TYPE:-float16}"
+# STT-провайдер: gigaam (default, GigaAM v3 — RU WER в ~2 раза ниже Whisper) | faster-whisper | fake
+VOICE_STT_PROVIDER="${VOICE_STT_PROVIDER:-gigaam}"
+GIGAAM_MODEL="${GIGAAM_MODEL:-v3_e2e_rnnt}"
 VOICE_MODELS="$ROOT/services/voice/models"
 # SESSION_LIMIT_S: off — без ограничения времени сессии (dev); число — секунд;
 # пустое — лимит по грейду. Переопределяется переменной окружения.
@@ -127,13 +130,21 @@ do_start() {
   (cd "$ROOT" && SANDBOX_MODE=subprocess SANDBOX_WORKDIR_BASE="$RUN/sbxw" \
     "$SBX_BIN" >>"$LOGS/sandbox.log" 2>&1 & nohup "$SBX_BIN" >>"$LOGS/sandbox.log" 2>&1 & echo $! >"$PIDS/sandbox.pid")
 
-  echo "==> voice :8100 (модели: $VOICE_MODELS/stt, $VOICE_MODELS/tts; STT: $STT_DEVICE/$STT_COMPUTE_TYPE, $STT_MODEL)"
-  if [[ ! -d "$VOICE_MODELS/stt" || ! -f "$VOICE_MODELS/tts/silero-tts-v5_ru.pt" ]]; then
-    echo "!! модели не найдены в $VOICE_MODELS — сначала: MODELS_DIR=$PWD/services/voice/models bash scripts/download-models.sh" >&2
+  echo "==> voice :8100 (STT: $VOICE_STT_PROVIDER${VOICE_STT_PROVIDER:+/$GIGAAM_MODEL}; TTS: $VOICE_MODELS/tts)"
+  if [[ ! -f "$VOICE_MODELS/tts/silero-tts-v5_ru.pt" ]]; then
+    echo "!! TTS-модель не найдена в $VOICE_MODELS — сначала: MODELS_DIR=$PWD/services/voice/models bash scripts/download-models.sh" >&2
+  fi
+  if [[ "$VOICE_STT_PROVIDER" == "gigaam" && ! -f "$VOICE_MODELS/stt-gigaam/$GIGAAM_MODEL.ckpt" ]]; then
+    echo "!! GigaAM-модель $GIGAAM_MODEL.ckpt не найдена в $VOICE_MODELS/stt-gigaam — сначала: MODELS_DIR=$PWD/services/voice/models bash scripts/download-models.sh" >&2
+  fi
+  if [[ "$VOICE_STT_PROVIDER" == "faster-whisper" && ! -d "$VOICE_MODELS/stt" ]]; then
+    echo "!! faster-whisper-модели не найдены в $VOICE_MODELS/stt — сначала: STT_MODEL=$STT_MODEL MODELS_DIR=$PWD/services/voice/models bash scripts/download-models.sh" >&2
   fi
   # TTS_SPEAKER: мужской голос по умолчанию (персона интервьюера — мужчина);
   # переопределить: TTS_SPEAKER=eugene|ru_01 make run-all
-  (cd "$ROOT/services/voice" && STT_MODEL="$STT_MODEL" STT_DEVICE="$STT_DEVICE" \
+  (cd "$ROOT/services/voice" && VOICE_STT_PROVIDER="$VOICE_STT_PROVIDER" \
+    GIGAAM_MODEL="$GIGAAM_MODEL" GIGAAM_DOWNLOAD_ROOT="$VOICE_MODELS/stt-gigaam" \
+    STT_MODEL="$STT_MODEL" STT_DEVICE="$STT_DEVICE" \
     STT_COMPUTE_TYPE="$STT_COMPUTE_TYPE" \
     LD_LIBRARY_PATH="$VOICE_CUDA_LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     STT_DOWNLOAD_ROOT="$VOICE_MODELS/stt" TTS_MODEL_DIR="$VOICE_MODELS/tts" \

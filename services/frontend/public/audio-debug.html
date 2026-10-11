@@ -127,72 +127,60 @@ $('connect').onclick = async () => {
   ws.onerror = () => log('WS ошибка', 'err');
 };
 // --- Проверка микрофона ---
-let micRec = null;
-async function micCheck(audioConstraints, tag) {
+// ВАЖНО (фикс искажений, 2026-10-11): старый вариант брал an.getFloatTimeDomainData
+// (последние fftSize=1024 сэмпла) по интервалу 100 мс → терял ~78% сэмплов
+// (на 48 кГц за 100 мс наступает 4800 сэмплов) → запись «в ужатом виде» (~4.7× быстрее) с искажениями;
+// плюс WAV-заголовок хардкодил 48000 Гц при фактическом ac.sampleRate (16 кГц с AEC-констрейнтом).
+// Теперь: тот же AudioWorklet (PcmCapture), что в приложении → Int16-чанки 16 кГц —
+// WAV = ровно то аудио, которое уходит в STT (можно скормить /api/v1/stt для проверки).
+async function micCheck(audioConstraints, tag, fileTag) {
   const st = $('micstate');
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
-    log('getUserMedia [' + tag + '] OK: ' + JSON.stringify(audioConstraints));
     const ac = new AudioContext();
+    if (ac.state === 'suspended') { try { await ac.resume(); } catch (e) {} }
+    await ac.audioWorklet.addModule(URL.createObjectURL(new Blob([WL_CODE], { type: 'application/javascript' })));
     const src = ac.createMediaStreamSource(stream);
-    const an = ac.createAnalyser();
-    an.fftSize = 1024;
-    src.connect(an);
-    st.textContent = 'устройство: ' + (stream.getAudioTracks()[0].label || 'по умолчанию') + ' @ ' + ac.sampleRate + ' Гц';
-    st.style.color = '#3fb950';
-    const data = new Float32Array(an.fftSize);
-    const chunks = [];
-    let n = 0;
-    let maxRms = 0;
-    const iv = setInterval(() => {
-      an.getFloatTimeDomainData(data);
-      let s = 0;
-      for (let i = 0; i < data.length; i++) s += data[i] * data[i];
-      const rms = Math.sqrt(s / data.length);
-      if (rms > maxRms) maxRms = rms;
-      $('micbar').style.width = Math.min(100, rms * 400) + '%';
-      // накапливаем float32 -> int16 для WAV
-      const i16 = new Int16Array(data.length);
-      for (let i = 0; i < data.length; i++) i16[i] = Math.max(-32768, Math.min(32767, Math.round(data[i] * 32768)));
-      chunks.push(i16);
-      n += i16.length;
-    }, 100);
+    const node = new AudioWorkletNode(ac, 'pcm-capture', {
+      numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+      processorOptions: { inputRate: ac.sampleRate, targetRate: 16000, chunkSamples: 4000 },
+    });
+    const wav = new WavBuilder(); // 16 кГц mono PCM16 (заголовок WavBuilder = 16000)
+    let maxRms = 0, chunks = 0;
+    node.port.onmessage = (e) => {
+      const d = e.data;
+      if (d instanceof Int16Array) { wav.push(d); chunks++; }
+      else if (d && d.kind === 'level' && d.rms > maxRms) maxRms = d.rms;
+    };
+    src.connect(node);
+    const g = ac.createGain(); g.gain.value = 0;
+    node.connect(g); g.connect(ac.destination);
+    st.textContent = 'записываю 5 с [' + tag + '] (ctx=' + ac.sampleRate + ' Гц) — говорите!';
+    st.style.color = '#8b949e';
     await new Promise(r => setTimeout(r, 5000));
-    clearInterval(iv);
+    node.disconnect();
     stream.getTracks().forEach(t => t.stop());
     await ac.close();
-    $('micbar').style.width = '0%';
-    // WAV из накопленного (частота ctx.sampleRate)
-    const rate = 48000; // приблизительная; для прослушки достаточно
-    const total = new Int16Array(n);
-    let off = 0;
-    for (const c of chunks) { total.set(c, off); off += c.length; }
-    const buf = new ArrayBuffer(44 + total.byteLength);
-    const v = new DataView(buf);
-    const ws2 = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
-    ws2(0, 'RIFF'); v.setUint32(4, 36 + total.byteLength, true); ws2(8, 'WAVE');
-    ws2(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-    v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
-    ws2(36, 'data'); v.setUint32(40, total.byteLength, true);
-    new Uint8Array(buf, 44).set(new Uint8Array(total.buffer));
-    const url = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+    const rate = 16000;
+    const url = URL.createObjectURL(wav.blob());
     const a = document.createElement('a');
-    a.href = url; a.download = 'mic-test.wav';
+    a.href = url; a.download = 'mic-test-' + fileTag + '.wav';
     $('downloads').appendChild(a);
-    a.textContent = 'Скачать mic-test.wav (5 с с микрофона)';
+    a.textContent = 'Скачать mic-test-' + fileTag + '.wav (' + (wav.n / rate).toFixed(1) + ' с, 16 кГц — то, что слышит STT)';
     a.style.cssText = 'display:inline-block;margin:4px;padding:8px 16px;background:#238636;color:white;border-radius:6px;text-decoration:none';
-    st.textContent = '[' + tag + '] max RMS = ' + maxRms.toFixed(4) + (maxRms < 0.001 ? ' — ТИШИНА!' : ' — звук есть') + ' · wav ниже';
-    log('Микрофон: записал 5 с (' + (n / rate).toFixed(1) + ' с аудио)', 'ok');
+    st.textContent = '[' + tag + '] ' + chunks + ' чанков, max RMS = ' + maxRms.toFixed(4) + (maxRms < 0.001 ? ' — ТИШИНА!' : ' — звук есть');
+    st.style.color = maxRms >= 0.001 ? '#3fb950' : '#f85149';
+    log('Микрофон [' + tag + ']: записал ' + (wav.n / rate).toFixed(1) + ' с @ 16 кГц (тот же worklet, что в приложении)', 'ok');
   } catch (err) {
     st.textContent = 'ОШИБКА [' + tag + ']: ' + err.message;
     st.style.color = '#f85149';
     log('getUserMedia [' + tag + ']: ' + err.message, 'err');
   }
 }
-$('micbtn').onclick = () => micCheck({ channelCount: 1 }, 'RAW');
+$('micbtn').onclick = () => micCheck({ channelCount: 1 }, 'RAW', 'raw');
 $('micbtnaec').onclick = () => micCheck(
   { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true },
-  'AEC/NS (то же, что в приложении)');
+  'AEC/NS (как в приложении)', 'aec');
 // автозаполнение ID из hash (#12)
 if (location.hash) $('sid').value = location.hash.slice(1);
 

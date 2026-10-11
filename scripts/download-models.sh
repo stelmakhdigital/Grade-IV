@@ -2,9 +2,10 @@
 # Скачивание моделей для системы «Грейд» в MODELS_DIR (default /mnt/models).
 #
 # Что скачивается:
-#   stt/  — faster-whisper (Systran/faster-whisper-{STT_MODEL}, default small)
-#   tts/  — Silero TTS v5 RU (silero-tts-v5_ru.pt)
-#   llm/  — Qwen3.8-27B-Instruct (для vLLM; ~60 ГБ fp16 / ~30 ГБ int8)
+#   stt/         — faster-whisper (Systran/faster-whisper-{STT_MODEL}, default small)
+#   stt-gigaam/  — GigaAM v3 (Sber, MIT; дефолт STT: v3_e2e_rnnt — пунктуация, WER в ~2 раза ниже Whisper)
+#   tts/         — Silero TTS v5 RU (silero-tts-v5_ru.pt)
+#   llm/         — Qwen3.8-27B-Instruct (для vLLM; ~60 ГБ fp16 / ~30 ГБ int8)
 #
 # VAD (silero_vad_v6.onnx) — в комплекте с faster-whisper (не скачивается).
 #
@@ -23,11 +24,11 @@ TTS_URL="https://models.silero.ai/models/tts/ru/v5_ru.pt"
 LLM_MODEL="${LLM_MODEL:-Qwen/Qwen3.8-27B-Instruct}"
 
 echo "=== Целевая дирекория: $MODELS_DIR ==="
-mkdir -p "$MODELS_DIR/stt" "$MODELS_DIR/tts" "$MODELS_DIR/llm"
+mkdir -p "$MODELS_DIR/stt" "$MODELS_DIR/stt-gigaam" "$MODELS_DIR/tts" "$MODELS_DIR/llm"
 
 # --- 1) STT: faster-whisper (HuggingFace) ---
 echo ""
-echo "=== [1/3] STT: faster-whisper $STT_MODEL (~$([ "$STT_MODEL" = "large-v3" ] && echo "3 ГБ" || echo "460 МБ")) ==="
+echo "=== [1/4] STT: faster-whisper $STT_MODEL (~$([ "$STT_MODEL" = "large-v3" ] && echo "3 ГБ" || echo "460 МБ")) ==="
 if [ -d "$MODELS_DIR/stt/Systran/faster-whisper-$STT_MODEL" ]; then
   echo "  Уже существует: $MODELS_DIR/stt/Systran/faster-whisper-$STT_MODEL"
 else
@@ -52,7 +53,7 @@ fi
 
 # --- 2) TTS: Silero v5 RU ---
 echo ""
-echo "=== [2/3] TTS: Silero v5 RU (~150 МБ) ==="
+echo "=== [2/4] TTS: Silero v5 RU (~150 МБ) ==="
 if [ -f "$MODELS_DIR/tts/$TTS_MODEL_FILE" ]; then
   echo "  Уже существует: $MODELS_DIR/tts/$TTS_MODEL_FILE"
 else
@@ -61,9 +62,24 @@ else
   echo "  Скачано: $MODELS_DIR/tts/$TTS_MODEL_FILE"
 fi
 
-# --- 3) LLM: Qwen3.8-27B-Instruct (HuggingFace, для vLLM) ---
+# --- 3) STT: GigaAM v3 (Sber, MIT; дефолт STT проекта) ---
 echo ""
-echo "=== [3/3] LLM: $LLM_MODEL (~60 ГБ fp16) ==="
+echo "=== [3/4] STT: GigaAM v3 E2E/CTC/RNNT (CDN Sber, ~1.8 ГБ всего) ==="
+GIGAAM_DIR="$MODELS_DIR/stt-gigaam"
+GIGAAM_URL="https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM"
+for f in v3_e2e_rnnt.ckpt v3_e2e_ctc.ckpt v3_rnnt.ckpt v3_ctc.ckpt \
+         v3_e2e_rnnt_tokenizer.model v3_e2e_ctc_tokenizer.model; do
+  if [ -f "$GIGAAM_DIR/$f" ]; then
+    echo "  Уже существует: $f"
+  else
+    curl -L --progress-bar -o "$GIGAAM_DIR/$f.part" "$GIGAAM_URL/$f"
+    mv "$GIGAAM_DIR/$f.part" "$GIGAAM_DIR/$f"
+  fi
+done
+
+# --- 4) LLM: Qwen3.8-27B-Instruct (HuggingFace, для vLLM) ---
+echo ""
+echo "=== [4/4] LLM: $LLM_MODEL (~60 ГБ fp16) ==="
 echo "  (Это большая загрузка. Для CPU-демо можно пропустить: LLM_MOCK=1.)"
 read -p "  Скачать LLM-модель? [y/N] " -r
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -88,7 +104,10 @@ echo ""
 echo "=== Готово ==="
 echo ""
 echo "Теперь задайте в .env (или окружении):"
-echo "  STT_DOWNLOAD_ROOT=$MODELS_DIR/stt"
+echo "  VOICE_STT_PROVIDER=gigaam  (дефолт STT проекта, GigaAM v3)"
+echo "  GIGAAM_DOWNLOAD_ROOT=$MODELS_DIR/stt-gigaam"
+echo "  # резервный провайдер:"
+echo "  VOICE_STT_PROVIDER=faster-whisper  STT_DOWNLOAD_ROOT=$MODELS_DIR/stt"
 echo "  TTS_MODEL_DIR=$MODELS_DIR/tts"
 echo "  LLM_BASE_URL=http://LLM_NODE:8001/v1  (если vLLM на отдельном узле)"
 echo ""

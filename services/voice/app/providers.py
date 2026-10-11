@@ -15,6 +15,35 @@ from typing import Protocol
 SAMPLE_RATE = 16000
 
 
+def extract_pcm16(data: bytes) -> tuple[bytes, int] | None:
+    """Извлекает PCM16 mono из буфера: WAV (RIFF) или raw PCM16.
+
+    Возвращает ``(pcm, sample_rate)`` (sample_rate=0 — raw, задаёт вызывающий)
+    или ``None``, если формат не поддерживается (не PCM16 mono / битый заголовок).
+    Общий утил리티 для всех STT-провайдеров (faster-whisper, gigaam).
+    """
+    import struct
+
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        if len(data) < 44:
+            return None
+        audio_format = struct.unpack_from("<H", data, 20)[0]
+        channels = struct.unpack_from("<H", data, 22)[0]
+        sample_rate = struct.unpack_from("<I", data, 24)[0]
+        bits = struct.unpack_from("<H", data, 34)[0]
+        if audio_format != 1 or bits != 16 or channels != 1:
+            return None
+        pos = 12
+        while pos + 8 <= len(data):
+            chunk_id = data[pos : pos + 4]
+            chunk_size = struct.unpack_from("<I", data, pos + 4)[0]
+            if chunk_id == b"data":
+                return data[pos + 8 : pos + 8 + chunk_size], sample_rate
+            pos += 8 + chunk_size + (chunk_size % 2)  # чанки выравниваются по 2 байта
+        return None
+    return data, 0  # raw PCM16 mono
+
+
 @dataclass(frozen=True)
 class STTResult:
     """Результат распознавания реплики."""

@@ -12,42 +12,15 @@ from __future__ import annotations
 
 import logging
 import os
-import struct
 import threading
 
 import numpy as np
 
-from .providers import SAMPLE_RATE, STTResult
+from .providers import SAMPLE_RATE, STTResult, extract_pcm16
 
 logger = logging.getLogger("voice.stt")
 
 MODEL_SIZES = ("tiny", "base", "small", "mid", "medium", "large-v3")
-
-
-def extract_pcm16(data: bytes) -> tuple[bytes, int] | None:
-    """Извлекает PCM16 mono из буфера: WAV (RIFF) или raw PCM16.
-
-    Возвращает ``(pcm, sample_rate)`` (sample_rate=0 — raw, задаёт вызывающий)
-    или ``None``, если формат не поддерживается (не PCM16 mono / битый заголовок).
-    """
-    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
-        if len(data) < 44:
-            return None
-        audio_format = struct.unpack_from("<H", data, 20)[0]
-        channels = struct.unpack_from("<H", data, 22)[0]
-        sample_rate = struct.unpack_from("<I", data, 24)[0]
-        bits = struct.unpack_from("<H", data, 34)[0]
-        if audio_format != 1 or bits != 16 or channels != 1:
-            return None
-        pos = 12
-        while pos + 8 <= len(data):
-            chunk_id = data[pos : pos + 4]
-            chunk_size = struct.unpack_from("<I", data, pos + 4)[0]
-            if chunk_id == b"data":
-                return data[pos + 8 : pos + 8 + chunk_size], sample_rate
-            pos += 8 + chunk_size + (chunk_size % 2)  # чанки выравниваются по 2 байта
-        return None
-    return data, 0  # raw PCM16 mono
 
 
 class FasterWhisperSTT:
