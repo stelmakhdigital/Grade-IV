@@ -187,20 +187,53 @@ export function SessionView({ id }: { id: number }) {
           </div>
 
           {stage === 'livecode' && session !== null ? (
-            <Suspense fallback={<PanelLoading />}>
-              <LiveCodePanel
-                sessionId={id}
-                stack={session.stack}
-                taskId={task?.id}
-                taskTitle={task?.title}
-                taskFiles={task?.files ?? null}
-                review={runReview}
-              />
-            </Suspense>
+            <>
+              <Suspense fallback={<PanelLoading />}>
+                <LiveCodePanel
+                  sessionId={id}
+                  stack={session.stack}
+                  taskId={task?.id}
+                  taskTitle={task?.title}
+                  taskFiles={task?.files ?? null}
+                  review={runReview}
+                />
+              </Suspense>
+              {/* Кнопка перехода в System Design: только для грейдов, где design
+                  входит в программу (Middle/Senior/Staff; Junior — livecode→report).
+                  Раньше была в else-ветке тернарного выражения (видна только в
+                  voice-стадии) и в livecode не рендерилась — стадия design была
+                  недостижима из UI. */}
+              {session.grade !== 'junior' && (
+                <div className="stage-nav" data-testid="stage-nav">
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    onClick={() => onStageAction('design')}
+                    data-testid="go-design"
+                  >
+                    К System Design
+                  </button>
+                </div>
+              )}
+            </>
           ) : stage === 'design' ? (
-            <Suspense fallback={<PanelLoading />}>
-              <DesignPanel sessionId={id} review={designReview} />
-            </Suspense>
+            <>
+              <Suspense fallback={<PanelLoading />}>
+                <DesignPanel sessionId={id} review={designReview} />
+              </Suspense>
+              {/* Возврат на предыдущую стадию разрешён (движок); холст при возврате
+                  восстанавливается из сохранённого whiteboard. */}
+              <div className="stage-nav" data-testid="stage-nav">
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={() => onStageAction('livecode')}
+                  data-testid="go-livecode-back"
+                >
+                  К Live-Code (назад)
+                </button>
+              </div>
+            </>
           ) : (
             <>
           {task !== null && task.statement !== undefined && (

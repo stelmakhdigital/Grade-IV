@@ -476,6 +476,15 @@ p {
   margin-top: 12px;
 }
 
+/* Навигация между стадиями (кнопки перехода) в панелях livecode/design. */
+.stage-nav {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
 .btn.danger {
   background: #e06c75;
   border-color: #e06c75;
