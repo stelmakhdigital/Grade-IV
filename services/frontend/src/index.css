@@ -98,6 +98,104 @@ p {
   font-size: 13px;
 }
 
+/* ------------------------------------------------- модальное окно (F6: вакансия) */
+
+.vacancy-row {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.vacancy-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  color: #7aa2f7;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.vacancy-link:hover {
+  color: #9cc0ff;
+}
+
+.vacancy-indicator {
+  font-size: 12px;
+  color: #98c379;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 10, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 1000;
+}
+
+.modal-box {
+  background: #10141d;
+  border: 1px solid #2a3140;
+  border-radius: 12px;
+  padding: 24px;
+  width: 100%;
+  max-width: 640px;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.modal-head h3 {
+  margin: 0;
+  color: #d6dbe5;
+  font-size: 18px;
+}
+
+.modal-desc {
+  color: #9aa4b8;
+  font-size: 14px;
+  margin: 0 0 16px;
+}
+
+.modal-textarea {
+  width: 100%;
+  min-height: 240px;
+  resize: vertical;
+  background: #0b0e14;
+  border: 1px solid #2a3140;
+  border-radius: 8px;
+  color: #d6dbe5;
+  font: inherit;
+  font-size: 14px;
+  padding: 12px;
+}
+.modal-textarea:focus {
+  outline: none;
+  border-color: #7aa2f7;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 16px;
+}
+.modal-actions .spacer {
+  flex: 1;
+}
+
 /* ------------------------------------------------------------------ форма */
 
 .field {

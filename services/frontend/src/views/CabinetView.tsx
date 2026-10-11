@@ -7,10 +7,12 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
   createSession,
+  getVacancy,
   listProfiles,
   listSessions,
   listTemplates,
   listTTSVoices,
+  saveVacancy,
   ApiError,
   type Grade,
   type InterviewProfile,
@@ -56,6 +58,12 @@ export function CabinetView() {
   const [ttsSpeakerDefault, setTtsSpeakerDefault] = useState<string>('');
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  // F6 (итерация 12): вакансия/кампания (модалка + индикатор в кабинете).
+  const [vacancyOpen, setVacancyOpen] = useState(false);
+  const [vacancyText, setVacancyText] = useState<string>('');
+  const [vacancyDraft, setVacancyDraft] = useState<string>('');
+  const [vacancyBusy, setVacancyBusy] = useState(false);
+  const [vacancyError, setVacancyError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -117,6 +125,15 @@ export function CabinetView() {
     return () => { cancelled = true; };
   }, []);
 
+  // F6 (итерация 12): загружаем сохранённую вакансию кандидата (профиль).
+  useEffect(() => {
+    let cancelled = false;
+    getVacancy()
+      .then((d) => { if (!cancelled) setVacancyText(d.vacancy_text ?? ''); })
+      .catch(() => { if (!cancelled) setVacancyText(''); });
+    return () => { cancelled = true; };
+  }, []);
+
 
   const onStart = async (e: FormEvent) => {
     e.preventDefault();
@@ -133,6 +150,43 @@ export function CabinetView() {
       }
     } finally {
       setStarting(false);
+    }
+  };
+
+  // F6 (итерация 12): модалка вакансии — открыть/сохранить/сбросить.
+  const openVacancy = () => {
+    setVacancyDraft(vacancyText);
+    setVacancyError(null);
+    setVacancyOpen(true);
+  };
+  const closeVacancy = () => setVacancyOpen(false);
+  const onVacancySave = async () => {
+    if (vacancyBusy) return;
+    setVacancyBusy(true);
+    setVacancyError(null);
+    try {
+      // Пустая строка = сброс (предсказуемо: saveVacancy('') очищает профиль).
+      const d = await saveVacancy(vacancyDraft);
+      setVacancyText(d.vacancy_text ?? vacancyDraft);
+      setVacancyOpen(false);
+    } catch (e) {
+      setVacancyError(apiErrorMessage(e));
+    } finally {
+      setVacancyBusy(false);
+    }
+  };
+  const onVacancyReset = async () => {
+    if (vacancyBusy) return;
+    setVacancyBusy(true);
+    setVacancyError(null);
+    try {
+      const d = await saveVacancy('');
+      setVacancyText(d.vacancy_text ?? '');
+      setVacancyDraft('');
+    } catch (e) {
+      setVacancyError(apiErrorMessage(e));
+    } finally {
+      setVacancyBusy(false);
     }
   };
 
@@ -231,6 +285,16 @@ export function CabinetView() {
             {starting ? 'Запуск…' : 'Начать интервью'}
           </button>
         </form>
+        <div className="vacancy-row">
+          <button type="button" className="vacancy-link" onClick={openVacancy} data-testid="vacancy-open">
+            Хочу попасть в кампанию
+          </button>
+          {vacancyText.length > 0 && (
+            <span className="vacancy-indicator" data-testid="vacancy-indicator">
+              Вакансия: сохранена ({vacancyText.length} симв.)
+            </span>
+          )}
+        </div>
       </section>
 
       <section className="card" aria-labelledby="history">
@@ -286,6 +350,67 @@ export function CabinetView() {
           </table>
         )}
       </section>
+
+      {vacancyOpen && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => { if (e.target === e.currentTarget) closeVacancy(); }}
+        >
+          <div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="vacancy-title">
+            <div className="modal-head">
+              <h3 id="vacancy-title">Хочу попасть в кампанию</h3>
+              <button type="button" className="btn ghost small" onClick={closeVacancy} aria-label="Закрыть">
+                ✕
+              </button>
+            </div>
+            <p className="modal-desc">
+              Вставьте описание реальной вакансии, в которую хотите попасть. ИИ-интервьюер
+              проведёт собеседование так, будто он из этой компании: будет отталкиваться от
+              стека, процессов и контекста вакансии, адаптируя глубину под выбранный грейд.
+            </p>
+            <textarea
+              className="modal-textarea"
+              value={vacancyDraft}
+              onChange={(e) => setVacancyDraft(e.target.value)}
+              placeholder="Описание вакансии: компания, стек, задачи, требования…"
+              maxLength={20000}
+              data-testid="vacancy-textarea"
+            />
+            {vacancyDraft.length > 0 && (
+              <div className="muted small" style={{ marginTop: 6 }} data-testid="vacancy-counter">
+                {vacancyDraft.length} / 20000
+              </div>
+            )}
+            {vacancyError !== null && (
+              <p className="form-error" role="alert">{vacancyError}</p>
+            )}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn danger"
+                onClick={() => void onVacancyReset()}
+                disabled={vacancyBusy || vacancyDraft === ''}
+                data-testid="vacancy-reset"
+              >
+                Сбросить
+              </button>
+              <div className="spacer" />
+              <button type="button" className="btn" onClick={closeVacancy} disabled={vacancyBusy}>
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => void onVacancySave()}
+                disabled={vacancyBusy}
+                data-testid="vacancy-save"
+              >
+                {vacancyBusy ? 'Сохранение…' : 'Сохранить'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

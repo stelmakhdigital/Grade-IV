@@ -154,6 +154,23 @@ export function me(): Promise<MeResult> {
   return request<MeResult>('/auth/me', { auth: true });
 }
 
+// ------------------------------------------------------------------ Vacancy (F6, итерация 12)
+
+/** Вакансия/кампания кандидата (F6, итерация 12): GET /me/vacancy. */
+export function getVacancy(): Promise<{ vacancy_text: string }> {
+  return request<{ vacancy_text: string }>('/me/vacancy', { auth: true });
+}
+
+/** Сохранить/сбросить вакансию кандидата (F6, итерация 12): PUT /me/vacancy.
+    Пустая строка = сброс. Лимит 20000 символов (бэкенд валидирует). */
+export function saveVacancy(text: string): Promise<{ vacancy_text: string }> {
+  return request<{ vacancy_text: string }>('/me/vacancy', {
+    method: 'PUT',
+    body: { vacancy_text: text },
+    auth: true,
+  });
+}
+
 // ---------------------------------------------------------------- sessions
 
 export interface InterviewTemplate {
