@@ -99,6 +99,34 @@ scripts/      run-all.sh (dev-стек), download-models.sh (модели)
 FOR_RUN/      (gitignore) dev-БД, логи, PID
 ```
 
+## Шаблонизация и промпты (A6)
+
+Единый источник правды для текстов программ/промптов интервьюера:
+
+- **Сид (код)** — `services/api/internal/interviewer/prompts.go`: `gradeProgram`
+  (программа по грейду), `gradeFocus`, `persona`, `toneBlocks`, `difficultyBlocks`.
+  Каждый текст определён **ровно один раз**. `interviewer.DefaultPrograms()` —
+  только выводит из них дефолтные шаблоны (не дублирует литералы).
+- **База данных** — таблица `interview_templates` (редактируемые через Admin-UI):
+  `db.Template.ProgramString()` — форматтер блоков шаблона в текст промпта (изменяемый
+  источник, не дублирование сида).
+
+**Runtime-precedence** (закреплён кодом, `session/engine_lifecycle.go`):
+
+1. **Шаблон сессии** — `template_id`, выбранный кандидатом в кабинете (по id)
+   или дефолтный для грейда (строка `interview_templates` в БД). Его программа
+   фиксируется в сессии при создании.
+2. **Строка `interview_templates` (БД)** — та же сущность, выбранная по id/дефолту.
+3. **Seed-текст из кода** (`gradeProgram`) — только если строки в БД нет
+   (шаблон грейда удалён). При использовании fallback'а пишется **WARN** в лог.
+
+То есть: *выбранный в кабинете шаблон (БД) > дефолтный шаблон грейда (БД) >
+seed-программа из кода (fallback + WARN)*.
+
+**Admin-UI** (итерация 11): редактирование ВСЕХ шаблонов проекта (программы,
+начала разговора, реестр TTS-голосов) — `GET/PUT /api/v1/admin/*`, доступен
+первому зарегистрированному пользователю (флаг `users.is_admin`).
+
 ## Лицензия
 
 [Apache 2.0](LICENSE). STT — GigaAM v3 (Sber, MIT) / faster-whisper (MIT); TTS — Silero v5 (MIT).

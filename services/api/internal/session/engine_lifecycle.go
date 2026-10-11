@@ -99,6 +99,14 @@ func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, s
 			templateID = tpl.ID
 		}
 	}
+	if program == "" {
+		// A6 (итерация 11): строки шаблона в БД нет → runtime использует
+		// seed-программу из кода (gradeProgram в interviewer/prompts.go). WARN —
+		// деградация к fallback (дефолты сидируются при Migrate, поэтому здесь —
+		// только если шаблон грейда удалён/не создан).
+		e.log.Warn("A6: строка шаблона в БД не найдена — используется seed-программа из кода (gradeProgram)",
+			"grade", grade, "stack", stack, "template_id", templateID)
+	}
 	m, err := e.store.Create(ctx, models.Session{
 		UserID:         userID,
 		Grade:          grade,
