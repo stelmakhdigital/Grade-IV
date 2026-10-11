@@ -291,6 +291,13 @@ export class MicCapture {
     }
     this.ctx = ctx;
     this.inputRate = ctx.sampleRate;
+    // M1: AudioContext, созданный после `await getUserMedia`, часто остаётся
+    // `suspended` (user-gesture-активация теряется) — а AudioWorkletNode в
+    // suspended-контексте НИКОГДА не вызывает process (тишина → ложный переход на
+    // fallback). Явный resume() из user-gesture-контекста (старт микрофона) —
+    // основной (worklet) путь работает сразу. Non-blocking: если resume не
+    // сработает (нет активации) — сработает watchdog M4 (fallback/reinit).
+    if (typeof ctx.resume === 'function') void ctx.resume(); // M1: resume (guard: jsdom-мок без resume)
     try {
       await ctx.audioWorklet.addModule(
         URL.createObjectURL(new Blob([WORKLET_CODE], { type: 'application/javascript' })),
@@ -427,6 +434,10 @@ export class MicCapture {
     }
     this.silence?.reset();
     this.silence = null;
+    if (this.ctxStateHandler !== null && this.ctx !== null && typeof this.ctx.removeEventListener === 'function') {
+      this.ctx.removeEventListener('statechange', this.ctxStateHandler);
+    }
+    this.ctxStateHandler = null;
     if (this.spNode !== null) {
       this.spNode.onaudioprocess = null;
       this.spNode.disconnect();
@@ -596,6 +607,7 @@ export class MicCapture {
     const ctx = this.ctx;
     const stream = this.stream;
     if (!ctx || !stream || this.micState !== 'running') return;
+    if (typeof ctx.resume === 'function') void ctx.resume(); // M1 + guard: jsdom-мок без resume
     try {
       // Выключаем worklet, чтобы не было двух потоков из одного микрофона.
       this.node?.disconnect();
