@@ -2,8 +2,10 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -32,18 +34,26 @@ var (
 
 func loadTTSVoices() (ttsVoiceRegistry, error) {
 	ttsVoicesOnce.Do(func() {
-		path := os.Getenv("TTS_VOICES_FILE")
-		if path == "" {
-			path = "config/tts-voices.json"
+		candidates := []string{}
+		if p := os.Getenv("TTS_VOICES_FILE"); p != "" {
+			candidates = []string{p}
+		} else {
+			// CWD-независимо: запуск из services/api (make run-api) и из корня
+			// репо (scripts/run-all.sh). BUG-20261011-012.
+			candidates = configCandidates("config/tts-voices.json")
 		}
-		b, err := os.ReadFile(path)
-		if err != nil {
-			ttsVoicesErr = err
+		for _, p := range candidates {
+			b, err := os.ReadFile(p)
+			if err != nil {
+				continue
+			}
+			if err := json.Unmarshal(b, &ttsVoicesVal); err != nil {
+				ttsVoicesErr = fmt.Errorf("tts-voices: разбор %s: %w", p, err)
+				return
+			}
 			return
 		}
-		if err := json.Unmarshal(b, &ttsVoicesVal); err != nil {
-			ttsVoicesErr = err
-		}
+		ttsVoicesErr = fmt.Errorf("tts-voices: не найден файл реестра (пробовал: %s)", strings.Join(candidates, ", "))
 	})
 	return ttsVoicesVal, ttsVoicesErr
 }

@@ -87,11 +87,16 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 	// Путь — env INTRO_OPENINGS_FILE, дефолт config/openings.json (файл в репо).
 	openingsPath := os.Getenv("INTRO_OPENINGS_FILE")
 	if openingsPath == "" {
-		openingsPath = "config/openings.json"
+		// CWD-независимо (make run-api / scripts/run-all.sh). BUG-20261011-012.
+		openingsPath = firstExistingConfig(configCandidates("config/openings.json"))
 	}
-	openings, err := interviewer.LoadOpenings(openingsPath)
-	if err != nil {
-		log.Error("openings: файл набора начал не загружен — дефолтное начало", "err", err)
+	var openings *interviewer.Openings
+	if openingsPath != "" {
+		var loadErr error
+		openings, loadErr = interviewer.LoadOpenings(openingsPath)
+		if loadErr != nil {
+			log.Error("openings: файл набора начал не загружен — дефолтное начало", "err", loadErr)
+		}
 	}
 	interviewer := interviewer.New(provider, sessions, log,
 		interviewer.WithProfiles(profiles),
