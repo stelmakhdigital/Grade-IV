@@ -337,8 +337,8 @@ func (o *Orchestrator) PaceFrames(c Conn, turnStart time.Time, frames chan []byt
 	silence := make([]byte, ChunkBytes)
 	ticker := time.NewTicker(25 * time.Millisecond) // разрешение pacing-списка
 	defer ticker.Stop()
-	var queue [][]byte     // накопленные кадры (LLM/TTS обгоняют pacing)
-	var nextSend time.Time // zero = можно отправлять сразу (первый кадр)
+	var queue [][]byte        // накопленные кадры (LLM/TTS обгоняют pacing)
+	var firstSendAt time.Time // M3: абсолютная точка отсчёта pacing (drift-free)
 	var firstAt, endAt time.Time
 	sentAny := false
 	closed := false      // TTS-воркер завершил поставку кадров
@@ -355,19 +355,25 @@ func (o *Orchestrator) PaceFrames(c Conn, turnStart time.Time, frames chan []byt
 			return firstAt, endAt, sentAny
 		}
 		now := time.Now()
+		// M3 (drift-free pacing): когда пора отправить кадр seq. 0-й — сразу; N-й —
+		// не раньше firstSendAt + N*FrameDur (АБСОЛЮТНЫЙ ритм). Не now+FrameDur
+		// (относительно фактической отправки): 25-мс тикер смещал каждую отправку
+		// на 0..25 мс, и дреф НАКОПЛЯЛСЯ (средний интервал ~262 мс > 250 мс realtime)
+		// → сервер отдавал медленнее реального времени, клиентский буфер (пре-буфер)
+		// стекался → underrun/рывки (M3, регресс BUG-006).
+		sendDue := seq == 0 || !firstSendAt.Add(time.Duration(seq)*FrameDur).After(now)
 		// Финальный end-кадр: все кадры получены и отправлены (по pacing-ритму).
-		if closed && len(queue) == 0 && !nextSend.After(now) {
+		if closed && len(queue) == 0 && sendDue {
 			if !sentAny {
 				return firstAt, endAt, false // кадров не было (все TTS-ошибки)
 			}
 			o.SendTTSFrame(c, seq, silence, true)
 			return firstAt, now, true
 		}
-		// Пре-буфер (V2): первый кадр — только когда накоплено ≥ preBufferFrames (или
-		// конец потока): just-in-time pacing (250 мс/кадр = 250 мс аудио) без задела
-		// → при любом джиттере/дрейфе pacing клиентский буфер пустеет (underrun =
-		// рывки/обрывы). Дальше — по pacing-ритму (nextSend).
-		if len(queue) > 0 && !nextSend.After(now) && (seq > 0 || closed || len(queue) >= preBufferFrames) {
+		// Пре-буфер (V2) + drift-free (M3): первый кадр — после 2 кадров в очереди
+		// (задел гасит джиттер); темп — абсолютный (firstSendAt + seq*250 мс), дреф
+		// 25-мс тикера не накапливается.
+		if len(queue) > 0 && sendDue && (seq > 0 || closed || len(queue) >= preBufferFrames) {
 			hold := queue[0]
 			queue = queue[1:]
 			frame := make([]byte, 0, 4+len(hold))
@@ -378,11 +384,11 @@ func (o *Orchestrator) PaceFrames(c Conn, turnStart time.Time, frames chan []byt
 			o.engine.SendBinary(c.ID(), frame)
 			seq++
 			if !sentAny {
+				firstSendAt = now // M3: якорь абсолютного pacing — первая отправка
 				firstAt = now
 				metrics.TurnStage.Observe(metrics.StageLabel("tts_first_frame"), now.Sub(turnStart).Seconds())
 			}
 			sentAny = true
-			nextSend = now.Add(FrameDur)
 			continue
 		}
 		if !closed {
