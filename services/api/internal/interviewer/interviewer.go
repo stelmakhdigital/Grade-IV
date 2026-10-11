@@ -50,12 +50,19 @@ func WithReports(store *db.ReportStore) Option {
 	return func(i *Interviewer) { i.reports = store }
 }
 
+// WithOpenings — настраиваемые случайные начала собеседования (F2, Итерация 10).
+// Без опции (или пустой набор) — стартовое приветствие по-старому (backward-compat).
+func WithOpenings(o *Openings) Option {
+	return func(i *Interviewer) { i.openings = o }
+}
+
 // Interviewer — ходы ИИ-интервьюера.
 type Interviewer struct {
 	llm        llm.Provider
 	sessions   *db.SessionStore
 	profiles   *db.ProfileStore
 	reports    *db.ReportStore
+	openings   *Openings // F2: случайные начала (настраиваемый набор)
 	log        *slog.Logger
 	maxHistory int
 }
@@ -157,6 +164,15 @@ func (i *Interviewer) OnStageChanged(ctx context.Context, sessionID int64, stage
 	}
 	if stageNote != "" {
 		msgs[len(msgs)-1].Content += "\n" + stageNote
+	}
+	// F2 (Итерация 10): голосовая стадия — случайное начало из НАСТРАИВАЕМОГО
+	// набора (по грейду, '*' — любой; не повторяем последний для пользователя).
+	// LLM адаптирует формулировку под живую речь (история диалога в контексте —
+	// не задаст повторно уже решённое). Без набора (openings==nil) — по-старому.
+	if sess.Stage == models.StageVoice && i.openings != nil {
+		if opening := i.openings.RandomFor(sess.Grade, sess.UserID); opening != "" {
+			msgs[len(msgs)-1].Content += "\nНачни именно с этого вопроса (адаптируй формулировку под живую речь, не дословно): " + opening
+		}
 	}
 	resp, err := i.llm.Chat(ctx, llm.Request{
 		Messages:    msgs,

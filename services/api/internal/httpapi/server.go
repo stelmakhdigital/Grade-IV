@@ -83,9 +83,20 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		session.WithPauseTimeout(time.Duration(cfg.PauseTimeoutS)*time.Second),
 		session.WithSessionLimit(cfg.SessionLimitS),
 		session.WithTemplates(templates))
+	// F2 (Итерация 10): настраиваемые случайные начала собеседования (по грейду).
+	// Путь — env INTRO_OPENINGS_FILE, дефолт config/openings.json (файл в репо).
+	openingsPath := os.Getenv("INTRO_OPENINGS_FILE")
+	if openingsPath == "" {
+		openingsPath = "config/openings.json"
+	}
+	openings, err := interviewer.LoadOpenings(openingsPath)
+	if err != nil {
+		log.Error("openings: файл набора начал не загружен — дефолтное начало", "err", err)
+	}
 	interviewer := interviewer.New(provider, sessions, log,
 		interviewer.WithProfiles(profiles),
-		interviewer.WithReports(reports))
+		interviewer.WithReports(reports),
+		interviewer.WithOpenings(openings))
 	voice := voicesvc.NewClient(cfg.VoiceURL)
 	s := &Server{
 		cfg:         cfg,
