@@ -207,6 +207,7 @@ export class MicCapture {
   private events: MicCaptureEvents | null = null; // живые события (для reinit)
   private reinitCount = 0; // полных пересозданий подряд (сброс — первый чанок)
   private reiniting = false; // защита от дубля пересоздания
+  private ctxStateHandler: ((ev: Event) => void) | null = null; // M4: statechange-listener (suspended→resume)
 
   async start(events: MicCaptureEvents): Promise<void> {
     if (this.micState === 'running' || this.micState === 'muted') return;
@@ -298,6 +299,21 @@ export class MicCapture {
     // основной (worklet) путь работает сразу. Non-blocking: если resume не
     // сработает (нет активации) — сработает watchdog M4 (fallback/reinit).
     if (typeof ctx.resume === 'function') void ctx.resume(); // M1: resume (guard: jsdom-мок без resume)
+    // M4: самовосстановление — AudioContext, подвесившийся mid-session (tab в фон /
+    // авто-suspend), worklet замер (нет чанков) и «счётчик речи» застревает.
+    // statechange → suspended (мик running): resume (если есть активация) + re-arm
+    // no-data watchdog (fallback/reinit, если resume не сработал). Guard: jsdom-мок
+    // без addEventListener. Снимается в disposeCapture (this.ctxStateHandler).
+    const onCtxState = (): void => {
+      if (ctx.state === 'suspended' && this.micState === 'running') {
+        if (typeof ctx.resume === 'function') void ctx.resume();
+        this.armNoDataTimeout();
+      }
+    };
+    this.ctxStateHandler = onCtxState;
+    if (typeof ctx.addEventListener === 'function') {
+      ctx.addEventListener('statechange', onCtxState);
+    }
     try {
       await ctx.audioWorklet.addModule(
         URL.createObjectURL(new Blob([WORKLET_CODE], { type: 'application/javascript' })),
