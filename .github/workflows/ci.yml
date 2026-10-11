@@ -25,16 +25,32 @@ jobs:
           cache-dependency-path: |
             services/api/go.sum
             services/sandbox/go.sum
-      - name: api — vet + test + build
+      - name: gofmt (api + sandbox) — регресс форматирования (T4)
+        run: |
+          set -e
+          for m in services/api services/sandbox; do
+            echo "=== gofmt -l $m ==="
+            out=$(cd "$m" && gofmt -l .)
+            if [ -n "$out" ]; then
+              echo "::error::gofmt: не отформатированы файлы: $out"
+              (cd "$m" && gofmt -d $out)
+              exit 1
+            fi
+          done
+          echo "gofmt: чисто"
+      - name: go vet (api + sandbox)
+        run: |
+          set -e
+          (cd services/api && go vet ./...)
+          (cd services/sandbox && go vet ./...)
+      - name: api — test + build
         working-directory: services/api
         run: |
-          go vet ./...
           go test -count=1 ./...
           CGO_ENABLED=0 go build -o bin/api ./cmd/api
-      - name: sandbox — vet + test + build
+      - name: sandbox — test + build
         working-directory: services/sandbox
         run: |
-          go vet ./...
           go test -count=1 ./...
           CGO_ENABLED=0 go build -o bin/sandbox ./cmd/sandbox
 
