@@ -26,13 +26,13 @@ func (s *Server) handleTemplatesList(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0, len(tpls))
 	for _, t := range tpls {
 		out = append(out, map[string]any{
-			"id":          t.ID,
-			"name":        t.Name,
-			"grade":       t.Grade,
-			"stack":       t.Stack,
-			"duration_s":  t.DurationS,
-			"blocks":      t.Blocks,
-			"is_default":  t.IsDefault,
+			"id":         t.ID,
+			"name":       t.Name,
+			"grade":      t.Grade,
+			"stack":      t.Stack,
+			"duration_s": t.DurationS,
+			"blocks":     t.Blocks,
+			"is_default": t.IsDefault,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"templates": out})

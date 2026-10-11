@@ -28,15 +28,15 @@ type TemplateBlock struct {
 
 // Template — настраиваемый шаблон интервью.
 type Template struct {
-	ID         int64           `json:"id"`
-	Name       string          `json:"name"`
-	Grade      models.Grade    `json:"grade"`
-	Stack      string          `json:"stack"`
-	DurationS  int             `json:"duration_s"`
-	Blocks     []TemplateBlock `json:"blocks"`
-	IsDefault  bool            `json:"is_default"`
-	CreatedAt  time.Time       `json:"created_at"`
-	UpdatedAt  time.Time       `json:"updated_at"`
+	ID        int64           `json:"id"`
+	Name      string          `json:"name"`
+	Grade     models.Grade    `json:"grade"`
+	Stack     string          `json:"stack"`
+	DurationS int             `json:"duration_s"`
+	Blocks    []TemplateBlock `json:"blocks"`
+	IsDefault bool            `json:"is_default"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }
 
 // ProgramString — программа для system-промпта (как gradeProgram, но из шаблона).
