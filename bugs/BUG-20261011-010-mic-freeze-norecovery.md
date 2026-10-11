@@ -20,16 +20,23 @@
 suspend-контекст.)
 
 ## Фикс
-Самовосстановление при «молчит при активном входе»:
-- **`statechange`-listener на AudioContext** (guard: jsdom-мок без `addEventListener`):
-  когда контекст уходит в `suspended`, пока мик `running` → `ctx.resume()` (если есть
-  активация) + re-arm no-data watchdog (если resume не сработал — fallback/reinit за 3 с).
-  Listener снимается в `disposeCapture` (без утечки).
+Самовосстановление при «молчит при активном входе» (реализовано в `mic.ts`):
+- **Поле** `private ctxStateHandler: ((ev: Event) => void) | null = null` — объявлено в
+  `MicCapture` (снимает listener при dispose, без утечки).
+- **Listener** в `initCapture` сразу после M1-`ctx.resume()`: 
+  `ctx.addEventListener('statechange', onCtxState)` под jsdom-guard
+  (`typeof ctx.addEventListener === 'function'`).
+- **Handler**: при `ctx.state === 'suspended'` И `micState === 'running'` → 
+  `void ctx.resume()` (если есть user-активация) + `armNoDataTimeout()` (re-arm no-data
+  watchdog → fallback/reinit за 3 с, если resume не сработал).
+- **Cleanup** в `disposeCapture`: `ctx.removeEventListener('statechange', ctxStateHandler)`
+  (guard) + `ctxStateHandler = null`.
 - M1 `ctx.resume()` при старте (основной путь в `running` с самого начала).
 
 Ограничение (зафиксировано): browser autoplay-политика не даёт `resume()` suspended-контекста
 без user-gesture — полная recovery происходит при следующем жесте (возврат в tab/клик);
 listener обеспечивает детект + best-effort resume + переключение на fallback/reinit.
 
-Регресс: FE vitest 114 зелёный (mock без statechange — guard не ломает тесты; existing
-«first chunk → no reinit» поведение сохранено — watchdog остаётся разовым по чанкам).
+Регресс: `tsc --noEmit` — 0 ошибок; FE `vitest` 114 зелёный (mock без `addEventListener` —
+guard не ломает тесты; existing «first chunk → no reinit» поведение сохранено — watchdog
+остаётся разовым по чанкам).
