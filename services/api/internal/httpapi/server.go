@@ -22,6 +22,7 @@ import (
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/metrics"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/session"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/voiceorchestrator"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/voicesvc"
 )
 
@@ -39,6 +40,9 @@ type Server struct {
 	interviewer *interviewer.Interviewer
 	voice       *voicesvc.Client
 	log         *slog.Logger
+	// orch — DI-оркестратор голосового хода (A1): LLM→TTS (pacing, ordered-
+	// синтез), barge-in. Стабильные зависимости в New; voice — параметр методов.
+	orch *voiceorchestrator.Orchestrator
 
 	// wsSessions — живые WS-соединения по ID сессии (1 сессия — 1 соединение):
 	// pause во время активного хода останавливает TTS-стрим (FR-S7).
@@ -83,7 +87,7 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		interviewer.WithProfiles(profiles),
 		interviewer.WithReports(reports))
 	voice := voicesvc.NewClient(cfg.VoiceURL)
-	return &Server{
+	s := &Server{
 		cfg:         cfg,
 		users:       users,
 		sessions:    sessions,
@@ -98,6 +102,17 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		log:         log,
 		wsSessions:  make(map[int64]*wsSession),
 	}
+	// DI-оркестратор голосового хода (A1): стабильные зависимости (engine,
+	// interviewer, лог, колбэки событий/текста). Voice передаётся в методы как
+	// параметр (s.orchVoice) — тесты подменяют s.voice после NewWithLLM.
+	s.orch = voiceorchestrator.New(voiceorchestrator.Deps{
+		Engine:              engine,
+		Interviewer:         interviewer,
+		Log:                 log,
+		EventData:           s.eventData,
+		SendInterviewerText: s.sendInterviewerText,
+	})
+	return s
 }
 
 // Engine — движок сессий (main: Stop при завершении).
