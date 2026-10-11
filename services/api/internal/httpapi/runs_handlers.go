@@ -80,6 +80,11 @@ func (s *Server) handleSessionRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, runsMaxBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			writeError(w, http.StatusRequestEntityTooLarge, "too_large", "исходники слишком большие (лимит 1 МБ)")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid_request", "ожидается JSON {files, action, task_id}")
 		return
 	}
