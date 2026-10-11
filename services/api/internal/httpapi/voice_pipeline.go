@@ -328,6 +328,19 @@ func (w *wsSession) streamBargeIn(s *Server) {
 func (w *wsSession) handleSTTStreamFinal(s *Server, ev voicesvc.StreamEvent) {
 	text := strings.TrimSpace(ev.Text)
 	ms := ev.SpeechMS
+	// M5: режим записи — кандидат диктует ответ. ВСЕ его final-ы (включая короткие)
+	// → в транскрипт (emitRecSegment), БЕЗ barge-in-гейта: шорт-фраза-дроп (эхо/
+	// дыхание) + stopTTS на короткой реплике — voice-путь; в записи дроп коротких
+	// фраз терял НАЧАЛО диктовки, пока ИИ ещё говорил (ttsActive) → при «Отправить»
+	// уходил только хвост (видимый транскрипт длиннее отправленного).
+	if w.recording.Load() {
+		if text != "" {
+			if snap, err := s.engine.Snapshot(w.id); err == nil && snap.Stage == models.StageVoice && snap.Status == models.StatusActive {
+				w.emitRecSegment(s, text, ms)
+			}
+		}
+		return
+	}
 	if w.ttsActive.Load() {
 		if !w.sttBarged.Load() && ms < BargeInMinSpeechMS {
 			// Короткая реплика — без прерывания, но с метрикой (result="ignored").
