@@ -341,7 +341,7 @@ func (o *Orchestrator) PaceFrames(c Conn, turnStart time.Time, frames chan []byt
 	var nextSend time.Time // zero = можно отправлять сразу (первый кадр)
 	var firstAt, endAt time.Time
 	sentAny := false
-	closed := false // TTS-воркер завершил поставку кадров
+	closed := false      // TTS-воркер завершил поставку кадров
 	preBufferFrames := 2 // V2: 2 кадра (500 мс) — пре-буфер клиента
 	for {
 		if c.Ctx().Err() != nil {

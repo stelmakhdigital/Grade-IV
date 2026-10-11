@@ -131,7 +131,7 @@ type wsSession struct {
 	// (handleSTTStreamFinal/runStreamTurn)
 	sttPendingMu sync.Mutex
 	sttPending   string
-	ttsActive   atomic.Bool // ИИ говорит (стрим TTS) — gate barge-in
+	ttsActive    atomic.Bool // ИИ говорит (стрим TTS) — gate barge-in
 	// TTS-поток (barge-in): stop-канал текущего стрима; nil — нет активного.
 	// Шлющий кадры (paceFrames/streamAIAudio) его наблюдает: closed — стрим
 	// остановлен (кандидат прервал речь ИИ).
