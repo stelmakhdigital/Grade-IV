@@ -411,6 +411,22 @@ export function useVoiceSession(id: number) {
         }
       }
     } catch (e) {
+      // M2: resume упал (409 «недопустимый переход ... active → active») — вероятно,
+      // сессия УЖЕ активна (десинк/reconnect: локальный paused-флаг true, а сервер
+      // active — double-resume/pause не применилась). Ре-синк: если active — это
+      // no-op («продолжить» = уже продолжается), без страшной 409-ошибки. Явный
+      // REST-ответ resume-active остаётся 409 (test-verified); здесь просто не
+      // показываем её, когда сессия фактически активна.
+      try {
+        const s2 = await getSession(id);
+        setSession(s2);
+        if (s2.status === 'active') {
+          setUiPaused(false);
+          return;
+        }
+      } catch {
+        // ре-синк не критичен — покажем исходную ошибку ниже
+      }
       setError(apiErrorMessage(e));
     } finally {
       setPauseBusy(false);
