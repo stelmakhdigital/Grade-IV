@@ -487,11 +487,6 @@ func (s *Server) readLoop(id int64, conn *websocket.Conn, ctx context.Context, w
 			// PCM16 16 кГц mono (ADR-001) → VAD → голосовой пайплайн (ADR-002).
 			pcmFrames++
 			pcmBytes += len(data)
-			// TEMP-DEBUG: доходит ли голос и каков его уровень (RMS PCM16).
-			if pcmFrames == 1 || pcmFrames%40 == 0 {
-				s.log.Info("ws: pcm-debug", "session", id, "frame", pcmFrames,
-					"bytes", len(data), "rms", pcm16RMS(data))
-			}
 			s.feedVAD(ws, data)
 		case websocket.MessageText:
 			var msg wsMessage
@@ -703,7 +698,7 @@ func stageKnown(s models.Stage) bool {
 	return false
 }
 
-// pcm16RMS — RMS уровня PCM16 mono (0..32767); TEMP-DEBUG диагностики «ИИ не слышит».
+// pcm16RMS — RMS уровня PCM16 mono (0..32767); используется в тестах голосового контура.
 func pcm16RMS(pcm []byte) int {
 	if len(pcm) < 2 {
 		return 0
