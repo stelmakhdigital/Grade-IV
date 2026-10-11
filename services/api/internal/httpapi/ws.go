@@ -126,6 +126,11 @@ type wsSession struct {
 	nudgeCount  atomic.Int32
 	vad         *vad.Detector
 	busy        atomic.Bool // голосовой ход занят (один параллельный, turn-taking)
+	// Отложенные реплики стрим-пути (V1): финал STT, пришедший пока занят ход
+	// (busy — LLM-фаза), не бросается, а накапливается; после хода идёт следом.
+	// (handleSTTStreamFinal/runStreamTurn)
+	sttPendingMu sync.Mutex
+	sttPending   string
 	ttsActive   atomic.Bool // ИИ говорит (стрим TTS) — gate barge-in
 	// TTS-поток (barge-in): stop-канал текущего стрима; nil — нет активного.
 	// Шлющий кадры (paceFrames/streamAIAudio) его наблюдает: closed — стрим

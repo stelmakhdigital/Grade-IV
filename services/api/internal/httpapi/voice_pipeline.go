@@ -385,7 +385,12 @@ func (w *wsSession) handleSTTStreamFinal(s *Server, ev voicesvc.StreamEvent) {
 		return
 	}
 	if !w.busy.CompareAndSwap(false, true) {
-		return // на границе занят — реплика теряется (допустимо в ходовом режиме)
+		// Занят ход (LLM-фаза) — реплику НЕ бросаем: накапливаем (V1); flush после
+		// хода (runStreamTurn) пошлёт её следом. Иначе длинная реплика кандидата
+		// (много final-ов по VAD-границам/сегментации) терялась после первого сегмента,
+		// а в UI застревал «распознаётся» (transcript для них не шёл).
+		w.appendSTTPending(text)
+		return
 	}
 	go w.runStreamTurn(s, text, ev.Confidence, ev.SpeechMS)
 }
@@ -410,7 +415,10 @@ func (w *wsSession) emitRecSegment(s *Server, text string, ms int) {
 // runStreamTurn — ход кандидата из стримингового STT (busy уже занят;
 // сбрасывается defer'ом): валидация стадии/доверия → runCandidateTurn.
 func (w *wsSession) runStreamTurn(s *Server, text string, conf float64, speechMS int) {
-	defer w.busy.Store(false)
+	defer func() {
+		w.busy.Store(false)
+		w.flushSTTPending(s) // после хода — идём накопленными репликами (V1)
+	}()
 	if text == "" {
 		return // молчание/шум — без хода
 	}
@@ -431,6 +439,44 @@ func (w *wsSession) runStreamTurn(s *Server, text string, conf float64, speechMS
 	}
 	s.log.Info("stt: реплика кандидата", "session", w.id, "chars", len(text), "conf", conf, "stream", true)
 	s.runCandidateTurn(w, text)
+}
+
+// appendSTTPending — накапливаем финал STT, пришедший пока занят ход (V1):
+// длинная реплика режется VAD на несколько final-ов; следующие (пока идёт
+// первый ход) не бросаются, а складываются — flushSTTPending пошлёт следом.
+func (w *wsSession) appendSTTPending(text string) {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return
+	}
+	w.sttPendingMu.Lock()
+	w.sttPending += " " + t
+	w.sttPendingMu.Unlock()
+}
+
+// flushSTTPending — после хода (busy освобождён) отправляем накопленные реплики
+// следующим ходом (V1). conf высокий: текст уже распознан (не шум). Barge-in: если
+// ИИ ещё говорит — прерываем (кандидат продолжает речь).
+func (w *wsSession) flushSTTPending(s *Server) {
+	w.sttPendingMu.Lock()
+	p := strings.TrimSpace(w.sttPending)
+	w.sttPending = ""
+	w.sttPendingMu.Unlock()
+	if p == "" {
+		return
+	}
+	if w.ttsActive.Load() {
+		w.stopTTS()
+	}
+	if !w.busy.CompareAndSwap(false, true) {
+		// редкая гонка (кто-то занял) — вернём в буфер, попробуем в следующий ход
+		w.sttPendingMu.Lock()
+		w.sttPending = p + " " + w.sttPending
+		w.sttPendingMu.Unlock()
+		return
+	}
+	s.log.Info("stt: отложенная реплика (была занята ходом) — отправляю", "session", w.id, "chars", len(p))
+	go w.runStreamTurn(s, p, 0.95, 0)
 }
 
 // truncateForLog — безопасное усечение строки для лога (не больше n байт;
