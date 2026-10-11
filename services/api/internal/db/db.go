@@ -115,6 +115,7 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 		// игнорируем (повторный запуск миграции).
 		alters = []string{
 			"ALTER TABLE sessions ADD COLUMN profile_id INTEGER REFERENCES interviewer_profiles(id)",
+			"ALTER TABLE sessions ADD COLUMN tts_speaker TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE reports ADD COLUMN verdict TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE reports ADD COLUMN grade_gap TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE reports ADD COLUMN study_plan_2weeks TEXT NOT NULL DEFAULT '[]'",
@@ -124,6 +125,7 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 		raw = schemaPostgres + "\n" + schemaPostgresProfiles
 		alters = []string{
 			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS profile_id BIGINT REFERENCES interviewer_profiles(id)",
+			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS tts_speaker TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS verdict TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS grade_gap TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS study_plan_2weeks TEXT NOT NULL DEFAULT '[]'",

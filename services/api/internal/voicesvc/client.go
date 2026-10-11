@@ -23,6 +23,27 @@ const (
 	maxTTSBytes = 4 << 20 // 4 МБ (~2 мин 16 кГц PCM16)
 )
 
+// F1 (Итерация 10): выбор голоса интервьюера. TTS-спикер передаётся в контексте
+// (не меняя сигнатуру Voice-интерфейса/фейков): Client.TTS читает его и кладёт в
+// запрос ("speaker") если не пуст (иначе voice-сервис использует дефолтный).
+type ttsspeakerKey int
+
+// WithTTSSpeaker — кладёт TTS-спикер в контекст (F1). Пустая строка — без спикера.
+func WithTTSSpeaker(ctx context.Context, speaker string) context.Context {
+	if speaker == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, ttsspeakerKey(0), speaker)
+}
+
+// TTSSpeakerFromCtx — TTS-спикер из контекста (F1); "" — не задан (дефолт сервера).
+func TTSSpeakerFromCtx(ctx context.Context) string {
+	if s, ok := ctx.Value(ttsspeakerKey(0)).(string); ok {
+		return s
+	}
+	return ""
+}
+
 // STTResult — результат распознавания (§4.3).
 type STTResult struct {
 	Text       string  `json:"text"`
@@ -88,7 +109,11 @@ func (c *Client) TTS(ctx context.Context, text string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, TTSTimeout)
 	defer cancel()
 
-	reqBody, err := json.Marshal(map[string]string{"text": text})
+	body := map[string]string{"text": text}
+	if sp := TTSSpeakerFromCtx(ctx); sp != "" {
+		body["speaker"] = sp // F1: выбранный голос интервьюера
+	}
+	reqBody, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}

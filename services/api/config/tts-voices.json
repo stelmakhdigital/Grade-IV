@@ -1,0 +1,11 @@
+{
+  "_comment": "Настраиваемый реестр голосов интервьюера (F1, Итерация 10). UI строит список выбора из этого файла (не хардкод). Каждый элемент: id (ключ), name (для UI), gender (male|female), speaker (реальный спикер voice-сервиса Silero v5_ru). Чтобы добавить/поменять голос — правьте этот файл; перезапуск api нужен (файл читается при старте). Список реальных спикеров модели v5_ru: aidar, eugene (male); baya, kseniya, xenia (female). default — голос по умолчанию (ru_01 → xenia).",
+  "default": "xenia",
+  "voices": [
+    { "id": "aidar", "name": "Аидар (мужской)", "gender": "male", "speaker": "aidar" },
+    { "id": "eugene", "name": "Евгений (мужской)", "gender": "male", "speaker": "eugene" },
+    { "id": "baya", "name": "Бая (женский)", "gender": "female", "speaker": "baya" },
+    { "id": "kseniya", "name": "Ксения (женский)", "gender": "female", "speaker": "kseniya" },
+    { "id": "xenia", "name": "Есения (женский)", "gender": "female", "speaker": "xenia" }
+  ]
+}

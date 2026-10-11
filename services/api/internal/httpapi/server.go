@@ -173,6 +173,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Сессии (WP-3, ARCHITECTURE.md §4.1).
 	mux.Handle("POST /api/v1/sessions", s.requireAuth(http.HandlerFunc(s.handleSessionsCreate)))
+	mux.Handle("GET /api/v1/tts-voices", s.requireAuth(http.HandlerFunc(s.handleTTSVoices))) // F1: реестр голосов
 	mux.Handle("GET /api/v1/profiles", s.requireAuth(http.HandlerFunc(s.handleProfilesList)))
 	mux.Handle("GET /api/v1/profiles/{id}", s.requireAuth(http.HandlerFunc(s.handleProfileGet)))
 	mux.Handle("GET /api/v1/sessions", s.requireAuth(http.HandlerFunc(s.handleSessionsList)))

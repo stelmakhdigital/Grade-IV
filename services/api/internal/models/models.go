@@ -96,6 +96,11 @@ type Session struct {
 	// ProfileID — профиль интервьюера (tone × difficulty, итерация B);
 	// 0 — default (balanced/standard). Влияет только на стиль, не на оценку.
 	ProfileID int64
+
+	// TTSSpeaker — выбранный голос интервьюера (F1, Итерация 10): спикер
+	// voice-сервиса (aidar/eugene — male; baya/kseniya/xenia — female). Пусто —
+	// дефолт voice-сервиса (ru_01 → xenia), backward-compat.
+	TTSSpeaker string
 }
 
 // SessionEvent — событие сессии (транскрипт, смена стадии и т.д.).

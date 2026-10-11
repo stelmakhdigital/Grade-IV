@@ -10,12 +10,14 @@ import {
   listProfiles,
   listSessions,
   listTemplates,
+  listTTSVoices,
   ApiError,
   type Grade,
   type InterviewProfile,
   type InterviewTemplate,
   type Session,
   type Stack,
+  type TTSVoice,
 } from '../api';
 import { useAuth } from '../auth';
 import { apiErrorMessage } from './LoginView';
@@ -48,6 +50,10 @@ export function CabinetView() {
   const [templateId, setTemplateId] = useState<number | undefined>(undefined);
   const [profiles, setProfiles] = useState<InterviewProfile[]>([]);
   const [profileId, setProfileId] = useState<number | undefined>(undefined);
+  // F1 (Итерация 10): голос интервьюера (реестр из API, не хардкод).
+  const [ttsVoices, setTtsVoices] = useState<TTSVoice[]>([]);
+  const [ttsSpeaker, setTtsSpeaker] = useState<string>('');
+  const [ttsSpeakerDefault, setTtsSpeakerDefault] = useState<string>('');
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
 
@@ -95,6 +101,22 @@ export function CabinetView() {
     return () => { cancelled = true; };
   }, []);
 
+  // F1 (Итерация 10): реестр голосов интервьюера (селектор перед стартом).
+  useEffect(() => {
+    let cancelled = false;
+    listTTSVoices()
+      .then((reg) => {
+        if (cancelled) return;
+        setTtsVoices(reg.voices ?? []);
+        setTtsSpeakerDefault(reg.default ?? '');
+        setTtsSpeaker(reg.default || (reg.voices?.[0]?.speaker ?? ''));
+      })
+      .catch(() => {
+        if (!cancelled) setTtsVoices([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
 
   const onStart = async (e: FormEvent) => {
     e.preventDefault();
@@ -102,7 +124,7 @@ export function CabinetView() {
     setStarting(true);
     setStartError(null);
     try {
-      const s = await createSession(grade, stack, templateId, profileId);
+      const s = await createSession(grade, stack, templateId, profileId, ttsSpeaker);
       window.location.hash = sessionPath(s.id);
     } catch (err) {
       setStartError(apiErrorMessage(err));
@@ -172,6 +194,18 @@ export function CabinetView() {
                   <option key={p.id} value={p.id} title={p.description ?? ''}>
                     {p.name} — {p.tone}/{p.difficulty}
                     {p.tone === 'balanced' && p.difficulty === 'standard' ? ' (по умолчанию)' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {ttsVoices.length > 0 && (
+            <label className="field">
+              <span>Голос интервьюера</span>
+              <select value={ttsSpeaker} onChange={(e) => setTtsSpeaker(e.target.value)} data-testid="tts-voice-select">
+                {ttsVoices.map((v) => (
+                  <option key={v.id} value={v.speaker}>
+                    {v.name}{v.speaker === ttsSpeakerDefault ? ' (по умолчанию)' : ''}
                   </option>
                 ))}
               </select>

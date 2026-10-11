@@ -17,6 +17,7 @@ type CreateOption func(*createParams)
 type createParams struct {
 	templateID int64
 	profileID  int64
+	ttsspeaker string
 }
 
 // WithProfile — профиль интервьюера (tone × difficulty, итерация B);
@@ -28,6 +29,12 @@ func WithProfile(profileID int64) CreateOption {
 // WithTemplate — шаблон интервью (итерация A); 0 — дефолтный шаблон грейда.
 func WithTemplate(templateID int64) CreateOption {
 	return func(p *createParams) { p.templateID = templateID }
+}
+
+// WithTTSSpeaker — выбранный голос интервьюера (F1, Итерация 10); пусто — дефолт
+// voice-сервиса (ru_01 → xenia).
+func WithTTSSpeaker(speaker string) CreateOption {
+	return func(p *createParams) { p.ttsspeaker = speaker }
 }
 
 // Create создаёт сессию: проверка минут (402-условие), вставка, старт в статусе active.
@@ -103,6 +110,7 @@ func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, s
 		TemplateID:     templateID,
 		Program:        program,
 		ProfileID:      cp.profileID,
+		TTSSpeaker:     cp.ttsspeaker,
 	})
 	if err != nil {
 		return models.Session{}, err

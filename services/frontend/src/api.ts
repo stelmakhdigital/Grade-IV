@@ -185,15 +185,35 @@ export function listProfiles(): Promise<InterviewProfile[]> {
   return request<InterviewProfile[]>('/profiles', { auth: true });
 }
 
+/** Голос интервьюера (F1, Итерация 10): из реестра config/tts-voices.json. */
+export interface TTSVoice {
+  id: string;
+  name: string;
+  gender: string;
+  speaker: string;
+}
+
+export interface TTSVoiceRegistry {
+  default: string;
+  voices: TTSVoice[];
+}
+
+/** F1 (Итерация 10): реестр голосов интервьюера (GET /api/v1/tts-voices). */
+export function listTTSVoices(): Promise<TTSVoiceRegistry> {
+  return request<TTSVoiceRegistry>('/tts-voices', { auth: true });
+}
+
 export function createSession(
   grade: Grade,
   stack: Stack,
   templateId?: number,
   profileId?: number,
+  ttsSpeaker?: string,
 ): Promise<Session> {
   const body: Record<string, unknown> = { grade, stack };
   if (templateId) body.template_id = templateId;
   if (profileId) body.profile_id = profileId;
+  if (ttsSpeaker) body.tts_speaker = ttsSpeaker;
   return request<Session>('/sessions', { body });
 }
 

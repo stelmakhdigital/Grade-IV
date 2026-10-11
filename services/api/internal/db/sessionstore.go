@@ -42,10 +42,10 @@ func (s *SessionStore) Create(ctx context.Context, m models.Session) (models.Ses
 	}
 	res, err := s.db.ExecContext(ctx, s.d.q(`
 		INSERT INTO sessions (user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, started_at, template_id, program, profile_id)
-		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`),
+			active_seconds, started_at, template_id, program, profile_id, tts_speaker)
+		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`),
 		m.UserID, m.Grade, m.Stack, m.Stage, m.Status, m.DurationLimitS,
-		m.StartedAt.UTC().Format(time.RFC3339), templateID, m.Program, profileID)
+		m.StartedAt.UTC().Format(time.RFC3339), templateID, m.Program, profileID, m.TTSSpeaker)
 	if err != nil {
 		return models.Session{}, fmt.Errorf("create session: %w", err)
 	}
@@ -60,7 +60,7 @@ func (s *SessionStore) Create(ctx context.Context, m models.Session) (models.Ses
 func (s *SessionStore) Get(ctx context.Context, id int64) (models.Session, error) {
 	return s.scanSession(s.db.QueryRowContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker
 			FROM sessions WHERE id = ?`), id))
 }
 
@@ -68,7 +68,7 @@ func (s *SessionStore) Get(ctx context.Context, id int64) (models.Session, error
 func (s *SessionStore) GetOwned(ctx context.Context, id, userID int64) (models.Session, error) {
 	m, err := s.scanSession(s.db.QueryRowContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker
 			FROM sessions WHERE id = ? AND user_id = ?`), id, userID))
 	if errors.Is(err, ErrSessionNotFound) {
 		return m, err
@@ -80,7 +80,7 @@ func (s *SessionStore) GetOwned(ctx context.Context, id, userID int64) (models.S
 func (s *SessionStore) ListByUser(ctx context.Context, userID int64) ([]models.Session, error) {
 	rows, err := s.db.QueryContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker
 			FROM sessions WHERE user_id = ? ORDER BY id DESC`), userID)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
@@ -150,7 +150,7 @@ func (s *SessionStore) Finalize(ctx context.Context, id int64, status models.Sta
 func (s *SessionStore) ListByStatus(ctx context.Context, status models.Status) ([]models.Session, error) {
 	rows, err := s.db.QueryContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker
 			FROM sessions WHERE status = ?`), status)
 	if err != nil {
 		return nil, fmt.Errorf("list by status: %w", err)
@@ -224,8 +224,9 @@ func (s *SessionStore) scanSession(row rowScanner) (models.Session, error) {
 	var templateID sql.NullInt64
 	var program string
 	var profileID sql.NullInt64
+	var ttsSpeaker string
 	err := row.Scan(&m.ID, &m.UserID, &grade, &stack, &stage, &status,
-		&m.DurationLimitS, &m.ActiveSeconds, &pausedAt, &startedAt, &finishedAt, &templateID, &program, &profileID)
+		&m.DurationLimitS, &m.ActiveSeconds, &pausedAt, &startedAt, &finishedAt, &templateID, &program, &profileID, &ttsSpeaker)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Session{}, ErrSessionNotFound
 	}
@@ -258,5 +259,6 @@ func (s *SessionStore) scanSession(row rowScanner) (models.Session, error) {
 	if profileID.Valid {
 		m.ProfileID = profileID.Int64
 	}
+	m.TTSSpeaker = ttsSpeaker
 	return m, nil
 }

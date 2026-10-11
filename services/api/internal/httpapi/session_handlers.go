@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
@@ -35,6 +36,7 @@ type sessionDTO struct {
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`
 	PausedAt       *time.Time `json:"paused_at,omitempty"`
 	ProfileID      int64      `json:"profile_id"`
+	TTSSpeaker     string     `json:"tts_speaker"` // F1: выбранный голос интервьюера
 }
 
 func toDTO(m models.Session, snap *session.Snapshot) sessionDTO {
@@ -51,6 +53,7 @@ func toDTO(m models.Session, snap *session.Snapshot) sessionDTO {
 		FinishedAt:     m.FinishedAt,
 		PausedAt:       m.PausedAt,
 		ProfileID:      m.ProfileID,
+		TTSSpeaker:     m.TTSSpeaker,
 	}
 	if snap != nil {
 		d.Stage = string(snap.Stage)
@@ -70,6 +73,7 @@ func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
 		Stack      models.Stack `json:"stack"`
 		TemplateID int64        `json:"template_id,omitempty"` // итерация A: 0 = дефолтный шаблон грейда
 		ProfileID  int64        `json:"profile_id,omitempty"`  // итерация B: 0 = balanced/standard
+		TTSSpeaker string       `json:"tts_speaker,omitempty"` // F1: голос интервьюера; пусто = дефолт
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "ожидается JSON {grade, stack}")
@@ -92,6 +96,9 @@ func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "internal", "не удалось получить профиль")
 			return
 		}
+	}
+	if body.TTSSpeaker != "" {
+		opts = append(opts, session.WithTTSSpeaker(strings.TrimSpace(body.TTSSpeaker)))
 	}
 	m, err := s.engine.Create(r.Context(), userIDFromContext(r.Context()), body.Grade, body.Stack, opts...)
 	switch {

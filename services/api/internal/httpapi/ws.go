@@ -90,6 +90,12 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 	vadCfg.RMSThreshold = s.cfg.VADRMSThreshold
 	vadCfg.PreSilenceMS = s.cfg.VADPreSilenceMS
 	ws := &wsSession{id: id, ctx: ctx, vad: vad.New(vadCfg)}
+	// F1 (Итерация 10): голос интервьюера (выбран в кабинете, сохранён в сессии)
+	// — в контекст TTS (Ctx() оборачивает; Client.TTS кладёт в запрос "speaker").
+	// Пусто — дефолт voice-сервиса (ru_01 → xenia), backward-compat.
+	if sess, err := s.sessions.Get(ctx, id); err == nil && sess.TTSSpeaker != "" {
+		ws.speaker = sess.TTSSpeaker
+	}
 	ws.touch()
 	s.wsRegister(id, ws) // реестр: pause остановит активный TTS-стрим (FR-S7)
 	defer s.wsUnregister(id)
@@ -116,6 +122,7 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 type wsSession struct {
 	id         int64
 	ctx        context.Context // контекст соединения (отмена при обрыве)
+	speaker    string          // F1: голос интервьюера (из сессии) — в контекст TTS
 	lastActive int64           // unixnano
 	lastPCM    int64           // unixnano последнего PCM-кадра от микрофона
 
