@@ -57,6 +57,19 @@ func WithOpenings(o *Openings) Option {
 	return func(i *Interviewer) { i.openings.Store(o) }
 }
 
+// WithGenderResolver — резолвер speaker→gender (F7, итерация 12): род речи персоны
+// по выбранному голосу. Источник — реестр tts-voices (httpapi, с Reload). Без опции
+// / пустая строка — мужской (текущее поведение).
+func WithGenderResolver(f func(speaker string) string) Option {
+	return func(i *Interviewer) { i.genderResolver = f }
+}
+
+// WithVacancyResolver — резолвер userID→текст вакансии (F6, итерация 12): блок
+// вакансии в system-промпт. Без опции / пустая строка — без блока вакансии.
+func WithVacancyResolver(f func(ctx context.Context, userID int64) string) Option {
+	return func(i *Interviewer) { i.vacancyResolver = f }
+}
+
 // SetOpenings — замена набора начал вживую (итерация 11: admin-reload).
 func (i *Interviewer) SetOpenings(o *Openings) { i.openings.Store(o) }
 
@@ -70,13 +83,15 @@ func (i *Interviewer) CurrentOpenings() []Opening {
 
 // Interviewer — ходы ИИ-интервьюера.
 type Interviewer struct {
-	llm        llm.Provider
-	sessions   *db.SessionStore
-	profiles   *db.ProfileStore
-	reports    *db.ReportStore
-	openings   atomic.Pointer[Openings] // F2: случайные начала (настраиваемый набор); итерация 11 — atomic swap при admin-reload
-	log        *slog.Logger
-	maxHistory int
+	llm             llm.Provider
+	sessions        *db.SessionStore
+	profiles        *db.ProfileStore
+	reports         *db.ReportStore
+	openings        atomic.Pointer[Openings] // F2: случайные начала (настраиваемый набор); итерация 11 — atomic swap при admin-reload
+	log             *slog.Logger
+	maxHistory      int
+	genderResolver  func(speaker string) string                    // F7: speaker→gender (реестр tts-voices); пусто/nil → male
+	vacancyResolver func(ctx context.Context, userID int64) string // F6: userID→текст вакансии; пусто/nil → без блока
 }
 
 // New создаёт движок интервьюера.
@@ -343,9 +358,19 @@ func (i *Interviewer) profilePrompt(sess models.Session) (tone, difficulty strin
 // buildMessages — system-промпт (с профилем) + последние реплики + текущий ход.
 func (i *Interviewer) buildMessages(sess models.Session, userMsg string, images ...string) []llm.Message {
 	tone, difficulty := i.profilePrompt(sess)
+	// F7: род речи по выбранному голосу (speaker → gender); пусто/неизвестно → male.
+	gender := ""
+	if i.genderResolver != nil {
+		gender = i.genderResolver(sess.TTSSpeaker)
+	}
+	// F6: блок вакансии кандидата (из профиля); пусто → без блока.
+	vacancy := ""
+	if i.vacancyResolver != nil {
+		vacancy = i.vacancyResolver(context.Background(), sess.UserID)
+	}
 	// Программа — из сессии (шаблон, итерация A); пустая — дефолтная gradeProgram.
 	sys := SystemPromptWithProfileProgram(sess.Grade, string(sess.Stack), sess.Stage,
-		tone, difficulty, sess.Program)
+		tone, difficulty, sess.Program, gender, vacancy)
 	msgs := []llm.Message{{Role: llm.RoleSystem, Content: sys}}
 	msgs = append(msgs, i.transcript(sess.ID, i.maxHistory)...)
 	msg := llm.Message{Role: llm.RoleUser, Content: userMsg}
