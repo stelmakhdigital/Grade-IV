@@ -342,6 +342,7 @@ func (o *Orchestrator) PaceFrames(c Conn, turnStart time.Time, frames chan []byt
 	var firstAt, endAt time.Time
 	sentAny := false
 	closed := false // TTS-воркер завершил поставку кадров
+	preBufferFrames := 2 // V2: 2 кадра (500 мс) — пре-буфер клиента
 	for {
 		if c.Ctx().Err() != nil {
 			return firstAt, endAt, false
@@ -362,7 +363,11 @@ func (o *Orchestrator) PaceFrames(c Conn, turnStart time.Time, frames chan []byt
 			o.SendTTSFrame(c, seq, silence, true)
 			return firstAt, now, true
 		}
-		if len(queue) > 0 && !nextSend.After(now) {
+		// Пре-буфер (V2): первый кадр — только когда накоплено ≥ preBufferFrames (или
+		// конец потока): just-in-time pacing (250 мс/кадр = 250 мс аудио) без задела
+		// → при любом джиттере/дрейфе pacing клиентский буфер пустеет (underrun =
+		// рывки/обрывы). Дальше — по pacing-ритму (nextSend).
+		if len(queue) > 0 && !nextSend.After(now) && (seq > 0 || closed || len(queue) >= preBufferFrames) {
 			hold := queue[0]
 			queue = queue[1:]
 			frame := make([]byte, 0, 4+len(hold))
