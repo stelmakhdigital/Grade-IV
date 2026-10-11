@@ -173,7 +173,8 @@ func (s *TemplateStore) EnsureDefaults(ctx context.Context, defs []Template) err
 	return nil
 }
 
-// Create — новый пользовательский шаблон (is_default=false).
+// Create — новый шаблон. Если is_default=true — атомарно снимает is_default с
+// других в (grade, stack OR '*'), чтобы Default(grade,stack) возвращал ровно один.
 func (s *TemplateStore) Create(ctx context.Context, t *Template) error {
 	blocksJSON, err := json.Marshal(t.Blocks)
 	if err != nil {
@@ -184,7 +185,20 @@ func (s *TemplateStore) Create(ctx context.Context, t *Template) error {
 	if t.IsDefault {
 		isDefault = 1
 	}
-	res, err := s.db.ExecContext(ctx, s.d.q(
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if isDefault == 1 {
+		if _, err := tx.ExecContext(ctx, s.d.q(
+			"UPDATE interview_templates SET is_default = 0, updated_at = ? "+
+				"WHERE grade = ? AND (stack = ? OR stack = '*')"),
+			now, t.Grade, t.Stack); err != nil {
+			return err
+		}
+	}
+	res, err := tx.ExecContext(ctx, s.d.q(
 		"INSERT INTO interview_templates (name, grade, stack, duration_s, blocks, is_default, created_at, updated_at) "+
 			"VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
 		t.Name, t.Grade, t.Stack, t.DurationS, string(blocksJSON), isDefault, now, now)
@@ -192,6 +206,9 @@ func (s *TemplateStore) Create(ctx context.Context, t *Template) error {
 		return err
 	}
 	id, _ := res.LastInsertId()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
 	t.ID = id
 	t.CreatedAt, t.UpdatedAt = time.Now().UTC(), time.Now().UTC()
 	return nil

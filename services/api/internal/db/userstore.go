@@ -36,11 +36,17 @@ func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // CreateUser создаёт пользователя (email нормализуется к нижнему регистру).
 // Если email уже зарегистрирован — возвращается *ErrEmailExists.
+// Итерация 11: первый пользователь в БД (свежая БД) = admin (is_admin=true).
 func (s *UserStore) CreateUser(ctx context.Context, email, passwordHash string) (models.User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
+	var n int
+	if err := s.db.QueryRowContext(ctx, s.d.q(`SELECT COUNT(*) FROM users`)).Scan(&n); err != nil {
+		return models.User{}, fmt.Errorf("count users: %w", err)
+	}
+	isAdmin := n == 0 // первый в свежей БД — admin
 	res, err := s.db.ExecContext(ctx,
-		s.d.q(`INSERT INTO users (email, password_hash, created_at) VALUES (?, ?, ?)`),
-		email, passwordHash, nowRFC3339())
+		s.d.q(`INSERT INTO users (email, password_hash, created_at, is_admin) VALUES (?, ?, ?, ?)`),
+		email, passwordHash, nowRFC3339(), isAdmin)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return models.User{}, &ErrEmailExists{Email: email}
