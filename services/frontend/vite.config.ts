@@ -13,6 +13,37 @@ export default defineConfig({
       '/ws': { target: 'ws://localhost:8000', ws: true },
     },
   },
+  build: {
+    // B2: лимит предупреждения о размере чанка. Ядро Excalidraw неразбивно
+    // (~1.8 MB raw / 737 kB gzip) — это ленивый чанк, грузится только на
+    // дизайн-стадии. Попробовано: склейка vendor в один чанк = 1.4 MB gzip
+    // монолит (хуже), гранулярный разрез Vite по диаграммным модулям Mermaid
+    // — лучший результат. Поэтому порог поднят до реального максимума, а
+    // first-load отдельно уменьшен ленивой загрузкой панелей (SessionView).
+    chunkSizeWarningLimit: 1900,
+    rollupOptions: {
+      output: {
+        // B2: react-рантайм — в стабильный отдельный чанк (кэшируется между
+        // версиями приложения, entry остаётся лёгким). Остальные vendor
+        // (Excalidraw/Mermaid/Cytoscape/KaTeX) не сливаем вручную: Vite сам
+        // делает гранулярный ленивый split, а склейка в один чанк ухудшает.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          // B2: react-рантайм — в стабильный отдельный чанк (кэшируется между
+          // версиями, entry остаётся лёгким). Матч по РЕАЛЬНЫМ путям пакетов
+          // (не по .pnpm-каталогам с peer-deps, где встречается "react-dom@").
+          if (
+            /node_modules[\\/]react-dom[\\/]/.test(id) ||
+            /node_modules[\\/]react[\\/]/.test(id) ||
+            /node_modules[\\/]scheduler[\\/]/.test(id)
+          ) {
+            return 'vendor-react';
+          }
+          return undefined;
+        },
+      },
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,

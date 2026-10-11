@@ -4,16 +4,28 @@
  * useVoiceSession. Рендер: активная сессия (голос/Live-Code/Design),
  * завершённая (запись диалога + отчёт).
  */
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth';
 import { MicVisualizer, type MicEqMode } from './MicVisualizer';
 import { useVoiceSession } from '../hooks/useVoiceSession';
 import { micDebugEnabled } from '../audio/mic';
 import { formatRecDuration, mergeRecording } from '../recording';
 import { statusLabel, stageLabel } from '../labels';
-import { LiveCodePanel } from './livecode/LiveCodePanel';
-import { DesignPanel } from './design/DesignPanel';
-import { ReportView } from './report/ReportView';
+import { PanelLoading } from './PanelLoading';
+
+// Тяжёлые панели — лениво (B2): чанки Live-Code (Monaco-обёртка), System
+// Design (Excalidraw) и отчёт грузятся по факту открытия соответствующей
+// вкладки/стадии, а не вместе с first-load кабинета. Пока ленивый чанк
+// загружается, Suspense показывает skeleton (PanelLoading).
+const LiveCodePanel = lazy(() =>
+  import('./livecode/LiveCodePanel').then((m) => ({ default: m.LiveCodePanel })),
+);
+const DesignPanel = lazy(() =>
+  import('./design/DesignPanel').then((m) => ({ default: m.DesignPanel })),
+);
+const ReportView = lazy(() =>
+  import('./report/ReportView').then((m) => ({ default: m.ReportView })),
+);
 
 export function SessionView({ id }: { id: number }) {
   const { user } = useAuth();
@@ -175,16 +187,20 @@ export function SessionView({ id }: { id: number }) {
           </div>
 
           {stage === 'livecode' && session !== null ? (
-            <LiveCodePanel
-              sessionId={id}
-              stack={session.stack}
-              taskId={task?.id}
-              taskTitle={task?.title}
-              taskFiles={task?.files ?? null}
-              review={runReview}
-            />
+            <Suspense fallback={<PanelLoading />}>
+              <LiveCodePanel
+                sessionId={id}
+                stack={session.stack}
+                taskId={task?.id}
+                taskTitle={task?.title}
+                taskFiles={task?.files ?? null}
+                review={runReview}
+              />
+            </Suspense>
           ) : stage === 'design' ? (
-            <DesignPanel sessionId={id} review={designReview} />
+            <Suspense fallback={<PanelLoading />}>
+              <DesignPanel sessionId={id} review={designReview} />
+            </Suspense>
           ) : (
             <>
           {task !== null && task.statement !== undefined && (
@@ -297,7 +313,9 @@ export function SessionView({ id }: { id: number }) {
             Интервью {statusLabel(session.status)}. Ниже — запись диалога и отчёт.
           </p>
         </section>
-        <ReportView sessionId={id} />
+        <Suspense fallback={<PanelLoading />}>
+          <ReportView sessionId={id} />
+        </Suspense>
         </>
       )}
 
