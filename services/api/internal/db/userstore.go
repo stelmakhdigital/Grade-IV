@@ -71,6 +71,31 @@ func (s *UserStore) GetUserByID(ctx context.Context, id int64) (models.User, err
 	return s.scanUser(ctx, s.d.q(`SELECT id, email, password_hash, created_at, is_admin FROM users WHERE id = ?`), id)
 }
 
+// GetVacancy — текст вакансии кандидата (F6, итерация 12). Нет пользователя → "".
+func (s *UserStore) GetVacancy(ctx context.Context, userID int64) (string, error) {
+	var text string
+	err := s.db.QueryRowContext(ctx,
+		s.d.q(`SELECT vacancy_text FROM users WHERE id = ?`), userID).Scan(&text)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get vacancy: %w", err)
+	}
+	return text, nil
+}
+
+// SetVacancy — сохранить/сбросить текст вакансии кандидата (F6, итерация 12).
+// Пустая строка = сброс.
+func (s *UserStore) SetVacancy(ctx context.Context, userID int64, text string) error {
+	_, err := s.db.ExecContext(ctx,
+		s.d.q(`UPDATE users SET vacancy_text = ? WHERE id = ?`), text, userID)
+	if err != nil {
+		return fmt.Errorf("set vacancy: %w", err)
+	}
+	return nil
+}
+
 func (s *UserStore) scanUser(ctx context.Context, query string, arg any) (models.User, error) {
 	var u models.User
 	var createdAt string

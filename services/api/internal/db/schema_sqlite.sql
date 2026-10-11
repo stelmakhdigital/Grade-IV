@@ -4,7 +4,8 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  is_admin BOOLEAN NOT NULL DEFAULT 0
+  is_admin BOOLEAN NOT NULL DEFAULT 0,
+  vacancy_text TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS sessions (

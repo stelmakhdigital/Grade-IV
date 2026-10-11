@@ -99,7 +99,13 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 	interviewer := interviewer.New(provider, sessions, log,
 		interviewer.WithProfiles(profiles),
 		interviewer.WithReports(reports),
-		interviewer.WithOpenings(openings))
+		interviewer.WithOpenings(openings),
+		interviewer.WithVacancyResolver(func(ctx context.Context, userID int64) string {
+			if t, err := users.GetVacancy(ctx, userID); err == nil {
+				return t
+			}
+			return ""
+		}))
 	voice := voicesvc.NewClient(cfg.VoiceURL)
 	s := &Server{
 		cfg:          cfg,
@@ -172,6 +178,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/register", s.handleRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.Handle("GET /api/v1/auth/me", s.requireAuth(http.HandlerFunc(s.handleMe)))
+	// F6 (итерация 12): вакансия/кампания кандидата (профиль → system-промпт).
+	mux.Handle("GET /api/v1/me/vacancy", s.requireAuth(http.HandlerFunc(s.handleGetVacancy)))
+	mux.Handle("PUT /api/v1/me/vacancy", s.requireAuth(http.HandlerFunc(s.handlePutVacancy)))
 
 	// Шаблоны интервью (итерация A).
 	mux.Handle("GET /api/v1/templates", s.requireAuth(http.HandlerFunc(s.handleTemplatesList)))
