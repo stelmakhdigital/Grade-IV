@@ -11,7 +11,9 @@
 #   LLM_BASE_URL  (дефолт http://192.168.1.114:8000/v1) — LLM-узел (vLLM)
 #   LLM_MODEL     (дефолт qwen3.8-27b-fp8)
 #   LLM_MOCK      (дефолт 0; 1 — без LLM-узла, эхо-интервьюер)
-#   STT_MODEL     (дефолт large-v3)
+#   STT_MODEL     (дефолт — локальная директория models/stt: faster-whisper large-v3,
+#                 конвертированная под локальный ctranslate2; HF-снапшоты могут
+#                 иметь несовместимую версию бинарника)
 #   STT_DEVICE    (дефолт cuda; cpu — без GPU)
 #   STT_COMPUTE_TYPE (дефолт float16; int8 для CPU)
 #
@@ -39,13 +41,16 @@ fi
 LLM_BASE_URL="${LLM_BASE_URL:-http://192.168.1.114:8000/v1}"
 LLM_MODEL="${LLM_MODEL:-qwen3.8-27b-fp8}"
 LLM_MOCK="${LLM_MOCK:-0}"
-STT_MODEL="${STT_MODEL:-large-v3}"
+VOICE_MODELS="$ROOT/services/voice/models"
+# STT-провайдер: faster-whisper (default: large-v3 на GPU, ctranslate2) | gigaam
+# (GigaAM v3 — RU WER в ~2 раза ниже, но torch в venv пока CPU-сборка — медленнее)
+# | fake. Переопределяется env.
+VOICE_STT_PROVIDER="${VOICE_STT_PROVIDER:-faster-whisper}"
+GIGAAM_MODEL="${GIGAAM_MODEL:-v3_e2e_rnnt}"
+# STT: локальная директория модели (model.bin + config) — без скачивания из HF.
+STT_MODEL="${STT_MODEL:-$VOICE_MODELS/stt}"
 STT_DEVICE="${STT_DEVICE:-cuda}"
 STT_COMPUTE_TYPE="${STT_COMPUTE_TYPE:-float16}"
-# STT-провайдер: gigaam (default, GigaAM v3 — RU WER в ~2 раза ниже Whisper) | faster-whisper | fake
-VOICE_STT_PROVIDER="${VOICE_STT_PROVIDER:-gigaam}"
-GIGAAM_MODEL="${GIGAAM_MODEL:-v3_e2e_rnnt}"
-VOICE_MODELS="$ROOT/services/voice/models"
 # SESSION_LIMIT_S: off — без ограничения времени сессии (dev); число — секунд;
 # пустое — лимит по грейду. Переопределяется переменной окружения.
 SESSION_LIMIT_S="${SESSION_LIMIT_S:-off}"

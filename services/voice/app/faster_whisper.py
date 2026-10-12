@@ -37,9 +37,15 @@ class FasterWhisperSTT:
         no_speech_prob: float = 0.6,
         beam_size: int = 5,
     ) -> None:
-        self._size = model_size if model_size in MODEL_SIZES else "small"
-        if model_size not in MODEL_SIZES:
-            logger.warning("STT_MODEL=%r неизвестен; использован default 'small'", model_size)
+        # STT_MODEL: размер (tiny..large-v3, скачивается из HF-кэша) ИЛИ путь к
+        # локальной CTranslate2-директории модели (model.bin + config.json +
+        # tokenizer) — например services/voice/models/stt (скачивание не нужно;
+        # HF-снапшоты могут иметь несовместимую версию бинарника ctranslate2).
+        self._size = model_size if (
+            model_size in MODEL_SIZES or os.path.isdir(model_size)
+        ) else "small"
+        if self._size != model_size:
+            logger.warning("STT_MODEL=%r неизвестен/недиректория; использован default 'small'", model_size)
         self._language = language
         self._no_speech_prob = no_speech_prob
         self._beam_size = beam_size
@@ -66,14 +72,22 @@ class FasterWhisperSTT:
                         self._device,
                         self._compute_type,
                     )
-                    self._model = WhisperModel(
-                        self._size,
-                        device=self._device,
-                        compute_type=self._compute_type,
-                        # Кэш моделей можно направить в общую директорию
-                        # (STT_DOWNLOAD_ROOT, default ~/.cache/huggingface).
-                        download_root=os.getenv("STT_DOWNLOAD_ROOT") or None,
-                    )
+                    if os.path.isdir(self._size):
+                        # Локальная директория модели: download_root не нужен.
+                        self._model = WhisperModel(
+                            self._size,
+                            device=self._device,
+                            compute_type=self._compute_type,
+                        )
+                    else:
+                        self._model = WhisperModel(
+                            self._size,
+                            device=self._device,
+                            compute_type=self._compute_type,
+                            # Кэш моделей можно направить в общую директорию
+                            # (STT_DOWNLOAD_ROOT, default ~/.cache/huggingface).
+                            download_root=os.getenv("STT_DOWNLOAD_ROOT") or None,
+                        )
         return self._model
 
     @property
