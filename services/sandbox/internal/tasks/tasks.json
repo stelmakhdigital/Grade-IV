@@ -462,5 +462,61 @@
       "solution.py": "class LockService:\n    \"\"\"Лизинг-лок (lease lock) с fencing-токенами — логика координатора.\n\n    Лок живёт до момента expire_at (now >= expire_at — лок считается свободным).\n    При КАЖДОМ новом выдаче (grant) fencing-токен увеличивается на 1, начиная с 1.\n    Продление текущего владельцем НЕ создаёт новый токен.\n    \"\"\"\n\n    def acquire(self, key: str, client: str, now: float, lease: float) -> int:\n        \"\"\"Попытка взять (или продлить свой) лок.\n\n        Успех: лок свободен (не занят ИЛИ истёк), либо уже принадлежит этому же\n        client (продление до now + lease, тот же токен). Возвращает fencing-токен.\n        Отказ (занят другим client и не истёк): 0.\n        \"\"\"\n        raise NotImplementedError  # TODO\n\n    def release(self, key: str, client: str, now: float) -> bool:\n        \"\"\"Отпуск лoka. True, если client был владельцем (лок свободен теперь),\n        иначе False (чужой лок не трогаем).\"\"\"\n        raise NotImplementedError  # TODO\n",
       "solution_test.py": "import unittest\n\nfrom solution import LockService\n\n\nclass TestLockService(unittest.TestCase):\n    def test_basic_lease(self):\n        ls = LockService()\n        self.assertEqual(ls.acquire(\"k\", \"A\", 0, 5), 1)\n        # продление тем же client: токен не меняется\n        self.assertEqual(ls.acquire(\"k\", \"A\", 2, 5), 1)\n        # другой client — отказ\n        self.assertEqual(ls.acquire(\"k\", \"B\", 3, 5), 0)\n        # истёк (до 7, A продлил до 2+5=7) — B получает, токен +1\n        self.assertEqual(ls.acquire(\"k\", \"B\", 7, 3), 2)\n        self.assertEqual(ls.acquire(\"k\", \"A\", 8, 3), 0)\n\n    def test_release(self):\n        ls = LockService()\n        self.assertEqual(ls.acquire(\"k\", \"A\", 0, 10), 1)\n        self.assertFalse(ls.release(\"k\", \"B\", 1))\n        self.assertTrue(ls.release(\"k\", \"A\", 1))\n        self.assertFalse(ls.release(\"k\", \"A\", 2))  # уже свободен\n        # после освобождения — новый grant, новый токен\n        self.assertEqual(ls.acquire(\"k\", \"C\", 2, 5), 2)\n\n    def test_expire_without_release(self):\n        ls = LockService()\n        self.assertEqual(ls.acquire(\"k\", \"A\", 0, 2), 1)\n        self.assertEqual(ls.acquire(\"k\", \"B\", 2, 1), 2)  # ровно 0+2 — истёк\n        self.assertEqual(ls.acquire(\"k\", \"C\", 3, 1), 3)  # 2+1 — истёк\n        self.assertEqual(ls.acquire(\"k\", \"A\", 3, 1), 0)  # занят C\n\n    def test_independent_keys(self):\n        ls = LockService()\n        self.assertEqual(ls.acquire(\"k1\", \"A\", 0, 5), 1)\n        self.assertEqual(ls.acquire(\"k2\", \"B\", 0, 5), 2)  # токены глобально растут\n        self.assertEqual(ls.acquire(\"k1\", \"B\", 0, 5), 0)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
     }
+  },
+  {
+    "id": "go-reverse-linked-list",
+    "stack": "go",
+    "grades": [
+      "junior"
+    ],
+    "title": "Разворот односвязного списка",
+    "statement": "Реализуйте функцию Reverse: разворот односвязного списка на месте (без создания новых узлов, без массива). Тип Node (поля Value, Next) задан в solution.go — не изменяйте его. Верните новый голову. Пустой список (nil) остаётся nil.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// Node — узел односвязного списка (не изменяйте).\ntype Node struct {\n\tValue int\n\tNext  *Node\n}\n\n// Reverse разворачивает список на месте и возвращает новый голову.\nfunc Reverse(head *Node) *Node {\n\treturn head // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport \"testing\"\n\nfunc build(vals ...int) *Node {\n\tvar head *Node\n\tfor i := len(vals) - 1; i >= 0; i-- {\n\t\thead = &Node{Value: vals[i], Next: head}\n\t}\n\treturn head\n}\n\nfunc values(head *Node) []int {\n\tvar out []int\n\tfor head != nil {\n\t\tout = append(out, head.Value)\n\t\thead = head.Next\n\t}\n\treturn out\n}\n\nfunc TestReverseNil(t *testing.T) {\n\tif got := Reverse(nil); got != nil {\n\t\tt.Errorf(\"Reverse(nil) = %v, want nil\", got)\n\t}\n}\n\nfunc TestReverse(t *testing.T) {\n\tcases := []struct {\n\t\tin   []int\n\t\twant []int\n\t}{\n\t\t{[]int{1}, []int{1}},\n\t\t{[]int{1, 2}, []int{2, 1}},\n\t\t{[]int{1, 2, 3, 4}, []int{4, 3, 2, 1}},\n\t\t{[]int{7, -1, 0, 5, 3}, []int{3, 5, 0, -1, 7}},\n\t}\n\tfor _, c := range cases {\n\t\tgot := values(Reverse(build(c.in...)))\n\t\tif len(got) != len(c.want) {\n\t\t\tt.Errorf(\"Reverse(%v) = %v, want %v\", c.in, got, c.want)\n\t\t\tcontinue\n\t\t}\n\t\tfor i := range got {\n\t\t\tif got[i] != c.want[i] {\n\t\t\t\tt.Errorf(\"Reverse(%v) = %v, want %v\", c.in, got, c.want)\n\t\t\t\tbreak\n\t\t\t}\n\t\t}\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-ring-buffer-queue",
+    "stack": "go",
+    "grades": [
+      "junior"
+    ],
+    "title": "Очередь на кольцевом буфере",
+    "statement": "Реализуйте очередь на кольцевом буфере фиксированной ёмкости: NewRing(size) создаёт буфер ёмкостью size (size < 0 → ёмкость 0). Push(v) добавляет в конец и возвращает false, если буфер полон; Pop() извлекает из начала и возвращает (0, false), если пусто; Len() — текущий размер. Элементы выдаются в порядке Push (FIFO), заворот на конец буфера обязателен.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// RingBuffer — очередь на кольцевом буфере фиксированной ёмкости.\ntype RingBuffer struct {\n\t// TODO: поля (буфер, индексы чтения/записи, текущий размер, ёмкость)\n}\n\n// NewRing создаёт буфер ёмкостью size (size < 0 → 0).\nfunc NewRing(size int) *RingBuffer {\n\treturn &RingBuffer{} // TODO: реализуйте\n}\n\n// Push добавляет v в конец; false, если буфер полон.\nfunc (r *RingBuffer) Push(v int) bool {\n\treturn false // TODO: реализуйте\n}\n\n// Pop извлекает из начала; (0, false), если пусто.\nfunc (r *RingBuffer) Pop() (int, bool) {\n\treturn 0, false // TODO: реализуйте\n}\n\n// Len — текущий размер.\nfunc (r *RingBuffer) Len() int {\n\treturn 0 // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport \"testing\"\n\nfunc TestRingFIFO(t *testing.T) {\n\tr := NewRing(3)\n\tif !r.Push(1) || !r.Push(2) || !r.Push(3) {\n\t\tt.Fatalf(\"буфер ёмкости 3 не принял 3 элемента\")\n\t}\n\tif r.Push(4) {\n\t\tt.Errorf(\"Push в полный буфер = true, want false\")\n\t}\n\tif r.Len() != 3 {\n\t\tt.Errorf(\"Len = %d, want 3\", r.Len())\n\t}\n\tfor want := 1; want <= 3; want++ {\n\t\tv, ok := r.Pop()\n\t\tif !ok || v != want {\n\t\t\tt.Fatalf(\"Pop = (%d, %v), want (%d, true)\", v, ok, want)\n\t\t}\n\t}\n\tif v, ok := r.Pop(); ok || v != 0 {\n\t\tt.Errorf(\"Pop из пустого = (%d, %v), want (0, false)\", v, ok)\n\t}\n\tif r.Len() != 0 {\n\t\tt.Errorf(\"Len после опустошения = %d, want 0\", r.Len())\n\t}\n}\n\nfunc TestRingWrap(t *testing.T) {\n\tr := NewRing(2)\n\tfor round := 0; round < 3; round++ {\n\t\tif !r.Push(10*round + 1) || !r.Push(10*round + 2) {\n\t\t\tt.Fatalf(\"round %d: Push вернул false\", round)\n\t\t}\n\t\tfor i := 1; i <= 2; i++ {\n\t\t\tv, ok := r.Pop()\n\t\t\tif !ok || v != 10*round+i {\n\t\t\t\tt.Fatalf(\"round %d: Pop = (%d, %v), want (%d, true)\", round, v, ok, 10*round+i)\n\t\t\t}\n\t\t}\n\t}\n\tif r.Len() != 0 {\n\t\tt.Errorf(\"Len = %d, want 0\", r.Len())\n\t}\n}\n\nfunc TestRingZeroCapacity(t *testing.T) {\n\tr := NewRing(0)\n\tif r.Push(1) {\n\t\tt.Errorf(\"Push в нулевой буфер = true, want false\")\n\t}\n\tif v, ok := r.Pop(); ok || v != 0 {\n\t\tt.Errorf(\"Pop из нулевого = (%d, %v), want (0, false)\", v, ok)\n\t}\n\tr2 := NewRing(-5) // size < 0 → ёмкость 0\n\tif r2.Push(1) {\n\t\tt.Errorf(\"size < 0: Push = true, want false\")\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-roman-to-int",
+    "stack": "go",
+    "grades": [
+      "junior"
+    ],
+    "title": "Римские числа → int",
+    "statement": "Реализуйте RomanToInt: переводит корректную римскую запись в целое. Буквы I V X L C D M (1, 5, 10, 50, 100, 500, 1000); буква, стоящая перед большей, вычитается (IV = 4, IX = 9, XL = 40, CD = 400, CM = 900), иначе прибавляется. Пустая строка — 0.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// RomanToInt переводит корректную римскую запись в целое.\nfunc RomanToInt(s string) int {\n\treturn 0 // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport \"testing\"\n\nfunc TestRomanToInt(t *testing.T) {\n\tcases := map[string]int{\n\t\t\"\":                 0,\n\t\t\"I\":                1,\n\t\t\"III\":              3,\n\t\t\"IV\":               4,\n\t\t\"IX\":               9,\n\t\t\"XIV\":              14,\n\t\t\"XL\":               40,\n\t\t\"XC\":               90,\n\t\t\"CD\":               400,\n\t\t\"CM\":               900,\n\t\t\"M\":                1000,\n\t\t\"MMXXV\":            2025,\n\t\t\"MCMXCIV\":          1994,\n\t\t\"DCCCLXXXVIII\":     888,\n\t\t\"MMMDCCCLXXXVIII\":  3888,\n\t}\n\tfor in, want := range cases {\n\t\tif got := RomanToInt(in); got != want {\n\t\t\tt.Errorf(\"RomanToInt(%q) = %d, want %d\", in, got, want)\n\t\t}\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-config-kv-parser",
+    "stack": "go",
+    "grades": [
+      "junior"
+    ],
+    "title": "Парсер конфигурации key=value",
+    "statement": "Реализуйте ParseConfig: разбирает многострочную конфигурацию в map[string]string. Правила: строки вида `key=value`, деление — по первому '='; пробелы вокруг ключа и значения отбрасываются; строки, начинающиеся с '#', и пустые строки игнорируются; строки без '=' и пустые ключи игнорируются; при дубликате ключа побеждает последнее значение; значение может быть пустым (a=).",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// ParseConfig разбирает многострочную конфигурацию key=value.\nfunc ParseConfig(text string) map[string]string {\n\treturn nil // TODO: реализуйте\n}\n",
+      "solution_test.go": "package task\n\nimport \"testing\"\n\nfunc TestParseConfig(t *testing.T) {\n\ttext := \"\\n\" +\n\t\t\"# комментарий\\n\" +\n\t\t\"host = example.com\\n\" +\n\t\t\"port=8080\\n\" +\n\t\t\"\\n\" +\n\t\t\"path=/var/log\\n\" +\n\t\t\"empty=\\n\" +\n\t\t\"badline\\n\" +\n\t\t\"=withoutkey\\n\" +\n\t\t\"url=https://a=b\\n\" +\n\t\t\"port=9090\\n\"\n\tgot := ParseConfig(text)\n\twant := map[string]string{\n\t\t\"host\":  \"example.com\",\n\t\t\"port\":  \"9090\",\n\t\t\"path\":  \"/var/log\",\n\t\t\"empty\": \"\",\n\t\t\"url\":   \"https://a=b\",\n\t}\n\tif len(got) != len(want) {\n\t\tt.Fatalf(\"len(got) = %d, want %d (got=%v)\", len(got), len(want), got)\n\t}\n\tfor k, v := range want {\n\t\tif got[k] != v {\n\t\t\tt.Errorf(\"got[%q] = %q, want %q\", k, got[k], v)\n\t\t}\n\t}\n}\n\nfunc TestParseConfigEmpty(t *testing.T) {\n\tif len(ParseConfig(\"\")) != 0 {\n\t\tt.Errorf(\"ParseConfig(\\\"\\\") не пуст\")\n\t}\n\tif len(ParseConfig(\"# только комментарий\\n\\n\")) != 0 {\n\t\tt.Errorf(\"только комментарии: результат не пуст\")\n\t}\n}\n"
+    }
   }
 ]
