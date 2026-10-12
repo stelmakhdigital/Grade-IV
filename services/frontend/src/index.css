@@ -665,6 +665,80 @@ p {
   margin: 0 0 8px;
 }
 
+/* Вкладки задач (spec-13B T2): «Задача 1..N» + статус-точка. */
+.task-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.task-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid #2a3140;
+  border-radius: 8px;
+  background: #151a24;
+  color: #a9b1c2;
+  font-size: 13px;
+  cursor: pointer;
+}
+.task-tab.active {
+  border-color: #7aa2f7;
+  color: #e5e9f0;
+  background: #1b2230;
+}
+.task-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: #4b5568; /* серая — нет сдач */
+}
+.task-dot.ok {
+  background: #4ade80; /* зелёная — последний run passed */
+}
+.task-dot.fail {
+  background: #f87171; /* красная — failed */
+}
+.submitted-counter {
+  color: #8b95a7;
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+
+/* Live-Code per-task в отчёте (spec-13B T3). */
+.livecode-tasks {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+}
+.livecode-task {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border: 1px solid #232a3a;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+.livecode-task-status {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.livecode-task-status.passed {
+  color: #4ade80;
+}
+.livecode-task-status.failed {
+  color: #f87171;
+}
+.livecode-task-status.no_submission {
+  color: #8b95a7;
+}
+
 .run-output {
   margin-top: 12px;
   border: 1px solid #232a3a;

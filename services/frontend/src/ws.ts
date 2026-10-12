@@ -16,7 +16,7 @@ export interface StageTask {
 }
 
 export type WsMessage =
-  | { type: 'stage'; name: string; task?: StageTask | null }
+  | { type: 'stage'; name: string; task?: StageTask | null; tasks?: StageTask[] }
   | { type: 'timer'; remaining_s: number }
   | { type: 'ai_text'; text: string }
   | { type: 'transcript'; who: 'user' | 'ai'; text: string }

@@ -39,6 +39,8 @@ export function useVoiceSession(id: number) {
   const [runReview, setRunReview] = useState<string>('');
   const [designReview, setDesignReview] = useState<string>('');
   const [task, setTask] = useState<StageTask | null>(null);
+  // Задачи стадии Live-Code (spec-13B T2): tasks из stage-сообщения; task = tasks[0] (совместимость).
+  const [tasks, setTasks] = useState<StageTask[]>([]);
   const [remainingS, setRemainingS] = useState<number | null>(null);
   const [lastAiText, setLastAiText] = useState<string>('');
   const [mic, setMic] = useState<MicState>('idle');
@@ -128,7 +130,11 @@ export function useVoiceSession(id: number) {
           case 'stage':
             setStage(m.name);
             stageRef.current = m.name;
-            setTask(m.task ?? null);
+            {
+              const list = m.tasks ?? (m.task ? [m.task] : []);
+              setTasks(list);
+              setTask(list[0] ?? null);
+            }
             setRunReview('');
             setDesignReview('');
             setRemainingS(null);
@@ -449,6 +455,7 @@ export function useVoiceSession(id: number) {
     runReview,
     designReview,
     task,
+    tasks,
     remainingS,
     lastAiText,
     mic,

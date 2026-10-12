@@ -158,4 +158,98 @@ describe('LiveCodePanel (WP-9)', () => {
     expect(screen.getByTestId('editor')).toHaveValue(DEFAULT_CODE.python);
     expect(screen.getByTestId('editor')).toHaveAttribute('data-lang', 'python');
   });
+
+  describe('вкладки задач (spec-13B T2)', () => {
+    const T1 = {
+      id: 'go-t1',
+      title: 'Первая',
+      files: { 'solution.go': 'package task // t1' },
+    };
+    const T2 = {
+      id: 'go-t2',
+      title: 'Вторая',
+      files: { 'solution.go': 'package task // t2' },
+    };
+
+    const renderTwoTasks = () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (init?.method === 'POST' && url.endsWith('/runs')) {
+            return json(200, RUN_OK);
+          }
+          return json(404, {});
+        }),
+      );
+      return render(
+        <LiveCodePanel
+          sessionId={77}
+          stack="go"
+          tasks={[T1, T2]}
+          review=""
+          editor={stubEditor()}
+        />,
+      );
+    };
+
+    it('N вкладки, старт — вкладка 1, счётчик «Сдано 0 из 2»', () => {
+      renderTwoTasks();
+      expect(screen.getByTestId('task-tab-1')).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByTestId('task-tab-2')).toHaveAttribute('aria-selected', 'false');
+      expect(screen.getByTestId('task-tab-1')).toHaveTextContent('Задача 1');
+      expect(screen.getByTestId('task-tab-2')).toHaveTextContent('Вторая');
+      // старт — файлы задачи 1
+      expect(screen.getByTestId('editor')).toHaveValue('package task // t1');
+      expect(screen.getByTestId('submitted-counter')).toHaveTextContent('Сдано задач: 0 из 2');
+    });
+
+    it('код сохраняется при переключении вкладок (task_id в ключе кэша)', async () => {
+      const user = userEvent.setup();
+      renderTwoTasks();
+      // правим код задачи 1
+      const editor = screen.getByTestId('editor');
+      await user.clear(editor);
+      await user.type(editor, 'package task // t1 моё решение');
+      expect(editor).toHaveValue('package task // t1 моё решение');
+      // переход на задачу 2 — у неё свои файлы
+      await user.click(screen.getByTestId('task-tab-2'));
+      expect(editor).toHaveValue('package task // t2');
+      // возврат на задачу 1 — код на месте
+      await user.click(screen.getByTestId('task-tab-1'));
+      expect(editor).toHaveValue('package task // t1 моё решение');
+    });
+
+    it('«Запустить тесты» — /runs с task_id активной задачи; статус-точка и счётчик', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(json(200, RUN_OK));
+      vi.stubGlobal('fetch', fetchMock);
+      const user = userEvent.setup();
+      render(
+        <LiveCodePanel
+          sessionId={78}
+          stack="go"
+          tasks={[T1, T2]}
+          review=""
+          editor={stubEditor()}
+        />,
+      );
+      // сначала задача 2 — запуск с её task_id
+      await user.click(screen.getByTestId('task-tab-2'));
+      await user.click(screen.getByTestId('run-tests'));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+      expect(body.task_id).toBe('go-t2');
+      expect(body.files).toEqual(T2.files);
+      // зелёная точка у задачи 2, серая у задачи 1; счётчик 1 из 2
+      await waitFor(() =>
+        expect(screen.getByTestId('task-tab-2')).toHaveTextContent('Вторая'),
+      );
+      expect(screen.getByTestId('submitted-counter')).toHaveTextContent('Сдано задач: 1 из 2');
+      // результат задачи 1 не затёрт: переход на 1 — без результата
+      await user.click(screen.getByTestId('task-tab-1'));
+      expect(screen.queryByTestId('run-output')).not.toBeInTheDocument();
+      // возврат на 2 — результат на месте
+      await user.click(screen.getByTestId('task-tab-2'));
+      expect(screen.getByTestId('run-output')).toBeInTheDocument();
+    });
+  });
 });

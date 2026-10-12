@@ -37,6 +37,7 @@ export function SessionView({ id }: { id: number }) {
     runReview,
     designReview,
     task,
+    tasks,
     lastAiText,
     mic,
     micDbg,
@@ -192,6 +193,7 @@ export function SessionView({ id }: { id: number }) {
                 <LiveCodePanel
                   sessionId={id}
                   stack={session.stack}
+                  tasks={tasks}
                   taskId={task?.id}
                   taskTitle={task?.title}
                   taskFiles={task?.files ?? null}
