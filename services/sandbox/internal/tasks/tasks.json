@@ -518,5 +518,61 @@
       "solution.go": "package task\n\n// ParseConfig разбирает многострочную конфигурацию key=value.\nfunc ParseConfig(text string) map[string]string {\n\treturn nil // TODO: реализуйте\n}\n",
       "solution_test.go": "package task\n\nimport \"testing\"\n\nfunc TestParseConfig(t *testing.T) {\n\ttext := \"\\n\" +\n\t\t\"# комментарий\\n\" +\n\t\t\"host = example.com\\n\" +\n\t\t\"port=8080\\n\" +\n\t\t\"\\n\" +\n\t\t\"path=/var/log\\n\" +\n\t\t\"empty=\\n\" +\n\t\t\"badline\\n\" +\n\t\t\"=withoutkey\\n\" +\n\t\t\"url=https://a=b\\n\" +\n\t\t\"port=9090\\n\"\n\tgot := ParseConfig(text)\n\twant := map[string]string{\n\t\t\"host\":  \"example.com\",\n\t\t\"port\":  \"9090\",\n\t\t\"path\":  \"/var/log\",\n\t\t\"empty\": \"\",\n\t\t\"url\":   \"https://a=b\",\n\t}\n\tif len(got) != len(want) {\n\t\tt.Fatalf(\"len(got) = %d, want %d (got=%v)\", len(got), len(want), got)\n\t}\n\tfor k, v := range want {\n\t\tif got[k] != v {\n\t\t\tt.Errorf(\"got[%q] = %q, want %q\", k, got[k], v)\n\t\t}\n\t}\n}\n\nfunc TestParseConfigEmpty(t *testing.T) {\n\tif len(ParseConfig(\"\")) != 0 {\n\t\tt.Errorf(\"ParseConfig(\\\"\\\") не пуст\")\n\t}\n\tif len(ParseConfig(\"# только комментарий\\n\\n\")) != 0 {\n\t\tt.Errorf(\"только комментарии: результат не пуст\")\n\t}\n}\n"
     }
+  },
+  {
+    "id": "go-generic-stack-queue",
+    "stack": "go",
+    "grades": [
+      "middle"
+    ],
+    "title": "Stack и Queue на generics",
+    "statement": "Реализуйте на generics LIFO-стек Stack[T] (NewStack, Push, Top, Pop, Len) и FIFO-очередь Queue[T] (NewQueue, Enqueue, Dequeue, Len). Top/Pop у пустого стека и Dequeue у пустой очереди возвращают (T{}, false). Операции не теряют и не дублируют элементы; Len отражает текущий размер.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// Stack — LIFO-стек на generics.\ntype Stack[T any] struct {\n\t// TODO: поля\n}\n\nfunc NewStack[T any]() *Stack[T] { return &Stack[T]{} }\n\n// Push кладёт v на вершину.\nfunc (s *Stack[T]) Push(v T) {} // TODO: реализуйте\n\n// Top возвращает вершину без удаления; (T{}, false), если пусто.\nfunc (s *Stack[T]) Top() (T, bool) {\n\tvar zero T\n\treturn zero, false // TODO: реализуйте\n}\n\n// Pop снимает вершину; (T{}, false), если пусто.\nfunc (s *Stack[T]) Pop() (T, bool) {\n\tvar zero T\n\treturn zero, false // TODO: реализуйте\n}\n\n// Len — размер стека.\nfunc (s *Stack[T]) Len() int { return 0 } // TODO: реализуйте\n\n// Queue — FIFO-очередь на generics.\ntype Queue[T any] struct {\n\t// TODO: поля\n}\n\nfunc NewQueue[T any]() *Queue[T] { return &Queue[T]{} }\n\n// Enqueue кладёт v в конец очереди.\nfunc (q *Queue[T]) Enqueue(v T) {} // TODO: реализуйте\n\n// Dequeue извлекает из начала; (T{}, false), если пусто.\nfunc (q *Queue[T]) Dequeue() (T, bool) {\n\tvar zero T\n\treturn zero, false // TODO: реализуйте\n}\n\n// Len — размер очереди.\nfunc (q *Queue[T]) Len() int { return 0 } // TODO: реализуйте\n",
+      "solution_test.go": "package task\n\nimport \"testing\"\n\nfunc TestStack(t *testing.T) {\n\ts := NewStack[int]()\n\tif _, ok := s.Pop(); ok {\n\t\tt.Errorf(\"Pop из пустого стека: ok = true, want false\")\n\t}\n\tif _, ok := s.Top(); ok {\n\t\tt.Errorf(\"Top пустого стека: ok = true, want false\")\n\t}\n\ts.Push(1)\n\ts.Push(2)\n\ts.Push(3)\n\tif s.Len() != 3 {\n\t\tt.Fatalf(\"Len = %d, want 3\", s.Len())\n\t}\n\tif v, _ := s.Top(); v != 3 {\n\t\tt.Errorf(\"Top = %d, want 3\", v)\n\t}\n\tfor want := 3; want >= 1; want-- {\n\t\tv, ok := s.Pop()\n\t\tif !ok || v != want {\n\t\t\tt.Fatalf(\"Pop = (%d, %v), want (%d, true)\", v, ok, want)\n\t\t}\n\t}\n\tif s.Len() != 0 {\n\t\tt.Errorf(\"Len после опустошения = %d, want 0\", s.Len())\n\t}\n}\n\nfunc TestQueue(t *testing.T) {\n\tq := NewQueue[string]()\n\tif _, ok := q.Dequeue(); ok {\n\t\tt.Errorf(\"Dequeue из пустой очереди: ok = true, want false\")\n\t}\n\tfor _, v := range []string{\"a\", \"b\", \"c\"} {\n\t\tq.Enqueue(v)\n\t}\n\tif q.Len() != 3 {\n\t\tt.Fatalf(\"Len = %d, want 3\", q.Len())\n\t}\n\tfor _, want := range []string{\"a\", \"b\", \"c\"} {\n\t\tv, ok := q.Dequeue()\n\t\tif !ok || v != want {\n\t\t\tt.Fatalf(\"Dequeue = (%q, %v), want (%q, true)\", v, ok, want)\n\t\t}\n\t}\n\tif q.Len() != 0 {\n\t\tt.Errorf(\"Len после опустошения = %d, want 0\", q.Len())\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-min-heap",
+    "stack": "go",
+    "grades": [
+      "middle"
+    ],
+    "title": "Min-heap целых",
+    "statement": "Реализуйте min-heap целых IntHeap: NewIntHeap, Push, Pop, Peek, Len. Pop возвращает минимальный элемент и true либо (0, false) для пустой кучи; Peek — минимум без удаления; Len — размер. Сложность Push/Pop — O(log n) (полная пересортировка массива при каждой операции не подходит).",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// IntHeap — минимальная куча целых (min-heap).\ntype IntHeap struct {\n\t// TODO: поля\n}\n\nfunc NewIntHeap() *IntHeap { return &IntHeap{} }\n\n// Push добавляет v.\nfunc (h *IntHeap) Push(v int) {} // TODO: реализуйте\n\n// Pop возвращает минимальный элемент и true; (0, false), если пусто.\nfunc (h *IntHeap) Pop() (int, bool) {\n\treturn 0, false // TODO: реализуйте\n}\n\n// Peek возвращает минимальный элемент без удаления; (0, false), если пусто.\nfunc (h *IntHeap) Peek() (int, bool) {\n\treturn 0, false // TODO: реализуйте\n}\n\n// Len — размер кучи.\nfunc (h *IntHeap) Len() int { return 0 } // TODO: реализуйте\n",
+      "solution_test.go": "package task\n\nimport (\n\t\"math/rand\"\n\t\"sort\"\n\t\"testing\"\n)\n\nfunc TestHeapRandom(t *testing.T) {\n\trng := rand.New(rand.NewSource(42)) // детерминированный порядок\n\th := NewIntHeap()\n\tif v, ok := h.Pop(); ok || v != 0 {\n\t\tt.Errorf(\"Pop пустой = (%d, %v), want (0, false)\", v, ok)\n\t}\n\tif _, ok := h.Peek(); ok {\n\t\tt.Errorf(\"Peek пустой: ok = true, want false\")\n\t}\n\tvar in []int\n\tfor i := 0; i < 1000; i++ {\n\t\tv := rng.Intn(1000)\n\t\tin = append(in, v)\n\t\th.Push(v)\n\t}\n\tif h.Len() != 1000 {\n\t\tt.Fatalf(\"Len = %d, want 1000\", h.Len())\n\t}\n\tsort.Ints(in)\n\tfor i, want := range in {\n\t\tif v, ok := h.Peek(); !ok || v != want {\n\t\t\tt.Fatalf(\"Peek[%d] = (%d, %v), want %d\", i, v, ok, want)\n\t\t}\n\t\tif got, ok := h.Pop(); !ok || got != want {\n\t\t\tt.Fatalf(\"Pop[%d] = (%d, %v), want %d\", i, got, ok, want)\n\t\t}\n\t}\n\tif h.Len() != 0 {\n\t\tt.Errorf(\"Len = %d, want 0\", h.Len())\n\t}\n}\n\nfunc TestHeapDuplicates(t *testing.T) {\n\th := NewIntHeap()\n\tfor _, v := range []int{5, 1, 5, 2, 1} {\n\t\th.Push(v)\n\t}\n\tif h.Len() != 5 {\n\t\tt.Fatalf(\"Len = %d, want 5\", h.Len())\n\t}\n\tfor _, want := range []int{1, 1, 2, 5, 5} {\n\t\tif got, ok := h.Pop(); !ok || got != want {\n\t\t\tt.Fatalf(\"Pop = (%d, %v), want (%d, true)\", got, ok, want)\n\t\t}\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-middleware-chain",
+    "stack": "go",
+    "grades": [
+      "middle"
+    ],
+    "title": "Цепочка middleware",
+    "statement": "Реализуйте middleware-цепочку: тип Middleware func(next func()) задан в solution.go — оборотчик, принимающий «следующий шаг». Chain (NewChain) собирает middleware через Use и возвращает сам Chain (чтобы писать c.Use(a).Use(b)); Run запускает цепочку, где первый Use — внешняя обёртка. Порядок для Use(a).Use(b).Use(c): код a до next() → b → c → код c после next() → b → a (a-in, b-in, c-in, c-out, b-out, a-out). Пустая цепочка — ничего не делает и не падает.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// Middleware оборачивает следующий шаг цепочки.\ntype Middleware func(next func())\n\n// Chain — цепочка middleware.\ntype Chain struct {\n\t// TODO: поля\n}\n\nfunc NewChain() *Chain { return &Chain{} }\n\n// Use добавляет middleware и возвращает c (для цепочки: c.Use(a).Use(b)).\nfunc (c *Chain) Use(mw Middleware) *Chain {\n\treturn c // TODO: реализуйте\n}\n\n// Run запускает цепочку (первый Use — внешняя обёртка).\nfunc (c *Chain) Run() {} // TODO: реализуйте\n",
+      "solution_test.go": "package task\n\nimport \"testing\"\n\nfunc TestChainOrder(t *testing.T) {\n\tvar log []string\n\tmw := func(name string) Middleware {\n\t\treturn func(next func()) {\n\t\t\tlog = append(log, name+\"-in\")\n\t\t\tnext()\n\t\t\tlog = append(log, name+\"-out\")\n\t\t}\n\t}\n\tc := NewChain().Use(mw(\"a\")).Use(mw(\"b\")).Use(mw(\"c\"))\n\tc.Run()\n\twant := []string{\"a-in\", \"b-in\", \"c-in\", \"c-out\", \"b-out\", \"a-out\"}\n\tif len(log) != len(want) {\n\t\tt.Fatalf(\"log = %v, want %v\", log, want)\n\t}\n\tfor i := range log {\n\t\tif log[i] != want[i] {\n\t\t\tt.Fatalf(\"log = %v, want %v\", log, want)\n\t\t}\n\t}\n}\n\nfunc TestChainEmptyAndSingle(t *testing.T) {\n\tNewChain().Run() // пустая цепочка — не падает\n\tvar log []string\n\tsingle := func(next func()) {\n\t\tlog = append(log, \"x\")\n\t\tnext()\n\t}\n\tNewChain().Use(single).Run()\n\tif len(log) != 1 || log[0] != \"x\" {\n\t\tt.Errorf(\"одно звено: log = %v, want [x]\", log)\n\t}\n}\n"
+    }
+  },
+  {
+    "id": "go-pubsub",
+    "stack": "go",
+    "grades": [
+      "middle"
+    ],
+    "title": "In-memory pub/sub",
+    "statement": "Реализуйте in-memory pub/sub Broker: NewBroker создаёт брокер. Subscribe(topic) возвращает id подписки и канал <-chan string (буфер 16); Publish(topic, msg) доставляет msg всем текущим подписчикам topic; Unsubscribe(subID) снимает подписку (неизвестный id — ничего не делает). Publish не должен блокироваться: полный буфер означает, что сообщение отброшено только для этого подписчика, остальные подписчики его получают. Брокер не создаёт фоновых goroutine.",
+    "files": {
+      "go.mod": "module task\n\ngo 1.21\n",
+      "solution.go": "package task\n\n// Broker — in-memory pub/sub (без фоновых goroutine).\ntype Broker struct {\n\t// TODO: поля\n}\n\nfunc NewBroker() *Broker { return &Broker{} }\n\n// Subscribe возвращает id подписки и канал-подписку (буфер 16).\nfunc (b *Broker) Subscribe(topic string) (string, <-chan string) {\n\treturn \"\", nil // TODO: реализуйте\n}\n\n// Unsubscribe снимает подписку по id.\nfunc (b *Broker) Unsubscribe(subID string) {} // TODO: реализуйте\n\n// Publish доставляет msg всем подписчикам topic (неблокируемо,\n// при полном буфере сообщение отбрасывается для этого подписчика).\nfunc (b *Broker) Publish(topic, msg string) {} // TODO: реализуйте\n",
+      "solution_test.go": "package task\n\nimport \"testing\"\n\n// recv читает одно сообщение из ch (или (\"\", false), если его ещё нет).\n// Ненблокируемо: при stub-решении (Subscribe → nil) тест не виснет.\nfunc recv(ch <-chan string) (string, bool) {\n\tselect {\n\tcase m := <-ch:\n\t\treturn m, true\n\tdefault:\n\t\treturn \"\", false\n\t}\n}\n\nfunc TestPubSubDelivery(t *testing.T) {\n\tb := NewBroker()\n\t_, ch1 := b.Subscribe(\"t1\")\n\t_, ch2 := b.Subscribe(\"t1\")\n\t_, ch3 := b.Subscribe(\"t2\")\n\tb.Publish(\"t1\", \"hello\")\n\tif m, ok := recv(ch1); !ok || m != \"hello\" {\n\t\tt.Errorf(\"ch1 = %q, want \\\"hello\\\"\", m)\n\t}\n\tif m, ok := recv(ch2); !ok || m != \"hello\" {\n\t\tt.Errorf(\"ch2 = %q, want \\\"hello\\\"\", m)\n\t}\n\tif m, ok := recv(ch3); ok {\n\t\tt.Errorf(\"в чужой topic доставлено: %q\", m)\n\t}\n}\n\nfunc TestPubSubUnsubscribe(t *testing.T) {\n\tb := NewBroker()\n\tid, ch := b.Subscribe(\"t\")\n\tb.Unsubscribe(id)\n\tb.Publish(\"t\", \"x\")\n\tif m, ok := recv(ch); ok {\n\t\tt.Errorf(\"после Unsubscribe доставлено: %q\", m)\n\t}\n\tb.Unsubscribe(\"nope\") // неизвестный id — не падает\n}\n\nfunc TestPubSubNonBlocking(t *testing.T) {\n\tb := NewBroker()\n\t_, ch := b.Subscribe(\"t\")\n\tfor i := 0; i < 20; i++ { // буфер 16: лишнее отброшено, Publish не блокируется\n\t\tb.Publish(\"t\", \"m\")\n\t}\n\tgot := 0\n\tfor {\n\t\tm, ok := recv(ch)\n\t\tif !ok {\n\t\t\t_ = m\n\t\t\tif got != 16 {\n\t\t\t\tt.Errorf(\"доставлено %d, want 16 (лишнее отброшено)\", got)\n\t\t\t}\n\t\t\treturn\n\t\t}\n\t\tgot++\n\t}\n}\n"
+    }
   }
 ]
