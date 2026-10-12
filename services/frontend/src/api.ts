@@ -386,6 +386,14 @@ export interface ReportProgressEntry {
   criteria_delta: Record<string, number>;
 }
 
+/** Пер-task результат Live-Code (spec-13B T3). */
+export interface ReportLiveCodeTask {
+  id: string;
+  title: string;
+  /** passed | failed | no_submission. */
+  status: string;
+}
+
 /** Итоговый отчёт (WP-11, §12; итерация B — детальные поля для кандидата). */
 export interface Report {
   overall: number;
@@ -402,6 +410,8 @@ export interface Report {
   grade_gap?: string;
   /** Итерация B: прогресс по прошлым интервью. */
   progress_vs_previous?: ReportProgressEntry[];
+  /** spec-13B T3: per-task результаты Live-Code. */
+  livecode_tasks?: ReportLiveCodeTask[];
 }
 
 /**

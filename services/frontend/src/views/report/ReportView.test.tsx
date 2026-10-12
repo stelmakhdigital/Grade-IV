@@ -124,4 +124,22 @@ describe('ReportView (WP-11)', () => {
     // Δ к текущему
     expect(screen.getByText('Live-Code (алгоритм, качество кода, тесты): -0.8')).toBeInTheDocument();
   });
+
+  it('spec-13B T3: per-task секция Live-Code (название + результат)', async () => {
+    const REPORT_C = {
+      ...REPORT,
+      livecode_tasks: [
+        { id: 'go-a', title: 'Разворот списка', status: 'passed' },
+        { id: 'go-b', title: 'Min-heap', status: 'failed' },
+        { id: 'go-s1', title: 'Worker pool (stretch)', status: 'no_submission' },
+      ],
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => json(200, REPORT_C)));
+    render(<ReportView sessionId={9} />);
+    expect(await screen.findByTestId('livecode-tasks')).toBeInTheDocument();
+    expect(screen.getByTestId('livecode-tasks')).toHaveTextContent('Разворот списка');
+    expect(screen.getByTestId('livecode-task-go-a')).toHaveTextContent('✓ пройдено');
+    expect(screen.getByTestId('livecode-task-go-b')).toHaveTextContent('✗ не пройдено');
+    expect(screen.getByTestId('livecode-task-go-s1')).toHaveTextContent('без сдачи');
+  });
 });

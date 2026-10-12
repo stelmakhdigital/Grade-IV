@@ -130,6 +130,29 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS }
         ))}
       </ul>
 
+      {report.livecode_tasks && report.livecode_tasks.length > 0 && (
+        <>
+          <h3>Live-Code: задачи</h3>
+          <ul className="livecode-tasks" data-testid="livecode-tasks">
+            {report.livecode_tasks.map((t) => (
+              <li key={t.id} className={`livecode-task lc-${t.status}`}>
+                <span className="livecode-task-title">{t.title || t.id}</span>
+                <span
+                  className={`livecode-task-status ${t.status}`}
+                  data-testid={`livecode-task-${t.id}`}
+                >
+                  {t.status === 'passed'
+                    ? '✓ пройдено'
+                    : t.status === 'failed'
+                      ? '✗ не пройдено'
+                      : 'без сдачи'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
       <div className="report-columns">
         <div>
           <h3>Сильные стороны</h3>
