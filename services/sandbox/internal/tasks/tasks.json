@@ -639,5 +639,31 @@
       "solution.py": "class EventBus:\n    \"\"\"Мини event-bus: subscribe / unsubscribe / emit.\"\"\"\n\n    def subscribe(self, event, handler):\n        \"\"\"Добавить handler на event и вернуть handler.\"\"\"\n        raise NotImplementedError  # TODO\n\n    def unsubscribe(self, event, handler):\n        \"\"\"Снять handler с event.\"\"\"\n        raise NotImplementedError  # TODO\n\n    def emit(self, event, *args, **kwargs):\n        \"\"\"Вызвать обработчики event в порядке подписок.\"\"\"\n        raise NotImplementedError  # TODO\n",
       "solution_test.py": "import unittest\n\nfrom solution import EventBus\n\n\nclass TestEventBus(unittest.TestCase):\n    def test_emit_order_and_args(self):\n        bus = EventBus()\n        log = []\n        h1 = lambda *a, **k: log.append((\"h1\", a, k))\n        h2 = lambda *a, **k: log.append((\"h2\", a, k))\n        self.assertIs(bus.subscribe(\"e\", h1), h1)\n        bus.subscribe(\"e\", h2)\n        bus.emit(\"e\", 1, x=2)\n        self.assertEqual(log, [(\"h1\", (1,), {\"x\": 2}), (\"h2\", (1,), {\"x\": 2})])\n\n    def test_unsubscribe(self):\n        bus = EventBus()\n        log = []\n        h = lambda: log.append(1)\n        bus.subscribe(\"e\", h)\n        bus.unsubscribe(\"e\", h)\n        bus.emit(\"e\")\n        self.assertEqual(log, [])\n        bus.unsubscribe(\"e\", h)  # повторный — не падает\n\n    def test_unknown_event_noop(self):\n        bus = EventBus()\n        bus.emit(\"nope\", 1)  # не падает\n\n    def test_two_subscriptions_same_handler(self):\n        bus = EventBus()\n        log = []\n        h = lambda: log.append(1)\n        bus.subscribe(\"e\", h)\n        bus.subscribe(\"e\", h)\n        bus.emit(\"e\")\n        self.assertEqual(len(log), 2)\n        bus.unsubscribe(\"e\", h)  # снят один экземпляр\n        bus.emit(\"e\")\n        self.assertEqual(len(log), 3)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
     }
+  },
+  {
+    "id": "py-generator-pipeline",
+    "stack": "python",
+    "grades": [
+      "middle"
+    ],
+    "title": "Ленивый конвейер из генераторов",
+    "statement": "Реализуйте ленивый конвейер на генераторах: gen_map(fn, it) — ленивое (генератором) применение fn к каждому элементу it; gen_filter(pred, it) — ленивый фильтр, оставляет x, где pred(x) — True; pipeline(source, *stages) — лениво применяет stages (функции, превращающие итератор в итератор) к source слева направо. Все функции возвращают генераторы: источник читается по мере потребления, а не целиком.",
+    "files": {
+      "solution.py": "def gen_map(fn, it):\n    \"\"\"Ленивое применение fn к каждому элементу it (генератор).\"\"\"\n    raise NotImplementedError  # TODO\n\n\ndef gen_filter(pred, it):\n    \"\"\"Ленивый фильтр: оставляет x, где pred(x) True (генератор).\"\"\"\n    raise NotImplementedError  # TODO\n\n\ndef pipeline(source, *stages):\n    \"\"\"Лениво применяет stages (функции итератор -> итератор) к source слева направо.\"\"\"\n    raise NotImplementedError  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import gen_map, gen_filter, pipeline\n\n\nclass TestPipeline(unittest.TestCase):\n    def test_map(self):\n        self.assertEqual(list(gen_map(lambda x: x * 2, [1, 2, 3])), [2, 4, 6])\n\n    def test_filter(self):\n        self.assertEqual(list(gen_filter(lambda x: x % 2 == 0, [1, 2, 3, 4])), [2, 4])\n\n    def test_compose(self):\n        out = pipeline([1, 2, 3, 4, 5],\n                       lambda it: gen_filter(lambda x: x % 2 == 0, it),\n                       lambda it: gen_map(lambda x: x * 10, it))\n        self.assertEqual(list(out), [20, 40])\n\n    def test_lazy(self):\n        consumed = []\n\n        def source():\n            for i in range(1000):\n                consumed.append(i)\n                yield i\n\n        out = pipeline(source(), lambda it: gen_map(lambda x: x, it))\n        for _ in range(3):\n            next(out)\n        # источник читается по мере потребления, а не целиком\n        self.assertLess(len(consumed), 100)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-protocol-parser",
+    "stack": "python",
+    "grades": [
+      "junior"
+    ],
+    "title": "Парсер текстового протокола",
+    "statement": "Реализуйте parse_protocol(text): разбирает текст протокола в список Command (dataclass Command задан в solution.py: поля name: str, args: dict — не изменяйте его). Каждая непустая строка — команда: первый токен — имя, остальные токены — аргументы «ключ=значение» (без '=' → значение пустое; значение берётся до конца токена, то есть '=' внутри значения сохраняется); строки, начинающиеся с '#', и пустые строки игнорируются. Токены разделены пробельными символами.",
+    "files": {
+      "solution.py": "from dataclasses import dataclass, field\n\n\n@dataclass\nclass Command:\n    \"\"\"Команда протокола: имя + словарь аргументов (не изменяйте).\"\"\"\n    name: str\n    args: dict = field(default_factory=dict)\n\n\ndef parse_protocol(text: str):\n    \"\"\"Разбирает текст протокола в список Command.\"\"\"\n    raise NotImplementedError  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import Command, parse_protocol\n\n\nclass TestProtocolParser(unittest.TestCase):\n    def test_basic(self):\n        out = parse_protocol(\"start id=1 mode=fast\")\n        self.assertEqual(out, [Command(\"start\", {\"id\": \"1\", \"mode\": \"fast\"})])\n\n    def test_flag_and_equals_in_value(self):\n        out = parse_protocol(\"set url=https://x?a=1 on\")\n        self.assertEqual(out, [Command(\"set\", {\"url\": \"https://x?a=1\", \"on\": \"\"})])\n\n    def test_comments_and_blanks(self):\n        out = parse_protocol(\"# comment\\n\\nrun\\n  # indented comment\\n\\nend now\\n\")\n        self.assertEqual(out, [Command(\"run\", {}), Command(\"end\", {\"now\": \"\"})])\n\n    def test_no_commands(self):\n        self.assertEqual(parse_protocol(\"\"), [])\n        self.assertEqual(parse_protocol(\"# only comment\"), [])\n\n    def test_args_dict(self):\n        out = parse_protocol(\"move x=10 y=20\")\n        self.assertEqual(out[0].name, \"move\")\n        self.assertEqual(out[0].args, {\"x\": \"10\", \"y\": \"20\"})\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
   }
 ]
