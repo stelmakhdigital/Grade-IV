@@ -124,7 +124,16 @@ export function useVoiceSession(id: number) {
     setWsState('connecting');
 
     ws.connect(id, {
-      onOpen: () => setWsState('open'),
+      onOpen: () => {
+        setWsState('open');
+        // Ре-синк режима записи (BUG-20261012-018): при переподключении WS
+        // серверная сессия новая (recording=false), а клиент мог остаться в
+        // режиме записи — без ре-синка нагнанное в это время не попало бы в
+        // буфер, а final-ы улетали бы отдельными сообщениями.
+        if (recRef.current.active) {
+          ws.sendUi('recording', { on: true });
+        }
+      },
       onMessage: (m: WsMessage) => {
         switch (m.type) {
           case 'stage':
@@ -330,7 +339,18 @@ export function useVoiceSession(id: number) {
       await startMic();
       // Режим записи (FR-S8): включил микрофон — сервис слушает и склеивает
       // транскрипт; ответ кандидата — только при выключении/«Отправить сейчас».
-      wsRef.current?.sendUi('recording', { on: true });
+      // BUG-20261012-018: если WS закрыт, сервер не узнает о записи и кадры не
+      // уйдут — честно сообщаем и не включаем «режим записи» (иначе кандидат
+      // диктует в пустоту: «наговариваю, а не записывается в буфер»).
+      const recStarted = wsRef.current?.sendUi('recording', { on: true }) ?? false;
+      if (!recStarted) {
+        micCap.stop();
+        micLevelRef.current = 0;
+        setMic('stopped');
+        setMicDbg(null);
+        setError('Нет соединения с сессией — включите микрофон после восстановления.');
+        return;
+      }
       recRef.current.active = true;
       setRecActive(true);
       setRecSegs([]);
