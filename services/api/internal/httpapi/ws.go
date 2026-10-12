@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -628,40 +631,134 @@ type liveCodeTask struct {
 	Files map[string]string `json:"files,omitempty"`
 }
 
-// enterLiveCode — вход на стадию Live-Code (WP-5/6): выбрать задачу из банка,
-// отправить её в сообщении stage, прокомментировать ИИ-интервьюер.
+// liveCodeTaskCount — число задач на стадию Live-Code по грейду (spec-13B T1):
+// junior=2, middle=3, senior=3, staff=3. Таблица в одном месте.
+var liveCodeTaskCount = map[models.Grade]int{
+	models.GradeJunior: 2,
+	models.GradeMiddle: 3,
+	models.GradeSenior: 3,
+	models.GradeStaff:  3,
+}
+
+// liveCodeStretchGrade — для middle/senior последняя задача — из пула следующего
+// грейда (middle→senior, senior→staff); junior/staff — без stretch (spec-13B T1.2).
+func liveCodeStretchGrade(g models.Grade) (models.Grade, bool) {
+	switch g {
+	case models.GradeMiddle:
+		return models.GradeSenior, true
+	case models.GradeSenior:
+		return models.GradeStaff, true
+	}
+	return g, false
+}
+
+// liveCodeSeed — LIVECODE_TASK_SEED (env, целое): детерминированный выбор для
+// тестов/E2E; не задан (или не целое) — рандом.
+func liveCodeSeed() (int64, bool) {
+	v := os.Getenv("LIVECODE_TASK_SEED")
+	if v == "" {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// pickLiveCodeTasks — N различных случайных (uniform, без повторов) задач из пула
+// грейда; для middle/senior последняя — случайная из пула следующего грейда
+// (stretch, если непустой). Пул меньше N — взять всё (грациозная деградация).
+func pickLiveCodeTasks(grade models.Grade, pool, stretchPool []liveCodeTask, rng *rand.Rand) []liveCodeTask {
+	n := liveCodeTaskCount[grade]
+	if n <= 0 {
+		n = 1
+	}
+	out := make([]liveCodeTask, 0, n)
+	if len(pool) > 0 {
+		main := n
+		if len(stretchPool) > 0 {
+			main = n - 1 // последняя — stretch
+			if main < 0 {
+				main = 0
+			}
+		}
+		if main > len(pool) {
+			main = len(pool)
+		}
+		perm := rng.Perm(len(pool))
+		for i := 0; i < main; i++ {
+			out = append(out, pool[perm[i]])
+		}
+	}
+	if len(stretchPool) > 0 {
+		out = append(out, stretchPool[rng.Intn(len(stretchPool))])
+	}
+	if len(out) == 0 && len(pool) > 0 {
+		out = append(out, pool[rng.Intn(len(pool))])
+	}
+	return out
+}
+
+// enterLiveCode — вход на стадию Live-Code (WP-5/6, spec-13B T1): случайный набор
+// задач из банка (N по грейду + stretch), сообщение stage {tasks, task},
+// событие livecode_tasks (для отчёта), лог выбранных id, ИИ-комментарий входа.
 func (s *Server) enterLiveCode(ctx context.Context, id int64, ws *wsSession) {
 	sess, err := s.sessions.Get(ctx, id)
 	if err != nil {
 		return
 	}
-	var task *liveCodeTask
-	if tasks, err := s.fetchLiveCodeTasks(ctx, string(sess.Stack), string(sess.Grade)); err == nil && len(tasks) > 0 {
-		// MVP: первая подходящая задача (выборка по случайному смещению — бэклог;
-		// детерминизм упрощает тесты и воспроизведение).
-		task = &tasks[0]
-	} else if err != nil {
+	var tasks []liveCodeTask
+	if pool, err := s.fetchLiveCodeTasks(ctx, string(sess.Stack), string(sess.Grade)); err != nil {
 		s.log.Warn("livecode: банк задач недоступен", "session", id, "err", err)
+	} else {
+		var stretchPool []liveCodeTask
+		if nextGrade, ok := liveCodeStretchGrade(sess.Grade); ok {
+			if sp, err := s.fetchLiveCodeTasks(ctx, string(sess.Stack), string(nextGrade)); err == nil && len(sp) > 0 {
+				stretchPool = sp
+			}
+		}
+		seed, seeded := liveCodeSeed()
+		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+		if seeded {
+			rng = rand.New(rand.NewSource(seed))
+		}
+		tasks = pickLiveCodeTasks(sess.Grade, pool, stretchPool, rng)
+		if len(tasks) > 0 {
+			ids := make([]string, 0, len(tasks))
+			for _, t := range tasks {
+				ids = append(ids, t.ID)
+			}
+			s.log.Info("livecode: выбранные задачи", "session", id, "tasks", ids, "seeded", seeded)
+			// Событие livecode_tasks — для per-task отчёта (spec-13B T3).
+			_, _ = s.eventData(ctx, id, "livecode_tasks", map[string]any{"tasks": tasks})
+			s.engine.SendTo(id, map[string]any{
+				"type": "stage", "name": models.StageLiveCode,
+				"tasks": tasks,
+				"task":  tasks[0], // совместимость: task = tasks[0]
+			})
+		}
 	}
-
-	if task != nil {
-		s.engine.SendTo(id, map[string]any{
-			"type": "stage", "name": models.StageLiveCode,
-			"task": map[string]any{
-				"id": task.ID, "title": task.Title, "statement": task.Statement, "files": task.Files,
-			},
-		})
-	}
-	text, err := s.interviewer.OnStageChanged(ctx, id, stageNote(task))
+	text, err := s.interviewer.OnStageChanged(ctx, id, stageNote(tasks))
 	s.speak(ctx, id, ws, text, err) // озвучка задачи (TTS)
 }
 
-// stageNote — контекст входа на Live-Code для LLM (задача, если выбрана).
-func stageNote(task *liveCodeTask) string {
-	if task == nil {
-		return "Задача ещё не назначена (банк задач недоступен). Спроси, готов ли кандидат, и напомни формат стадии."
+// stageNote — контекст входа на Live-Code для LLM (список задач, если выбраны):
+// первая — основная, остальные — stretch/bonus на усмотрение кандидата.
+func stageNote(tasks []liveCodeTask) string {
+	if len(tasks) == 0 {
+		return "Задачи ещё не назначены (банк задач недоступен). Спроси, готов ли кандидат, и напомни формат стадии."
 	}
-	return fmt.Sprintf("Задача: «%s» (id=%s). Условие: %s", task.Title, task.ID, task.Statement)
+	b := strings.Builder{}
+	fmt.Fprintf(&b, "Сессии назначено %d задач: первая — основная, остальные — stretch/bonus на усмотрение кандидата. Озвучи список при входе.\n", len(tasks))
+	for i, t := range tasks {
+		role := "основная"
+		if i > 0 {
+			role = "stretch/bonus"
+		}
+		fmt.Fprintf(&b, "Задача %d (%s): «%s» (id=%s). Условие: %s\n", i+1, role, t.Title, t.ID, t.Statement)
+	}
+	return b.String()
 }
 
 // fetchLiveCodeTasks — GET {SANDBOX_URL}/api/v1/tasks?stack=&grade= (5 с).
