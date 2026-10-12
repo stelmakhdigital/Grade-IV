@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path"
 	"strings"
@@ -146,6 +147,22 @@ func main() {
 		os.Exit(1)
 	}
 	rn := runner.New(runner.Config{Mode: mode})
+
+	// BUG-20261011-014: subprocess-режим честно шлёт код через `sh -c "go test ..."`/
+	// `python3 -m pytest`, опираясь на PATH процесса. Если тулчейна нет — каждый
+	// запуск падает на exit 127 («go: not found») без понятного лога. Проверяем на
+	// старте и пишем ERROR, чтобы оператор сразу видел причину.
+	if mode == "subprocess" {
+		for _, tool := range []string{"go", "python3"} {
+			if p, err := exec.LookPath(tool); err != nil {
+				logger.Error("toolchain not in PATH (subprocess-режим: запуски кода кандидата падут на exit 127)",
+					"tool", tool,
+					"hint", "добавьте каталог тулчейна в PATH процесса sandbox (см. scripts/run-all.sh)")
+			} else {
+				logger.Info("toolchain ok", "tool", tool, "path", p)
+			}
+		}
+	}
 
 	srv := &http.Server{
 		Addr:              addr,
