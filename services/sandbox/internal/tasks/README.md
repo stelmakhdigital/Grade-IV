@@ -108,6 +108,12 @@
 | py-event-bus | python | middle | зелёный (12.10, референс) |
 | py-generator-pipeline | python | middle | зелёный (12.10, референс) |
 | py-protocol-parser | python | junior | зелёный (12.10, референс) |
+| go-worker-pool-graceful | go | senior | зелёный (12.10, референс, 13C) |
+| go-fanout-fanin-pipeline | go | senior | зелёный (12.10, референс, 13C) |
+| py-async-runner-limited | python | senior | зелёный (12.10, референс, 13C) |
+| go-kv-wal-store | go | staff | зелёный (12.10, референс, 13C) |
+| py-priority-deadline-scheduler | python | staff | зелёный (12.10, референс, 13C) |
+| py-lru-ttl-decorator | python | staff | зелёный (12.10, референс, 13C) |
 
-Всего: 49 задач (go 25 / python 24). Новые 15 (≥7 go + ≥7 py) — прогнаны референсами
-12.10, все тесты зелёные.
+Всего: 55 задач (go 28 / python 27). Новые 15 (13A: ≥7 go + ≥7 py) + 6 senior/staff (13C)
+прогнаны референсами 12.10, все тесты зелёные.
