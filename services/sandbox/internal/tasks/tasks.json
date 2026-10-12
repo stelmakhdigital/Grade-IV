@@ -574,5 +574,70 @@
       "solution.go": "package task\n\n// Broker — in-memory pub/sub (без фоновых goroutine).\ntype Broker struct {\n\t// TODO: поля\n}\n\nfunc NewBroker() *Broker { return &Broker{} }\n\n// Subscribe возвращает id подписки и канал-подписку (буфер 16).\nfunc (b *Broker) Subscribe(topic string) (string, <-chan string) {\n\treturn \"\", nil // TODO: реализуйте\n}\n\n// Unsubscribe снимает подписку по id.\nfunc (b *Broker) Unsubscribe(subID string) {} // TODO: реализуйте\n\n// Publish доставляет msg всем подписчикам topic (неблокируемо,\n// при полном буфере сообщение отбрасывается для этого подписчика).\nfunc (b *Broker) Publish(topic, msg string) {} // TODO: реализуйте\n",
       "solution_test.go": "package task\n\nimport \"testing\"\n\n// recv читает одно сообщение из ch (или (\"\", false), если его ещё нет).\n// Ненблокируемо: при stub-решении (Subscribe → nil) тест не виснет.\nfunc recv(ch <-chan string) (string, bool) {\n\tselect {\n\tcase m := <-ch:\n\t\treturn m, true\n\tdefault:\n\t\treturn \"\", false\n\t}\n}\n\nfunc TestPubSubDelivery(t *testing.T) {\n\tb := NewBroker()\n\t_, ch1 := b.Subscribe(\"t1\")\n\t_, ch2 := b.Subscribe(\"t1\")\n\t_, ch3 := b.Subscribe(\"t2\")\n\tb.Publish(\"t1\", \"hello\")\n\tif m, ok := recv(ch1); !ok || m != \"hello\" {\n\t\tt.Errorf(\"ch1 = %q, want \\\"hello\\\"\", m)\n\t}\n\tif m, ok := recv(ch2); !ok || m != \"hello\" {\n\t\tt.Errorf(\"ch2 = %q, want \\\"hello\\\"\", m)\n\t}\n\tif m, ok := recv(ch3); ok {\n\t\tt.Errorf(\"в чужой topic доставлено: %q\", m)\n\t}\n}\n\nfunc TestPubSubUnsubscribe(t *testing.T) {\n\tb := NewBroker()\n\tid, ch := b.Subscribe(\"t\")\n\tb.Unsubscribe(id)\n\tb.Publish(\"t\", \"x\")\n\tif m, ok := recv(ch); ok {\n\t\tt.Errorf(\"после Unsubscribe доставлено: %q\", m)\n\t}\n\tb.Unsubscribe(\"nope\") // неизвестный id — не падает\n}\n\nfunc TestPubSubNonBlocking(t *testing.T) {\n\tb := NewBroker()\n\t_, ch := b.Subscribe(\"t\")\n\tfor i := 0; i < 20; i++ { // буфер 16: лишнее отброшено, Publish не блокируется\n\t\tb.Publish(\"t\", \"m\")\n\t}\n\tgot := 0\n\tfor {\n\t\tm, ok := recv(ch)\n\t\tif !ok {\n\t\t\t_ = m\n\t\t\tif got != 16 {\n\t\t\t\tt.Errorf(\"доставлено %d, want 16 (лишнее отброшено)\", got)\n\t\t\t}\n\t\t\treturn\n\t\t}\n\t\tgot++\n\t}\n}\n"
     }
+  },
+  {
+    "id": "py-valid-parentheses",
+    "stack": "python",
+    "grades": [
+      "junior"
+    ],
+    "title": "Валидные скобки",
+    "statement": "Реализуйте is_valid(s): True, если скобки (), [], {} в строке корректно вложены и закрыты в правильном порядке, иначе False. Символов, кроме скобок, нет. Пустая строка — True.",
+    "files": {
+      "solution.py": "def is_valid(s: str) -> bool:\n    \"\"\"True, если скобки в s корректно закрыты.\"\"\"\n    raise NotImplementedError  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import is_valid\n\n\nclass TestValidParentheses(unittest.TestCase):\n    def test_valid(self):\n        for s in (\"\", \"()\", \"[]\", \"{}\", \"([{}])\", \"([]){}\", \"(){[[]]}\"):\n            self.assertTrue(is_valid(s), s)\n\n    def test_invalid(self):\n        for s in (\")\", \"([\", \"([)]\", \"(]\", \"({])\", \"((()\", \"{[}\"):\n            self.assertFalse(is_valid(s), s)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-url-query-parser",
+    "stack": "python",
+    "grades": [
+      "junior"
+    ],
+    "title": "Парсинг URL query string",
+    "statement": "Реализуйте parse_query(qs): разбирает строку запроса URL в dict str→str. Правила: пары разделяются '&'; '=' делит ключ и значение по первому вхождению (нет '=' → значение пустое); ключ и значение декодируются как URL (percent-декодирование, '+' → пробел); при дубликате ключа побеждает последнее значение; пустая строка и пустые пары ('a=1&&b=2') игнорируются.",
+    "files": {
+      "solution.py": "def parse_query(qs: str) -> dict:\n    \"\"\"Разбирает строку запроса URL в словарь (ключи/значения декодируются).\"\"\"\n    raise NotImplementedError  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import parse_query\n\n\nclass TestParseQuery(unittest.TestCase):\n    def test_basic(self):\n        self.assertEqual(parse_query(\"a=1&b=2\"), {\"a\": \"1\", \"b\": \"2\"})\n\n    def test_empty(self):\n        self.assertEqual(parse_query(\"\"), {})\n\n    def test_no_value_and_empty_pairs(self):\n        self.assertEqual(parse_query(\"x\"), {\"x\": \"\"})\n        self.assertEqual(parse_query(\"a=&b=1\"), {\"a\": \"\", \"b\": \"1\"})\n        self.assertEqual(parse_query(\"a=1&&b=2&\"), {\"a\": \"1\", \"b\": \"2\"})\n\n    def test_duplicate_last_wins(self):\n        self.assertEqual(parse_query(\"a=1&a=2\"), {\"a\": \"2\"})\n\n    def test_decoding(self):\n        self.assertEqual(parse_query(\"name=John+Doe\"), {\"name\": \"John Doe\"})\n        self.assertEqual(parse_query(\"q=hello%20world&k=a%26b\"),\n                         {\"q\": \"hello world\", \"k\": \"a&b\"})\n\n    def test_equals_in_value(self):\n        self.assertEqual(parse_query(\"url=https://x?a=1\"), {\"url\": \"https://x?a=1\"})\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-merge-two-sorted",
+    "stack": "python",
+    "grades": [
+      "junior"
+    ],
+    "title": "Объединение двух отсортированных списков",
+    "statement": "Реализуйте merge_sorted(a, b): объединяет два отсортированных по возрастанию списка в один отсортированный список. Линейная сложность O(len(a)+len(b)); входные списки не изменяются.",
+    "files": {
+      "solution.py": "def merge_sorted(a: list, b: list) -> list:\n    \"\"\"Объединяет два отсортированных (по возрастанию) списка в один отсортированный.\"\"\"\n    raise NotImplementedError  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import merge_sorted\n\n\nclass TestMergeSorted(unittest.TestCase):\n    def test_basic(self):\n        self.assertEqual(merge_sorted([1, 3], [2, 4, 5]), [1, 2, 3, 4, 5])\n\n    def test_empties(self):\n        self.assertEqual(merge_sorted([], [1, 2]), [1, 2])\n        self.assertEqual(merge_sorted([1, 2], []), [1, 2])\n        self.assertEqual(merge_sorted([], []), [])\n\n    def test_duplicates_and_negative(self):\n        self.assertEqual(merge_sorted([1, 1, 3], [1, 2, 3]), [1, 1, 1, 2, 3, 3])\n        self.assertEqual(merge_sorted([-5, -1], [-3, 0]), [-5, -3, -1, 0])\n\n    def test_no_mutation(self):\n        a, b = [1, 4], [2]\n        merge_sorted(a, b)\n        self.assertEqual(a, [1, 4])\n        self.assertEqual(b, [2])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-retry-decorator",
+    "stack": "python",
+    "grades": [
+      "middle"
+    ],
+    "title": "Retry-декоратор с backoff",
+    "statement": "Реализуйте make_retry(attempts, backoff=0.0, sleep=None) — фабрику retry-декоратора. Обёрнутая функция вызывается до attempts раз (attempts < 1 → одна попытка): успех возвращается немедленно; после неудачи, если остались попытки и передан вызываемый sleep, вызывается sleep(backoff * номер_попытки) (то есть backoff, 2*backoff, …); когда попытки исчерпаны, пробрасывается последнее исключение. sleep — иньектируемая функция (для тестов); если sleep=None, время не ждётся.",
+    "files": {
+      "solution.py": "def make_retry(attempts, backoff=0.0, sleep=None):\n    \"\"\"Фабрика декоратора retry с backoff (sleep иньектируется).\"\"\"\n    raise NotImplementedError  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import make_retry\n\n\nclass TestRetry(unittest.TestCase):\n    def test_succeeds_after_failures(self):\n        calls = {\"n\": 0}\n        sleeps = []\n\n        @make_retry(attempts=3, backoff=0.5, sleep=sleeps.append)\n        def flaky():\n            calls[\"n\"] += 1\n            if calls[\"n\"] < 3:\n                raise ValueError(\"boom\")\n            return \"ok\"\n\n        self.assertEqual(flaky(), \"ok\")\n        self.assertEqual(calls[\"n\"], 3)\n        # backoff * номер_попытки; после успеха — больше не ждём\n        self.assertEqual(sleeps, [0.5, 1.0])\n\n    def test_exhausted_reraises_last(self):\n        calls = {\"n\": 0}\n\n        @make_retry(attempts=2, sleep=lambda s: None)\n        def always_fails():\n            calls[\"n\"] += 1\n            raise RuntimeError(f\"err{calls['n']}\")\n\n        with self.assertRaises(RuntimeError) as cm:\n            always_fails()\n        self.assertIn(\"err2\", str(cm.exception))\n        self.assertEqual(calls[\"n\"], 2)\n\n    def test_min_attempts(self):\n        calls = {\"n\": 0}\n\n        @make_retry(attempts=0)  # attempts < 1 → одна попытка\n        def f():\n            calls[\"n\"] += 1\n            raise KeyError(\"x\")\n\n        with self.assertRaises(KeyError):\n            f()\n        self.assertEqual(calls[\"n\"], 1)\n\n    def test_no_sleep_by_default(self):\n        calls = {\"n\": 0}\n\n        @make_retry(attempts=2, backoff=1.0)  # sleep=None — время не ждём\n        def g():\n            calls[\"n\"] += 1\n            raise ValueError(\"x\")\n\n        with self.assertRaises(ValueError):\n            g()\n        self.assertEqual(calls[\"n\"], 2)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  },
+  {
+    "id": "py-event-bus",
+    "stack": "python",
+    "grades": [
+      "middle"
+    ],
+    "title": "Мини event-bus",
+    "statement": "Реализуйте класс EventBus: subscribe(event, handler) — добавляет handler на event и возвращает handler; unsubscribe(event, handler) — снимает handler (один и тот же handler может быть подписан несколько раз — вызов снимает одно вхождение; неизвестный handler — ничего не делает); emit(event, *args, **kwargs) — вызывает обработчики event в порядке подписок, передавая все аргументы; событие без подписчиков — ничего не делает и не падает.",
+    "files": {
+      "solution.py": "class EventBus:\n    \"\"\"Мини event-bus: subscribe / unsubscribe / emit.\"\"\"\n\n    def subscribe(self, event, handler):\n        \"\"\"Добавить handler на event и вернуть handler.\"\"\"\n        raise NotImplementedError  # TODO\n\n    def unsubscribe(self, event, handler):\n        \"\"\"Снять handler с event.\"\"\"\n        raise NotImplementedError  # TODO\n\n    def emit(self, event, *args, **kwargs):\n        \"\"\"Вызвать обработчики event в порядке подписок.\"\"\"\n        raise NotImplementedError  # TODO\n",
+      "solution_test.py": "import unittest\n\nfrom solution import EventBus\n\n\nclass TestEventBus(unittest.TestCase):\n    def test_emit_order_and_args(self):\n        bus = EventBus()\n        log = []\n        h1 = lambda *a, **k: log.append((\"h1\", a, k))\n        h2 = lambda *a, **k: log.append((\"h2\", a, k))\n        self.assertIs(bus.subscribe(\"e\", h1), h1)\n        bus.subscribe(\"e\", h2)\n        bus.emit(\"e\", 1, x=2)\n        self.assertEqual(log, [(\"h1\", (1,), {\"x\": 2}), (\"h2\", (1,), {\"x\": 2})])\n\n    def test_unsubscribe(self):\n        bus = EventBus()\n        log = []\n        h = lambda: log.append(1)\n        bus.subscribe(\"e\", h)\n        bus.unsubscribe(\"e\", h)\n        bus.emit(\"e\")\n        self.assertEqual(log, [])\n        bus.unsubscribe(\"e\", h)  # повторный — не падает\n\n    def test_unknown_event_noop(self):\n        bus = EventBus()\n        bus.emit(\"nope\", 1)  # не падает\n\n    def test_two_subscriptions_same_handler(self):\n        bus = EventBus()\n        log = []\n        h = lambda: log.append(1)\n        bus.subscribe(\"e\", h)\n        bus.subscribe(\"e\", h)\n        bus.emit(\"e\")\n        self.assertEqual(len(log), 2)\n        bus.unsubscribe(\"e\", h)  # снят один экземпляр\n        bus.emit(\"e\")\n        self.assertEqual(len(log), 3)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
   }
 ]
