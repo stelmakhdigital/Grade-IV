@@ -41,6 +41,8 @@ type ReportData struct {
 	GradeGap string `json:"grade_gap"`
 	// ProgressVsPrevious — все прошлые интервью (последние 5), Итерация B.
 	ProgressVsPrevious []ProgressEntry `json:"progress_vs_previous"`
+	// LiveCodeTasks — per-task результаты Live-Code (spec-13B T3), детерминированно.
+	LiveCodeTasks []LiveCodeTaskResult `json:"livecode_tasks"`
 }
 
 // ProgressEntry — прошлое интервью для сравнения прогресса (Итерация B).
@@ -115,13 +117,28 @@ func gradeRecommendation(overall float64) string {
 	}
 }
 
+// LiveCodeTaskRef — задача из события livecode_tasks (выбор при входе на стадию).
+type LiveCodeTaskRef struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+// LiveCodeTaskResult — задача сессии в отчёте (spec-13B T3): название + результат.
+// Status: passed | failed | no_submission.
+type LiveCodeTaskResult struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
 // reportMaterial — данные сессии для отчёта (транскрипт, кодовые запуски, схема).
 type reportMaterial struct {
-	Grade      string
-	Stack      string
-	Transcript []string
-	CodeRuns   []map[string]any
-	Design     map[string]any
+	Grade         string
+	Stack         string
+	Transcript    []string
+	CodeRuns      []map[string]any
+	Design        map[string]any
+	LiveCodeTasks []LiveCodeTaskRef
 }
 
 // reportMaterialFromEvents — сбор материала из событий сессии (Data — JSON).
@@ -152,6 +169,23 @@ func (i *Interviewer) reportMaterialFromEvents(ctx context.Context, sessionID in
 		case "whiteboard_save":
 			if len(data) > 0 {
 				mat.Design = data
+			}
+		case "livecode_tasks":
+			if raw, ok := data["tasks"].([]any); ok {
+				for _, it := range raw {
+					if tm, ok := it.(map[string]any); ok {
+						ref := LiveCodeTaskRef{}
+						if s, ok := tm["id"].(string); ok {
+							ref.ID = s
+						}
+						if s, ok := tm["title"].(string); ok {
+							ref.Title = s
+						}
+						if ref.ID != "" {
+							mat.LiveCodeTasks = append(mat.LiveCodeTasks, ref)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -312,6 +346,33 @@ func buildProgress(sess models.Session, current []CriterionScore, prev []previou
 	return out
 }
 
+// liveCodeTaskResults — per-task статусы (spec-13B T3): последняя сдача задачи
+// (code_run: task_id+passed) → passed/failed; сдач нет → no_submission.
+func liveCodeTaskResults(mat reportMaterial) []LiveCodeTaskResult {
+	last := map[string]bool{} // task_id → passed последней сдачи
+	for _, r := range mat.CodeRuns {
+		id, _ := r["task_id"].(string)
+		if id == "" {
+			continue
+		}
+		p, _ := r["passed"].(bool)
+		last[id] = p
+	}
+	out := make([]LiveCodeTaskResult, 0, len(mat.LiveCodeTasks))
+	for _, t := range mat.LiveCodeTasks {
+		status := "no_submission"
+		if p, ok := last[t.ID]; ok {
+			if p {
+				status = "passed"
+			} else {
+				status = "failed"
+			}
+		}
+		out = append(out, LiveCodeTaskResult{ID: t.ID, Title: t.Title, Status: status})
+	}
+	return out
+}
+
 // GenerateReport — итоговый отчёт (WP-11 + Итерация B: подробный):
 // LLM-оценщик по рубрике §12 с контекстом прошлых интервью + fallback.
 // Сессия должна быть в терминальном статусе (finished/aborted).
@@ -334,6 +395,11 @@ func (i *Interviewer) GenerateReport(ctx context.Context, sessionID int64) (Repo
 	finish := func(r ReportData) ReportData {
 		// Прогресс — детерминированно (числовые delta не доверяем LLM).
 		r.ProgressVsPrevious = buildProgress(sess, r.Criteria, prev)
+		// Per-task Live-Code — детерминированно по событиям сессии (spec-13B T3).
+		r.LiveCodeTasks = liveCodeTaskResults(mat)
+		if r.LiveCodeTasks == nil {
+			r.LiveCodeTasks = []LiveCodeTaskResult{}
+		}
 		if r.StudyPlan2Weeks == nil {
 			r.StudyPlan2Weeks = []string{}
 		}

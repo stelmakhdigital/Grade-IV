@@ -447,7 +447,17 @@ func (s *Server) handleReportGet(w http.ResponseWriter, r *http.Request) {
 		"grade_gap":            extra.GradeGap,
 		"study_plan_2weeks":    json.RawMessage(extra.StudyPlan2Weeks),
 		"progress_vs_previous": json.RawMessage(extra.ProgressVsPrevious),
+		// Per-task Live-Code (spec-13B T3); старые строки — пусто → [].
+		"livecode_tasks": json.RawMessage(orJSONArray(extra.LiveCodeTasks)),
 	})
+}
+
+// orJSONArray — пустой/отсутствующий JSON-массив → "[]" (старые строки отчёта).
+func orJSONArray(raw string) string {
+	if raw == "" {
+		return "[]"
+	}
+	return raw
 }
 
 // startReportGeneration — fire-and-forget генерация отчёта (WP-11):
@@ -467,12 +477,14 @@ func (s *Server) startReportGeneration(id int64) {
 		recJSON, _ := json.Marshal(data.Recommendations)
 		sp2wJSON, _ := json.Marshal(data.StudyPlan2Weeks)
 		progJSON, _ := json.Marshal(data.ProgressVsPrevious)
+		lctJSON, _ := json.Marshal(data.LiveCodeTasks)
 		if err := s.reports.Save(ctx, id, data.Overall, data.GradeRecommendation,
 			critJSON, strJSON, weakJSON, recJSON, db.ReportExtra{
 				Verdict:            data.Verdict,
 				GradeGap:           data.GradeGap,
 				StudyPlan2Weeks:    string(sp2wJSON),
 				ProgressVsPrevious: string(progJSON),
+				LiveCodeTasks:      string(lctJSON),
 			}); err != nil {
 			s.log.Error("report save", "session", id, "err", err)
 			return

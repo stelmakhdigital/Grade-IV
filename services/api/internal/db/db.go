@@ -122,6 +122,7 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 			"ALTER TABLE reports ADD COLUMN grade_gap TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE reports ADD COLUMN study_plan_2weeks TEXT NOT NULL DEFAULT '[]'",
 			"ALTER TABLE reports ADD COLUMN progress_vs_previous TEXT NOT NULL DEFAULT '[]'",
+			"ALTER TABLE reports ADD COLUMN livecode_tasks TEXT NOT NULL DEFAULT '[]'",
 		}
 	case DialectPostgres:
 		raw = schemaPostgres + "\n" + schemaPostgresProfiles
@@ -134,6 +135,7 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS grade_gap TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS study_plan_2weeks TEXT NOT NULL DEFAULT '[]'",
 			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS progress_vs_previous TEXT NOT NULL DEFAULT '[]'",
+			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS livecode_tasks TEXT NOT NULL DEFAULT '[]'",
 		}
 	default:
 		return fmt.Errorf("неподдерживаемый диалект: %q", d)
