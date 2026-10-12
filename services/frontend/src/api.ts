@@ -322,6 +322,11 @@ export function runTests(
 ): Promise<RunResult> {
   return request<RunResult>(`/sessions/${id}/runs`, {
     body: { files, action: 'test', task_id: taskId },
+  }).then((r) => {
+    // BUG-20261011-013: backend отдаёт "tests": null (nil-slice в Go), когда
+    // тесты не были запущены (compile-ошибка, нет тулчейна, timeout-setup).
+    // Без нормализации панель крашится (result.tests.filter) и размонтирует сессию.
+    return r ? { ...r, tests: r.tests ?? [] } : r;
   });
 }
 

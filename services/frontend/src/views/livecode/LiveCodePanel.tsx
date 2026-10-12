@@ -160,8 +160,9 @@ export function LiveCodePanel({
 
   const testStats = useMemo(() => {
     if (result === null) return null;
-    const passed = result.tests.filter((t) => t.passed).length;
-    return { passed, total: result.tests.length };
+    const tests = result.tests ?? []; // BUG-20261011-013: защита от null (backend)
+    const passed = tests.filter((t) => t.passed).length;
+    return { passed, total: tests.length };
   }, [result]);
 
   return (
@@ -219,9 +220,9 @@ export function LiveCodePanel({
 
       {result !== null && (
         <div className="run-output" data-testid="run-output">
-          {result.tests.length > 0 && (
+          {(result.tests ?? []).length > 0 && (
             <ul className="test-list">
-              {result.tests.map((t) => (
+              {(result.tests ?? []).map((t) => (
                 <li key={t.name} className={t.passed ? 'test-pass' : 'test-fail'}>
                   {t.passed ? '✓' : '✗'} {t.name}
                   {t.output !== undefined && t.output !== '' && (
