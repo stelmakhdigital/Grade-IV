@@ -8,8 +8,8 @@ type Stack[T any] struct {
 }
 
 func NewStack[T any]() *Stack[T] { return &Stack[T]{} }
-func (s *Stack[T]) Push(v T) { s.data = append(s.data, v) }
-func (s *Stack[T]) Len() int { return len(s.data) }
+func (s *Stack[T]) Push(v T)     { s.data = append(s.data, v) }
+func (s *Stack[T]) Len() int     { return len(s.data) }
 func (s *Stack[T]) Top() (T, bool) {
 	if len(s.data) == 0 {
 		return *new(T), false
@@ -32,8 +32,8 @@ type Queue[T any] struct {
 }
 
 func NewQueue[T any]() *Queue[T] { return &Queue[T]{} }
-func (q *Queue[T]) Enqueue(v T) { q.data = append(q.data, v) }
-func (q *Queue[T]) Len() int { return len(q.data) - q.head }
+func (q *Queue[T]) Enqueue(v T)  { q.data = append(q.data, v) }
+func (q *Queue[T]) Len() int     { return len(q.data) - q.head }
 func (q *Queue[T]) Dequeue() (T, bool) {
 	if q.Len() == 0 {
 		return *new(T), false
