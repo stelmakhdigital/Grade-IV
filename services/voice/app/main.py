@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 
@@ -21,7 +22,7 @@ from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from .providers import SAMPLE_RATE, FakeSTT, FakeTTS
+from .providers import SAMPLE_RATE, STT_EXECUTOR, FakeSTT, FakeTTS
 from .stt_stream import build_vad, register_stt_stream, register_vad_stream
 
 logger = logging.getLogger("voice")
@@ -99,7 +100,12 @@ def build_app(stt=None, tts=None, vad=None, max_speech_s: float | None = None) -
     ) -> dict:
         """Аудио-реплика (WAV/PCM16 mono) -> {text, confidence, duration_s}."""
         data = await audio.read()
-        result = stt.transcribe(data or b"", sample_rate or SAMPLE_RATE)
+        # run_in_executor: transcribe (CPU/GPU, до секунд) не должен блокировать
+        # event-loop сервиса (стримы /stt/stream, /vad/stream замирали бы);
+        # однопоточный STT_EXECUTOR — сериализация с остальными вызовами.
+        result = await asyncio.get_running_loop().run_in_executor(
+            STT_EXECUTOR, lambda: stt.transcribe(data or b"", sample_rate or SAMPLE_RATE)
+        )
         return {
             "text": result.text,
             "confidence": result.confidence,

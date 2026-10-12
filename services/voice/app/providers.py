@@ -7,12 +7,20 @@
 """
 from __future__ import annotations
 
+import concurrent.futures
 import math
 import struct
 from dataclasses import dataclass
 from typing import Protocol
 
 SAMPLE_RATE = 16000
+
+# ctranslate2 (faster-whisper) и torch (GigaAM) не допускают параллельного
+# transcribe одной модели из разных потоков (гонка partial+final → RuntimeError
+# в model.encode, сегмент терялся — BUG-20261012-018): все STT-вызовы процесса
+# идут через ОДНОПОТОЧНЫЙ исполнитель (сериализация; GPU-запросы по мс — очередь
+# не ощутима, на CPU это защита от крашей).
+STT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="stt")
 
 
 def extract_pcm16(data: bytes) -> tuple[bytes, int] | None:

@@ -25,7 +25,7 @@ from collections import deque
 import numpy as np
 from fastapi import WebSocket
 
-from .providers import SAMPLE_RATE, STTProvider
+from .providers import SAMPLE_RATE, STT_EXECUTOR, STTProvider
 
 logger = logging.getLogger("grade-voice.stream")
 
@@ -207,7 +207,12 @@ async def _send(ws: WebSocket, payload: dict) -> None:
 async def _do_partial(stt: STTProvider, ws: WebSocket, pcm: bytes, cell: dict) -> None:
     """Partial (best-effort): распознавание на текущий буфер; дубли не шлём."""
     try:
-        res = await asyncio.to_thread(stt.transcribe, pcm, SAMPLE_RATE)
+        # STT_EXECUTOR (однопоточный): ctranslate2 не потокобезопасен для
+        # параллельного transcribe — partial/final/REST сериализуем
+        # (BUG-20261012-018).
+        res = await asyncio.get_running_loop().run_in_executor(
+            STT_EXECUTOR, lambda: stt.transcribe(pcm, SAMPLE_RATE)
+        )
         if res.text and res.text != cell.get("text"):
             cell["text"] = res.text
             await _send(ws, {"type": "partial", "text": res.text})
@@ -266,7 +271,9 @@ def register_stt_stream(app, stt: STTProvider, vad, max_speech_s: float | None =
                         speech_ms = round(len(audio) // 2 * 1000 / SAMPLE_RATE)
                     splits = 0
                     await _send(ws, {"type": "state", "speech": False})
-                    res = await asyncio.to_thread(stt.transcribe, audio, SAMPLE_RATE)
+                    res = await asyncio.get_running_loop().run_in_executor(
+                        STT_EXECUTOR, lambda: stt.transcribe(audio, SAMPLE_RATE)
+                    )
                     await _send(ws, {
                         "type": "final",
                         "text": res.text,
@@ -283,7 +290,9 @@ def register_stt_stream(app, stt: STTProvider, vad, max_speech_s: float | None =
                     buf = bytearray()
                     splits += 1
                     speech_ms = round(len(audio) // 2 * 1000 / SAMPLE_RATE)
-                    res = await asyncio.to_thread(stt.transcribe, audio, SAMPLE_RATE)
+                    res = await asyncio.get_running_loop().run_in_executor(
+                        STT_EXECUTOR, lambda: stt.transcribe(audio, SAMPLE_RATE)
+                    )
                     await _send(ws, {
                         "type": "final",
                         "text": res.text,
