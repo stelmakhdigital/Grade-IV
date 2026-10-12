@@ -4,6 +4,12 @@
  * загрузка — тяжёлый бандл не попадает в критический путь кабинета.
  */
 import { Suspense, lazy, useEffect, useId, useRef } from 'react';
+// СТИЛИ Excalidraw (BUG-20261011-017): без этого CSS тулбар кривой —
+// keybinding-подписи (1-8) льются отдельной колонкой (нужен position:absolute
+// + display:none), radio-инпуты внутри ToolIcon видны серыми точками.
+// Импортируем здесь (не в main.tsx), чтобы CSS пошёл в design-чанк вместе
+// с самим Excalidraw (code-splitting).
+import '@excalidraw/excalidraw/index.css';
 import type { WhiteboardState } from '../../api';
 import type { DesignCanvasApi } from './DesignCanvasApi';
 import { blockColor } from './designColors';
