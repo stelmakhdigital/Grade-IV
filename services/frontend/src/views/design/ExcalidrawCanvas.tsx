@@ -6,6 +6,7 @@
 import { Suspense, lazy, useEffect, useId, useRef } from 'react';
 import type { WhiteboardState } from '../../api';
 import type { DesignCanvasApi } from './DesignCanvasApi';
+import { blockColor } from './designColors';
 
 const Excalidraw = lazy(() =>
   import('@excalidraw/excalidraw').then((m) => ({ default: m.Excalidraw })),
@@ -49,11 +50,8 @@ export interface ExcalidrawCanvasProps {
   initialState?: WhiteboardState | null;
 }
 
-// Цвета блоков палитры (ADR-004).
-const PALETTE_COLORS = [
-  'hsl(210, 90%, 70%)', 'hsl(45, 95%, 60%)', 'hsl(150, 70%, 55%)', 'hsl(0, 80%, 65%)',
-  'hsl(275, 75%, 65%)', 'hsl(330, 75%, 60%)',
-];
+// Цвет блоков: детерминированно по имени (designColors) — палитра и холст
+// одного цвета (раньше Math.random: один и тот же блок каждого цвета).
 
 let idCounter = 0;
 function nextId(prefix: string): string {
@@ -64,15 +62,18 @@ function nextId(prefix: string): string {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SceneElement = any;
 
-/** Группа элементов для блока: прямоугольник + текст-подпись. */
+/** Группа элементов для блока: прямоугольник + текст-подпись.
+ * Оба элемента в одной группе (groupIds) — подпись тянется за прямоугольником
+ * (раньше текст «отставал» при перетаскивании блока). */
 function blockElements(name: string, x: number, y: number): SceneElement[] {
+  const gid = nextId('grp');
   const base = {
     angle: 0,
     strokeColor: '#e6e6e6',
     fillStyle: 'solid',
     strokeWidth: 1,
     strokeStyle: 'solid',
-    groupIds: [],
+    groupIds: [gid],
     frameId: null,
     roundness: { type: 3 },
     opacity: 100,
@@ -92,7 +93,7 @@ function blockElements(name: string, x: number, y: number): SceneElement[] {
     y,
     width: 180,
     height: 60,
-    backgroundColor: PALETTE_COLORS[Math.floor(Math.random() * PALETTE_COLORS.length)] ?? '#888',
+    backgroundColor: blockColor(name),
   };
   const text: SceneElement = {
     ...base,
@@ -136,6 +137,17 @@ export function ExcalidrawCanvas({ apiRef, initialState }: ExcalidrawCanvasProps
         const elements: SceneElement[] = api.getSceneElements() ?? [];
         api.updateScene({ elements: [...elements, ...blockElements(name, x, y)] });
       },
+      clear: () => {
+        const api = excalidraw.current;
+        if (api === null) return;
+        slot.current = 0; // новые блоки — снова с первой ячейки сетки
+        // restoreElements с пустым списком — штатная очистка сцены (0.18).
+        try {
+          api.restoreElements({ elements: [] });
+        } catch {
+          api.updateScene({ elements: [] });
+        }
+      },
       snapshot: async () => {
         const api = excalidraw.current;
         const elements: SceneElement[] = api?.getSceneElements() ?? [];
@@ -175,6 +187,12 @@ export function ExcalidrawCanvas({ apiRef, initialState }: ExcalidrawCanvasProps
       <Suspense fallback={<div className="muted">Загрузка холста…</div>}>
         <Excalidraw
           key={label}
+          // BUG-20261011-016: ширина контейнера .design-canvas ≈ 768 px — совпадает
+          // с dockedSidebarBreakpoint (768) по умолчанию, Excalidraw переключался
+          // в мобильный режим: тулбар с инструментами (стрелка/фигуры) прятался
+          // за бургер-меню, соединить блоки стрелками было нельзя. 0 — всегда
+          // desktop-раскладка.
+          UIOptions={{ dockedSidebarBreakpoint: 0 }}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           excalidrawAPI={(api: any) => {
             excalidraw.current = api;

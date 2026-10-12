@@ -757,12 +757,31 @@ p {
   line-height: 1.5;
   color: var(--muted, #9aa4b2);
 }
+/* Палитра: 3 группы (трафик/сервисы/данные) + цветные метки блоков.
+   Цвет метки = цвет блока на холсте (детерминированно, designColors.ts). */
 .palette {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.palette-group {
+  display: flex;
+  align-items: center;
   gap: 6px;
   flex-wrap: wrap;
 }
+.palette-group__title {
+  flex: none;
+  min-width: 148px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted, #9aa4b2);
+}
 .palette-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   padding: 6px 10px;
   border-radius: 8px;
   border: 1px solid var(--border, #333);
@@ -774,11 +793,53 @@ p {
 .palette-item:hover {
   border-color: #58a6ff;
 }
+.palette-item__dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
 .design-canvas {
   border: 1px solid var(--border, #333);
   border-radius: 10px;
   overflow: hidden;
-  height: 420px;
+  /* 640 px — весь вертикальный тулбар Excalidraw (~750 px контента) + холст;
+     при 540 нижние инструменты обрезались. */
+  height: 640px;
+}
+/* Excalidraw 0.18 в нашем контейнере (ширина ≈ 768 px): тулбар (sidebar) по
+   умолчанию свёрнут, а вместо него — гигантский «sidebar-trigger» (логотип
+   768×768 поверх холста, клик открывает тулбар). Кандидат не находил
+   инструмент «Стрелка» — схемы не имели связей (links=0). Принудительно:
+   тулбар видим, триггер-логотип и английские HintViewer-подсказки — нет. */
+.design-canvas .Island.App-toolbar {
+  display: flex !important;
+}
+.design-canvas .sidebar-trigger,
+.design-canvas .HintViewer,
+.design-canvas .welcome-screen-center,
+.design-canvas .welcome-screen-decor {
+  display: none !important;
+}
+/* Счётчик блоков и статус оценки ИИ (рядом с «Оценить схему»). */
+.design-count {
+  font-size: 13px;
+  color: var(--muted, #9aa4b2);
+}
+.design-evaluating {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #58a6ff;
+}
+.design-evaluating__spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(88, 166, 255, 0.25);
+  border-top-color: #58a6ff;
+  animation: panel-spin 0.8s linear infinite;
 }
 
 /* Отчёт (WP-11) */

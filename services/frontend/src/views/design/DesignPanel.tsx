@@ -1,6 +1,6 @@
 /**
  * Панель стадии System Design (ADR-004, WP-10): палитра 12 архитектурных
- * блоков, холст (Excalidraw или инъектированный мок в тестах),
+ * блоков (3 группы), холст (Excalidraw или инъектированный мок в тестах),
  * «Оценить» → PUT /whiteboard (state + структура) → ИИ-оценка (ai_text).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -8,13 +8,25 @@ import type { ComponentType } from 'react';
 import { ApiError, getWhiteboard, saveWhiteboard, type WhiteboardState } from '../../api';
 import { apiErrorMessage } from '../LoginView';
 import type { DesignCanvasApi } from './DesignCanvasApi';
+import { blockColor } from './designColors';
 import { ExcalidrawCanvas } from './ExcalidrawCanvas';
 
-/** Палитра 12 блоков (ADR-004). */
-export const DESIGN_BLOCKS = [
-  'Client', 'Load Balancer', 'API-сервис', 'Worker', 'SQL-БД', 'NoSQL',
-  'Кэш', 'Очередь', 'Message Broker', 'CDN', 'Внешний API', 'Monitoring',
+/** Палитра 12 блоков ADR-004, сгруппированно по роли в архитектуре.
+ * Порядок групп: трафик → сервисы → данные/инфраструктура (логика чтения
+ * схемы слева направо, сверху вниз). */
+export const DESIGN_BLOCK_GROUPS = [
+  { title: 'Трафик', names: ['Client', 'Load Balancer', 'CDN'] },
+  { title: 'Сервисы', names: ['API-сервис', 'Worker', 'Внешний API'] },
+  {
+    title: 'Данные и инфраструктура',
+    names: ['SQL-БД', 'NoSQL', 'Кэш', 'Очередь', 'Message Broker', 'Monitoring'],
+  },
 ] as const;
+
+/** Плоский список 12 блоков (ADR-004) — совместимость/использование вне палитры. */
+export const DESIGN_BLOCKS: readonly string[] = DESIGN_BLOCK_GROUPS.flatMap(
+  (g) => g.names,
+);
 
 export interface DesignPanelProps {
   sessionId: number;
@@ -47,6 +59,9 @@ export function DesignPanel({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [initialState, setInitialState] = useState<WhiteboardState | null>(null);
+  // «ИИ оценивает…» — от успешного сохранения до появления нового review.
+  const [evaluating, setEvaluating] = useState(false);
+  const reviewAtSaveRef = useRef('');
 
   // Восстановление ранее сохранённой схемы (GET whiteboard → холст) при возврате
   // на стадию. Смысл только если схема уже сохранялась в этой вкладке; иначе холст
@@ -78,6 +93,20 @@ export function DesignPanel({
     setSaved(false);
   }, []);
 
+  const onClear = useCallback(() => {
+    apiRef.current?.clear?.();
+    setPlaced([]);
+    setSaved(false);
+    setEvaluating(false);
+  }, []);
+
+  // Ревью пришло (review изменился после сохранения) — «оцениваем» заканчивается.
+  useEffect(() => {
+    if (evaluating && review !== reviewAtSaveRef.current) {
+      setEvaluating(false);
+    }
+  }, [review, evaluating]);
+
   const onEvaluate = useCallback(async () => {
     if (submitting || apiRef.current === null) return;
     setSubmitting(true);
@@ -87,6 +116,8 @@ export function DesignPanel({
       await saveWhiteboard(sessionId, snap.state, { blocks: placed, links: snap.arrows }, snap.pngB64 ?? undefined);
       savedDesignSessions.add(sessionId); // при возврате на стадию схема восстановится
       setSaved(true);
+      reviewAtSaveRef.current = review;
+      setEvaluating(true);
     } catch (e) {
       if (e instanceof ApiError) {
         setError(`Схема: ${e.message}`);
@@ -96,27 +127,38 @@ export function DesignPanel({
     } finally {
       setSubmitting(false);
     }
-  }, [submitting, sessionId, placed]);
+  }, [submitting, sessionId, placed, review]);
 
   return (
     <div className="design" data-testid="design-panel">
       <p className="design-hint" data-testid="design-hint">
-        Постройте архитектуру: поставьте блоки из палитры и соедините их стрелками
-        (клиент → балансировка → сервисы → БД/кэш/очереди, мониторинг). «Оценить схему»
-        сохранит холст и попросит ИИ-ревью по рубрике: покрытие, масштабируемость,
-        отказоустойчивость, trade-offs.
+        1. Поставьте блоки из палитры. 2. Соедините их стрелками (инструмент «Стрелка»
+        на панели слева: клик по блоку → клик по следующему): клиент → балансировка →
+        сервисы → БД/кэш/очереди, мониторинг. 3. «Оценить схему» сохранит холст и
+        попросит ИИ-ревью по рубрике: покрытие, масштабируемость, отказоустойчивость,
+        trade-offs.
       </p>
       <div className="palette" aria-label="Палитра блоков">
-        {DESIGN_BLOCKS.map((name) => (
-          <button
-            key={name}
-            type="button"
-            className="palette-item"
-            onClick={() => placeBlock(name)}
-            data-testid={`block-${name.toLowerCase()}`}
-          >
-            {name}
-          </button>
+        {DESIGN_BLOCK_GROUPS.map((group) => (
+          <div className="palette-group" key={group.title}>
+            <span className="palette-group__title">{group.title}</span>
+            {group.names.map((name) => (
+              <button
+                key={name}
+                type="button"
+                className="palette-item"
+                onClick={() => placeBlock(name)}
+                data-testid={`block-${name.toLowerCase()}`}
+              >
+                <span
+                  className="palette-item__dot"
+                  style={{ background: blockColor(name) }}
+                  aria-hidden="true"
+                />
+                {name}
+              </button>
+            ))}
+          </div>
         ))}
       </div>
 
@@ -132,6 +174,24 @@ export function DesignPanel({
         >
           {submitting ? 'Сохраняем…' : saved ? 'Схема сохранена — ждём оценку' : 'Оценить схему'}
         </button>
+        <button
+          type="button"
+          className="btn ghost"
+          onClick={onClear}
+          disabled={placed.length === 0}
+          title="Убрать все блоки со холста"
+        >
+          Очистить холст
+        </button>
+        {placed.length > 0 && (
+          <span className="design-count">Блоков на холсте: {placed.length}</span>
+        )}
+        {evaluating && (
+          <span className="design-evaluating" role="status">
+            <span className="design-evaluating__spinner" aria-hidden="true" />
+            ИИ оценивает схему (до ~1 минуты)
+          </span>
+        )}
         {error !== null && (
           <span className="form-error" role="alert" data-testid="design-error">{error}</span>
         )}
