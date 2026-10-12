@@ -177,6 +177,16 @@ type wsSession struct {
 	fallbackWarned atomic.Bool  // Warn + метрика — однократно
 	sttSpeechSince atomic.Int64 // unix-nano начала текущего speech-сегмента (state=true); 0 — тишина
 	sttBarged      atomic.Bool  // barge-in уже сработал на текущем TTS-стриме (reset в beginTTS)
+	// Хвост диктовки (BUG-20261012-018): «recording off» пришёл, пока кандидат ещё
+	// говорил (VAD в речи или final уже считается в voice) — следующий final это
+	// «хвост диктовки», уже вошедший в клиентский склеенный буфер (последний
+	// partial): из него НЕ строим отдельное сообщение кандидата (раньше хвост
+	// «отправлялся сам как будто в следующем сообщении»). Одноразовый: расходует
+	// первый пришедший final (в пределах recTailDiscardGrace).
+	recTailDiscardAt atomic.Int64 // unixnano off-а при активной речи; 0 — хвоста нет
+	// Стрим VAD: state=false получен, final ещё считается в voice (STT) —
+	// финал в пути (хвост диктовки может прийти после «recording off»).
+	sttFinalPending atomic.Bool
 
 	// Silero VAD-стрим (ADR-002, поправка 2026-10-09): voice /vad/stream —
 	// 2-й уровень цепочки деградации (/stt/stream → /vad/stream → energy VAD).
@@ -575,6 +585,16 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage, ws *wsSession) {
 		_ = json.Unmarshal(msg.Payload, &p)
 		ws.recording.Store(p.On)
 		ws.recSpeechMS.Store(0)
+		if p.On {
+			// Новое окно записи — старый «хвост» (если был) неактуален.
+			ws.recTailDiscardAt.Store(0)
+		} else if ws.sttSpeechSince.Load() != 0 || ws.sttFinalPending.Load() ||
+			ws.vad.InSpeech() || ws.sileroSpeech.Load() {
+			// На момент выключения микрофона речь была в пути (BUG-20261012-018):
+			// следующий final — хвост диктовки, уже в склеенном буфере клиента;
+			// не отправляем его отдельным сообщением.
+			ws.recTailDiscardAt.Store(time.Now().UnixNano())
+		}
 		s.log.Info("ws: режим записи", "session", id, "on", p.On)
 
 	case "utterance":

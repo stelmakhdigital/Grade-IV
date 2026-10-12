@@ -23,6 +23,10 @@ const (
 	// (защита от ложных срабатываний; Silero-путь: таймер в onSTTStreamEvent).
 	// Единственный источник — voiceorchestrator.
 	BargeInMinSpeechMS = voiceorchestrator.BargeInMinSpeechMS
+	// recTailDiscardGrace — окно, в которое final после «recording off» при
+	// активной речи считается хвостом диктовки (BUG-20261012-018). Покрывает
+	// время STT хвостовой реплики (≤ 30 с аудио: ~5 с на CPU, ~1 с на GPU).
+	recTailDiscardGrace = 15 * time.Second
 	// MIN_CLAUSE_CHARS — мин. длина клиаза (байты) для клиуз-дробления (A1: единый
 	// источник в voiceorchestrator; сохранён для unit-тестов httpapi).
 	MIN_CLAUSE_CHARS = voiceorchestrator.MinClauseChars
@@ -209,6 +213,15 @@ func (s *Server) handleVoiceUtterance(ws *wsSession, pcm []byte) {
 	if text == "" {
 		return // молчание/шум — без хода
 	}
+	// Хвост диктовки (BUG-20261012-018), batch-путь: реплика, завершённая сразу
+	// после «recording off» при активной речи — уже в склеенном буфере клиента.
+	if t := ws.recTailDiscardAt.Load(); t != 0 {
+		ws.recTailDiscardAt.Store(0)
+		if !ws.recording.Load() && time.Since(time.Unix(0, t)) < recTailDiscardGrace {
+			s.log.Info("recording: отброшен хвост диктовки (batch-путь)", "session", ws.id, "chars", len(text))
+			return
+		}
+	}
 	// Фильтр доверия: STT на шуме/дыхании галлюцинирует с низкой уверенностью.
 	// Реальные реплики — conf ≥ 0.7 (замеры). Порог 0.5: ниже — шум, без хода.
 	if res.Confidence < 0.5 {
@@ -244,7 +257,11 @@ func (s *Server) feedVAD(ws *wsSession, pcm []byte) {
 		return
 	}
 	// Ход занят, но ИИ молчит (LLM-фаза) — не слушаем (turn-taking, ADR-002).
-	if ws.busy.Load() && !ws.ttsActive.Load() {
+	// Исключение — режим записи (BUG-20261012-018): кандидат диктует ответ,
+	// и отбрасывать его аудио на ~8 с LLM-фазы = терять начало ответа
+	// («наговариваю, а через абзац перестаёт записываться»). В записи final-ы
+	// идут в буфер (emitRecSegment), ход не стартуют — turn-taking не нужен.
+	if ws.busy.Load() && !ws.ttsActive.Load() && !ws.recording.Load() {
 		return
 	}
 	if !ws.sttStreamDown.Load() {
@@ -283,12 +300,15 @@ func (w *wsSession) onSTTStreamEvent(s *Server, ev voicesvc.StreamEvent) {
 		// длительность для final — speech_ms из final-события.
 		if ev.Speech {
 			w.sttSpeechSince.Store(time.Now().UnixNano())
+			w.sttFinalPending.Store(false)
 			if w.ttsActive.Load() {
 				time.AfterFunc(BargeInMinSpeechMS*time.Millisecond,
 					func() { w.streamBargeIn(s) })
 			}
 		} else {
 			w.sttSpeechSince.Store(0)
+			// state=false → final уже считается в voice (STT) — финал в пути.
+			w.sttFinalPending.Store(true)
 		}
 	case "partial":
 		if ev.Text != "" {
@@ -328,6 +348,19 @@ func (w *wsSession) streamBargeIn(s *Server) {
 func (w *wsSession) handleSTTStreamFinal(s *Server, ev voicesvc.StreamEvent) {
 	text := strings.TrimSpace(ev.Text)
 	ms := ev.SpeechMS
+	w.sttFinalPending.Store(false)
+	// Хвост диктовки (BUG-20261012-018): «recording off» пришёл во время речи
+	// кандидата — этот final уже вошёл в склеенный буфер клиента (последний
+	// partial) и не должен становиться отдельным сообщением («текст отправился
+	// сам как в следующем сообщении»). Флаг одноразовый: новый разговорный
+	// final после хвоста обрабатывается как обычно.
+	if t := w.recTailDiscardAt.Load(); t != 0 {
+		w.recTailDiscardAt.Store(0)
+		if !w.recording.Load() && time.Since(time.Unix(0, t)) < recTailDiscardGrace {
+			s.log.Info("recording: отброшен хвост диктовки (final после off)", "session", w.id, "chars", len(text))
+			return
+		}
+	}
 	// M5: режим записи — кандидат диктует ответ. ВСЕ его final-ы (включая короткие)
 	// → в транскрипт (emitRecSegment), БЕЗ barge-in-гейта: шорт-фраза-дроп (эхо/
 	// дыхание) + stopTTS на короткой реплике — voice-путь; в записи дроп коротких
