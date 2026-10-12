@@ -1,10 +1,24 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { fileURLToPath } from 'node:url';
+
+// BUG-20261011-015: es6-promise-pool@2.5.0 (транзитивная зависимость
+// @excalidraw/excalidraw) — UMD-файл, ломающийся, когда в окне уже есть
+// глобальный AMD define (к дизайн-стадии его инжектят vendor-бандлы):
+// UMD уходит в AMD-ветку, default-экспорт становится {} → «not a constructor»
+// → падает loadFontFaces и PNG-экспорт схемы. Aliас на чистую ESM-копию
+// (src/vendor, тело без изменений) — в dev и prod.
+const es6PromisePoolShim = fileURLToPath(new URL('./src/vendor/es6-promise-pool.mjs', import.meta.url));
 
 // Dev-прокси: /api, /healthz и /ws -> grade-api (:8000). В prod — nginx (nginx.conf).
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      'es6-promise-pool': es6PromisePoolShim,
+    },
+  },
   server: {
     port: 5173,
     proxy: {
