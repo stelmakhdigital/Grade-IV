@@ -3,7 +3,7 @@
  * grade-рекомендация, сильные/слабые стороны, рекомендации.
  * 202 «generating» — опрос каждые 2 с (максимум ~1 мин).
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getReport, type Report } from '../../api';
 import { apiErrorMessage } from '../LoginView';
 
@@ -22,6 +22,11 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS }
   const [report, setReport] = useState<Report | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
+  // spec-14/D4: id таймера в реф — цепочка setTimeout поллинга раньше не
+  // очищалась: setState на размонтированный компонент + двойной поллинг при
+  // смене sessionId.
+  const pollTimerRef = useRef<number | null>(null);
+  const aliveRef = useRef(true);
 
   const load = useCallback(async (pollsLeft: number) => {
     try {
@@ -29,8 +34,8 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS }
       if (r === 'generating') {
         if (pollsLeft > 1) {
           setState('loading');
-          window.setTimeout(() => {
-            void load(pollsLeft - 1);
+          pollTimerRef.current = window.setTimeout(() => {
+            if (aliveRef.current) void load(pollsLeft - 1);
           }, pollMs);
           return;
         }
@@ -48,8 +53,16 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS }
   }, [sessionId]);
 
   useEffect(() => {
+    aliveRef.current = true;
     setState('loading');
     void load(maxPolls);
+    return () => {
+      aliveRef.current = false;
+      if (pollTimerRef.current !== null) {
+        window.clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
   }, [load, maxPolls]);
 
   if (state === 'loading') {

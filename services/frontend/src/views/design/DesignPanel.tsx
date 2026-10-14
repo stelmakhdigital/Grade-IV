@@ -87,14 +87,46 @@ export function DesignPanel({
     };
   }, [sessionId]);
 
+  // spec-14/D5: холст Excalidraw лениво грузится — раньше placeBlock при
+  // apiRef.current === null молча ничего не рисовал, а счётчик «Блоков»
+  // рос (можно было «Оценить» пустой холст). Теперь клик при неготовом
+  // холсте ставит блок В ОЧЕРЕДЬ — он будет поставлен автоматически, как
+  // только Excalidraw смонтируется (apiRef заполняется в его useEffect).
+  const [canvasReady, setCanvasReady] = useState(false);
+  const [canvasHint, setCanvasHint] = useState<string | null>(null);
+  const pendingBlockRef = useRef<string | null>(null);
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      const ready = apiRef.current !== null;
+      setCanvasReady(ready);
+      const pending = pendingBlockRef.current;
+      if (ready && pending !== null) {
+        pendingBlockRef.current = null;
+        apiRef.current?.placeBlock(pending);
+        setPlaced((prev) => [...prev, pending]);
+        setSaved(false);
+        setCanvasHint(null);
+      }
+      if (ready) window.clearInterval(t);
+    }, 300);
+    return () => window.clearInterval(t);
+  }, []);
   const placeBlock = useCallback((name: string) => {
-    apiRef.current?.placeBlock(name);
+    if (apiRef.current === null) {
+      pendingBlockRef.current = name;
+      setCanvasHint('Холст загружается — блок будет поставлен автоматически.');
+      return;
+    }
+    setCanvasHint(null);
+    apiRef.current.placeBlock(name);
     setPlaced((prev) => [...prev, name]);
     setSaved(false);
   }, []);
 
   const onClear = useCallback(() => {
     apiRef.current?.clear?.();
+    pendingBlockRef.current = null;
+    setCanvasHint(null);
     setPlaced([]);
     setSaved(false);
     setEvaluating(false);
@@ -149,6 +181,7 @@ export function DesignPanel({
                 className="palette-item"
                 onClick={() => placeBlock(name)}
                 data-testid={`block-${name.toLowerCase()}`}
+                title={canvasReady ? undefined : 'Холст загружается — блок будет поставлен автоматически'}
               >
                 <span
                   className="palette-item__dot"
@@ -163,6 +196,11 @@ export function DesignPanel({
       </div>
 
       <Canvas apiRef={apiRef} initialState={initialState} />
+      {canvasHint !== null && (
+        <p className="form-error" role="status" data-testid="design-canvas-hint">
+          {canvasHint}
+        </p>
+      )}
 
       <div className="voice-controls">
         <button

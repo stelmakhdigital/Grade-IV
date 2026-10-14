@@ -8,7 +8,7 @@
  * Редактор инжинирится (prop `editor`), чтобы логику можно было
  * тестировать в jsdom без Monaco.
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ApiError, runTests, type RunResult, type Stack } from '../../api';
 import type { StageTask } from '../../ws';
 import { apiErrorMessage } from '../LoginView';
@@ -175,8 +175,34 @@ export function LiveCodePanel({
   });
   const activeResult = activeTaskId !== undefined ? results[activeTaskId] ?? null : null;
 
+  // spec-14/D7: ресинк по поздним/обновлённым stage.tasks — инициализация
+  // once из taskList не видела задачи, пришедшие после монтирования (статус-
+  // точки и счётчик «Сдано» не пересчитывались).
+  useEffect(() => {
+    setResults((prev) => {
+      const next: Record<string, RunResult | null> = {};
+      let changed = false;
+      for (const t of taskList) {
+        if (t.id === undefined) continue;
+        const cached = codeCache.get(cacheKeyFor(sessionId, stack, t.id, t.files))?.result ?? null;
+        next[t.id] = cached;
+        if (prev[t.id] === undefined || prev[t.id] !== cached) changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [taskList, sessionId, stack]);
+
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // spec-14/D7: setState после unmount (поздний ответ runTests) — guard.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true; // StrictMode: remount после cleanup
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Сохраняем код + результат активной задачи в кэш: переживает переключение
   // вкладок и смену стадий.
@@ -190,7 +216,7 @@ export function LiveCodePanel({
     setError(null);
     try {
       const r = await runTests(sessionId, files, activeTaskId);
-      if (activeTaskId !== undefined) {
+      if (activeTaskId !== undefined && mountedRef.current) {
         setResults((prev) => ({ ...prev, [activeTaskId as string]: r }));
       }
     } catch (e) {
@@ -200,7 +226,7 @@ export function LiveCodePanel({
         setError(apiErrorMessage(e));
       }
     } finally {
-      setRunning(false);
+      if (mountedRef.current) setRunning(false);
     }
   }, [running, sessionId, files, activeTaskId]);
 

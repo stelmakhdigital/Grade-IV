@@ -43,7 +43,7 @@ export function LoginView() {
         await register(email, password);
       }
     } catch (err) {
-      setError(apiErrorMessage(err));
+      setError(apiErrorMessage(err, { auth: 'login' }));
     } finally {
       setBusy(false);
     }
@@ -109,13 +109,21 @@ export function LoginView() {
 }
 
 /** Человекочитаемое сообщение об ошибке по кодам API. */
-export function apiErrorMessage(err: unknown): string {
+export function apiErrorMessage(
+  err: unknown,
+  opts?: { auth?: 'login' | 'expired' },
+): string {
   if (err instanceof ApiError) {
     switch (err.code) {
       case 'email_exists':
         return 'Этот email уже зарегистрирован — войдите.';
       case 'unauthorized':
-        return 'Неверный email или пароль.';
+        // spec-14/D8: 401 бывает и вне формы входа (протухший токен на
+        // странице сессии) — «Неверный email или пароль» там вводил в
+        // заблуждение. Контекст задаётся вызывающим.
+        return opts?.auth === 'login'
+          ? 'Неверный email или пароль.'
+          : 'Сессия истекла — войдите заново.';
       case 'weak_password':
         return 'Пароль — не короче 8 символов.';
       case 'bad_email':

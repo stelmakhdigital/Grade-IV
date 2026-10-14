@@ -25,6 +25,9 @@ export default defineConfig({
       '/api': { target: 'http://localhost:8000' },
       '/healthz': { target: 'http://localhost:8000' },
       '/ws': { target: 'ws://localhost:8000', ws: true },
+      // spec-14/D11: dev-диагностика микрофона — same-origin через прокси
+      // (раньше debug-reporter ломался за прокси/HTTPS).
+      '/debug': { target: 'http://localhost:8000' },
     },
   },
   build: {

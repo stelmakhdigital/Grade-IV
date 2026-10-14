@@ -150,6 +150,15 @@ function TemplatesTab() {
 
   const save = async () => {
     if (!form) return;
+    // spec-14/D9: раньше пустое имя/NaN-duration уходили на POST без валидации.
+    if (form.name.trim() === '') {
+      setError('Укажите название шаблона.');
+      return;
+    }
+    if (!Number.isFinite(form.duration_s) || form.duration_s <= 0) {
+      setError('Длительность шаблона — положительное число минут.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -464,6 +473,13 @@ function VoicesTab() {
 
   const save = async () => {
     if (!reg) return;
+    // spec-14/D9: «Добавить» создаёт строку с пустыми id/speaker — раньше
+    // она уходила на PUT как мусорная запись.
+    const bad = reg.voices.find((v) => v.speaker.trim() === '' || v.id.trim() === '');
+    if (bad !== undefined) {
+      setError('У добавленного голоса заполните id и speaker (поле «speaker» — имя голоса из voice-сервиса).');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {

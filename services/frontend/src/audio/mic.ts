@@ -607,7 +607,11 @@ export class MicCapture {
     if (this.dbgTimer !== null) return;
     this.dbgTimer = window.setInterval(() => {
       const info = this.debugInfo();
-      void fetch(`http://${location.hostname}:8000/debug/mic-report`, {
+      // spec-14/D11: раньше захардкоженный `http://${hostname}:8000` — ломался
+      // за прокси/HTTPS (mixed content) и молча глушился. Теперь same-origin
+      // относительный путь (проксирование /debug — в vite.config.ts), как и
+      // остальные вызовы api.
+      void fetch('/debug/mic-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kind: 'mic-capture-live', time: new Date().toISOString(), ua: navigator.userAgent, ...info }),

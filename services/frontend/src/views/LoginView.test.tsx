@@ -75,7 +75,11 @@ describe('LoginView (WP-7)', () => {
   });
 
   it('apiErrorMessage: маппинг кодов', () => {
+    // spec-14/D8: 401 вне формы входа — «сессия истекла», в форме входа — пароль.
     expect(apiErrorMessage(new ApiError(401, 'unauthorized', 'x'))).toBe(
+      'Сессия истекла — войдите заново.',
+    );
+    expect(apiErrorMessage(new ApiError(401, 'unauthorized', 'x'), { auth: 'login' })).toBe(
       'Неверный email или пароль.',
     );
     expect(apiErrorMessage(new ApiError(0, 'network', 'x'))).toContain('Нет соединения');

@@ -356,14 +356,25 @@ export function CabinetView() {
           className="modal-overlay"
           onClick={(e) => { if (e.target === e.currentTarget) closeVacancy(); }}
         >
-          <div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="vacancy-title">
+          {/* spec-14/D9: клавиатурная доступность — Escape закрывает (focus
+              внутри диалога после autoFocus), описание связано по id. */}
+          <div
+            className="modal-box"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vacancy-title"
+            aria-describedby="vacancy-desc"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && !vacancyBusy) closeVacancy();
+            }}
+          >
             <div className="modal-head">
               <h3 id="vacancy-title">Хочу попасть в кампанию</h3>
               <button type="button" className="btn ghost small" onClick={closeVacancy} aria-label="Закрыть">
                 ✕
               </button>
             </div>
-            <p className="modal-desc">
+            <p className="modal-desc" id="vacancy-desc">
               Вставьте описание реальной вакансии, в которую хотите попасть. ИИ-интервьюер
               проведёт собеседование так, будто он из этой компании: будет отталкиваться от
               стека, процессов и контекста вакансии, адаптируя глубину под выбранный грейд.
@@ -374,13 +385,12 @@ export function CabinetView() {
               onChange={(e) => setVacancyDraft(e.target.value)}
               placeholder="Описание вакансии: компания, стек, задачи, требования…"
               maxLength={20000}
+              autoFocus
               data-testid="vacancy-textarea"
             />
-            {vacancyDraft.length > 0 && (
-              <div className="muted small" style={{ marginTop: 6 }} data-testid="vacancy-counter">
-                {vacancyDraft.length} / 20000
-              </div>
-            )}
+            <div className="muted small" style={{ marginTop: 6 }} data-testid="vacancy-counter">
+              {vacancyDraft.length} / 20000
+            </div>
             {vacancyError !== null && (
               <p className="form-error" role="alert">{vacancyError}</p>
             )}
