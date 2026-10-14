@@ -988,3 +988,118 @@ p {
 @keyframes panel-spin {
   to { transform: rotate(360deg); }
 }
+
+/* spec-14/D16: клавиатурная навигация — видимый фокус на всех интерактивных
+   элементах (раньше :focus-visible не был стилизован вовсе). */
+.btn:focus-visible,
+.tab:focus-visible,
+.palette-item:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid #7aa2f7;
+  outline-offset: 2px;
+}
+
+/* spec-14/D13: тренд прогресса по итогам интервью (F2). */
+.trend-card .trend-delta {
+  font-size: 14px;
+  color: #9aa4b8;
+}
+.trend-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 6px;
+}
+.trend-chip {
+  display: inline-block;
+  min-width: 34px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 13px;
+  text-align: center;
+}
+.trend-chip.good {
+  color: #3fb950;
+  border-color: rgba(63, 185, 152, 0.45);
+}
+.trend-chip.mid {
+  color: #d29922;
+  border-color: rgba(210, 153, 34, 0.45);
+}
+.trend-chip.bad {
+  color: #f85149;
+  border-color: rgba(248, 81, 73, 0.45);
+}
+.score-chip {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 12px;
+}
+.score-chip.good {
+  color: #3fb950;
+}
+.score-chip.mid {
+  color: #d29922;
+}
+.score-chip.bad {
+  color: #f85149;
+}
+
+/* spec-14/D12: предупреждение о паузе дольше порога (pause_timeout). */
+.paused-warn {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  color: #d29922;
+}
+.paused-warn.danger {
+  color: #f85149;
+}
+
+/* spec-14/D15: живой прогресс минимума речи в окне записи. */
+.rec-speech-hint {
+  display: inline-block;
+  margin: 4px 8px 0 0;
+  font-size: 12px;
+  color: #6b7688;
+}
+
+/* spec-14/D16: мобильная раскладка (раньше ни одного @media — таблицы и
+   сетки переполняли вьюпорт). */
+@media (max-width: 720px) {
+  .app {
+    padding: 20px 12px;
+  }
+  .app h1 {
+    font-size: 24px;
+  }
+  .table-wrap,
+  .sessions-table {
+    display: block;
+    overflow-x: auto;
+  }
+  .sessions-table th,
+  .sessions-table td {
+    padding: 6px 8px;
+    white-space: nowrap;
+  }
+  .report-columns {
+    grid-template-columns: 1fr !important;
+  }
+  .voice-controls {
+    flex-wrap: wrap;
+  }
+  .history-head {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .modal-box {
+    max-width: 92vw;
+  }
+}

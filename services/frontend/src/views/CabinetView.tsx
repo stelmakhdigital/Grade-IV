@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
   createSession,
+  getReport,
   getVacancy,
   listProfiles,
   listSessions,
@@ -40,6 +41,18 @@ const STACKS: { value: Stack; label: string }[] = [
 /** Путь к странице сессии (hash-роутинг, App.tsx). */
 export function sessionPath(id: number): string {
   return `#/sessions/${id}`;
+}
+
+/** spec-14/D12: порог паузы сервера (session.DefaultPauseTimeout, SRS §7):
+ * пауза дольше — resume сам прерывает сессию (pause_timeout). */
+const PAUSE_TIMEOUT_MS = 30 * 60 * 1000;
+
+/** Остаток паузы до порога (мс) для paused-сессии; null — не применимо. */
+function pausedLeftMs(s: Session, now: number): number | null {
+  if (s.status !== 'paused' || !s.paused_at) return null;
+  const t = new Date(s.paused_at).getTime();
+  if (Number.isNaN(t)) return null;
+  return PAUSE_TIMEOUT_MS - (now - t);
 }
 
 export function CabinetView() {
@@ -77,6 +90,37 @@ export function CabinetView() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // spec-14/D13 (F2-progress): тренд прогресса — overall по завершённым
+  // сессиям (отчёты грузим лениво, по одной; отсутствие отчёта → null).
+  const [overalls, setOveralls] = useState<Record<number, number | null>>({});
+  useEffect(() => {
+    if (sessions === null) return;
+    let cancelled = false;
+    const finished = sessions.filter((s) => s.status === 'finished' || s.status === 'aborted');
+    (async () => {
+      for (const s of finished) {
+        try {
+          const r = await getReport(s.id);
+          if (!cancelled) {
+            setOveralls((prev) => ({ ...prev, [s.id]: r === 'generating' ? null : r.overall }));
+          }
+        } catch {
+          if (!cancelled) setOveralls((prev) => ({ ...prev, [s.id]: null }));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessions]);
+
+  // spec-14/D12: тик для пересчёта «осталось паузы» (30 с, дёшево).
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNowTick(Date.now()), 30000);
+    return () => window.clearInterval(t);
+  }, []);
 
   // Шаблоны интервью (итерация A): грузим для выбранного грейда/стека.
   useEffect(() => {
@@ -297,6 +341,47 @@ export function CabinetView() {
         </div>
       </section>
 
+      {/* spec-14/D13 (F2-progress): тренд итоговых баллов по завершённым
+          интервью (хронология слева направо — как в истории сверху вниз). */}
+      {(() => {
+        const rows = (sessions ?? [])
+          .filter((s) => overalls[s.id] != null)
+          .reverse();
+        if (rows.length < 2) return null;
+        const first = overalls[rows[0].id] as number;
+        const last = overalls[rows[rows.length - 1].id] as number;
+        const delta = last - first;
+        const arrow = delta > 0.05 ? '↗' : delta < -0.05 ? '↘' : '→';
+        return (
+          <section className="card trend-card" aria-labelledby="trend">
+            <div className="history-head">
+              <h2 id="trend">Прогресс по итогам</h2>
+              <span className="trend-delta" data-testid="trend-delta">
+                {arrow} {delta >= 0 ? '+' : ''}{delta.toFixed(2)}{rows.length > 2 ? ` (за ${rows.length} интервью)` : ''}
+              </span>
+            </div>
+            <div className="trend-row" data-testid="trend-row">
+              {rows.map((s, i) => {
+                const v = overalls[s.id] as number;
+                const cls = v >= 4 ? 'good' : v >= 2.5 ? 'mid' : 'bad';
+                const prev = i > 0 ? (overalls[rows[i - 1].id] as number) : null;
+                const diff = prev !== null ? v - prev : null;
+                return (
+                  <span
+                    key={s.id}
+                    className={`trend-chip ${cls}`}
+                    title={`${formatDate(s.started_at)} · ${s.grade} / ${s.stack}${diff !== null ? ` · к прошлому: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}` : ''}`}
+                  >
+                    {v.toFixed(1)}
+                  </span>
+                );
+              })}
+            </div>
+            <p className="muted small">Итоговый балл интервью (1–5). Хронология слева направо.</p>
+          </section>
+        );
+      })()}
+
       <section className="card" aria-labelledby="history">
         <div className="history-head">
           <h2 id="history">История</h2>
@@ -331,6 +416,45 @@ export function CabinetView() {
                   <td>{stageLabel(s.stage)}</td>
                   <td>
                     <span className={`status ${s.status}`}>{statusLabel(s.status)}</span>
+                    {/* spec-14/D13: итоговый балл рядом со статусом. */}
+                    {overalls[s.id] != null && (
+                      <span
+                        className={`score-chip ${(overalls[s.id] as number) >= 4 ? 'good' : (overalls[s.id] as number) >= 2.5 ? 'mid' : 'bad'}`}
+                        title="Итоговый балл отчёта (1–5)"
+                        data-testid={`overall-${s.id}`}
+                      >
+                        {(overalls[s.id] as number).toFixed(1)}
+                      </span>
+                    )}
+                    {/* spec-14/D12: пауза дольше порога — «Продолжить» прервёт
+                        интервью (pause_timeout) — предупреждаем заранее. */}
+                    {(() => {
+                      const left = pausedLeftMs(s, nowTick);
+                      if (left === null) return null;
+                      if (left <= 0) {
+                        return (
+                          <span
+                            className="paused-warn danger"
+                            data-testid={`pause-warn-${s.id}`}
+                            title="Пауза дольше порога (30 мин): «Продолжить» завершит интервью и запустит генерацию отчёта"
+                          >
+                            порог паузы истёк
+                          </span>
+                        );
+                      }
+                      if (left < 10 * 60 * 1000) {
+                        return (
+                          <span
+                            className="paused-warn"
+                            data-testid={`pause-warn-${s.id}`}
+                            title="Пауза дольше порога (30 мин) прервёт интервью"
+                          >
+                            паузы осталось {Math.ceil(left / 60000)} мин
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
                   </td>
                   <td>{formatSeconds(s.active_seconds)}</td>
                   <td>
