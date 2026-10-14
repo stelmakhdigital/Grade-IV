@@ -251,6 +251,48 @@ p {
   text-align: center;
 }
 
+/* A5: лендинг-хиро — как проходит интервью (4 стадии) */
+.hero {
+  max-width: 680px;
+  margin: 18px auto 22px;
+  text-align: left;
+}
+
+.hero-steps {
+  list-style: none;
+  counter-reset: step;
+  padding: 0;
+  margin: 0;
+}
+
+.hero-steps li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 34px;
+  margin: 10px 0;
+}
+
+.hero-steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #2a3349;
+  border-radius: 5px;
+  font-size: 12px;
+  color: #7aa2f7;
+}
+
+.hero-note {
+  margin: 16px 0 0;
+  font-size: 13px;
+}
+
 .auth-card {
   text-align: left;
   max-width: 400px;

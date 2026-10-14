@@ -52,7 +52,34 @@ export function LoginView() {
   return (
     <main className="app auth-page">
       <h1>Грейд</h1>
-      <p className="muted">ИИ мок-интервью для разработчиков</p>
+      <p className="muted">ИИ-интервью для разработчиков — грейд по трём стадиям</p>
+
+      {/* A5: лендинг — что делает продукт и как проходит интервью */}
+      <section className="hero" aria-label="Как проходит интервью">
+        <ol className="hero-steps">
+          <li>
+            <b>Голос</b> — диалог с ИИ-интервьюером по стеку и грейду: опыт,
+            ООП, анализ сложности.
+          </li>
+          <li>
+            <b>Live-Code</b> — задачи в редакторе с реальным прогоном тестов
+            (Go/Python).
+          </li>
+          <li>
+            <b>System Design</b> — собираете схему на доске, ИИ делает ревью
+            архитектуры.
+          </li>
+          <li>
+            <b>Отчёт</b> — оценка по критериям, разрыв до грейда, план
+            подготовки и публичная ссылка.
+          </li>
+        </ol>
+        <p className="hero-note muted">
+          Всё как на реальном интервью: голос, код и доска — но без стресса.
+          Грейд выставляется по фактам диалога, а не по впечатлению.
+        </p>
+      </section>
+
       <form className="card auth-card" onSubmit={onSubmit} noValidate>
         <div className="tabs" role="tablist">
           <button

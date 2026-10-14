@@ -497,3 +497,9 @@ export async function revokeShare(id: number): Promise<{ revoked: boolean }> {
 export async function fetchPublicReport(token: string): Promise<PublicReport> {
   return request<PublicReport>(`/public/reports/${encodeURIComponent(token)}`);
 }
+
+/** Одноразовый тикет для WS-upgrade (spec-14/#12: JWT в query утекает в логи). */
+export async function fetchWSTicket(): Promise<string> {
+  const r = await request<{ ticket: string }>('/ws-ticket');
+  return r.ticket;
+}
