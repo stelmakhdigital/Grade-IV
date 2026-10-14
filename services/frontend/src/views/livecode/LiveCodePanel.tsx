@@ -13,6 +13,7 @@ import { ApiError, runTests, type RunResult, type Stack } from '../../api';
 import type { StageTask } from '../../ws';
 import { apiErrorMessage } from '../LoginView';
 import { CodeEditor } from './CodeEditor';
+import { parseGoTestJSON } from './goTestDigest';
 
 export const MAIN_FILE: Record<Stack, string> = {
   go: 'main.go',
@@ -174,6 +175,23 @@ export function LiveCodePanel({
     return m;
   });
   const activeResult = activeTaskId !== undefined ? results[activeTaskId] ?? null : null;
+
+  // spec-15 UX: разбор сырого go test -json в читабельный дайджест (диагностика
+  // проваленных тестов терялась в стене машинного JSON). Не-json вывод
+  // (pytest, ошибки компиляции) — как есть.
+  const activeDigest = useMemo(
+    () => (activeResult !== null ? parseGoTestJSON(activeResult.stdout ?? '') : null),
+    [activeResult],
+  );
+  const digestOutput = useMemo(() => {
+    const m = new Map<string, string>();
+    if (activeDigest !== null) {
+      for (const t of activeDigest.tests) {
+        if (t.output.length > 0) m.set(t.name, t.output.join('\n'));
+      }
+    }
+    return m;
+  }, [activeDigest]);
 
   // spec-14/D7: ресинк по поздним/обновлённым stage.tasks — инициализация
   // once из taskList не видела задачи, пришедшие после монтирования (статус-
@@ -340,15 +358,41 @@ export function LiveCodePanel({
               {(activeResult.tests ?? []).map((t) => (
                 <li key={t.name} className={t.passed ? 'test-pass' : 'test-fail'}>
                   {t.passed ? '✓' : '✗'} {t.name}
-                  {t.output !== undefined && t.output !== '' && (
-                    <pre className="test-output">{t.output}</pre>
-                  )}
+                  {/* spec-15: диагностика проваленного теста — из per-test output
+                      контракта api (если заполнен) либо из разобранного
+                      go test -json (раньше она была только в сыром JSON-стиме). */}
+                  {(() => {
+                    const out = t.output !== undefined && t.output !== '' ? t.output : digestOutput.get(t.name);
+                    return out !== undefined && out !== '' && <pre className="test-output">{out}</pre>;
+                  })()}
                 </li>
               ))}
             </ul>
           )}
-          {(activeResult.stdout !== '' || activeResult.stderr !== '') && (
-            <pre className="run-stdout">{[activeResult.stdout, activeResult.stderr].filter(Boolean).join('\n')}</pre>
+          {activeDigest !== null && activeDigest.tests.length > 0 && (activeResult.tests ?? []).length === 0 && (
+            <ul className="test-list">
+              {activeDigest.tests.map((t) => (
+                <li key={t.name} className={t.passed === true ? 'test-pass' : 'test-fail'}>
+                  {t.passed === true ? '✓' : '✗'} {t.name}
+                  {t.output.length > 0 && <pre className="test-output">{t.output.join('\n')}</pre>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {activeDigest !== null ? (
+            <>
+              {activeDigest.packages.length > 0 && (
+                <pre className="run-stdout">{activeDigest.packages.join('\n')}</pre>
+              )}
+              <details className="run-raw">
+                <summary>сырой вывод тестов</summary>
+                <pre>{activeDigest.raw}</pre>
+              </details>
+            </>
+          ) : (
+            (activeResult.stdout !== '' || activeResult.stderr !== '') && (
+              <pre className="run-stdout">{[activeResult.stdout, activeResult.stderr].filter(Boolean).join('\n')}</pre>
+            )
           )}
         </div>
       )}

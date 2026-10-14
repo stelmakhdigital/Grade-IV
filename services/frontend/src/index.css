@@ -781,6 +781,26 @@ p {
   white-space: pre-wrap;
 }
 
+/* spec-15: сырой вывод go test под спойлером (дайджест — основной блок) */
+.run-raw {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.run-raw summary {
+  cursor: pointer;
+  color: #5c6c85;
+  user-select: none;
+}
+
+.run-raw pre {
+  margin: 6px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  color: #8b96ac;
+  white-space: pre-wrap;
+}
+
 .run-ok {
   color: #73daca;
   font-size: 13px;
