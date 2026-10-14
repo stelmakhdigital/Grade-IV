@@ -200,8 +200,11 @@ func (s *Server) handleSessionAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Пауза дольше порога: Resume сам прервал сессию (pause_timeout, aborted) —
-	// возобновлять нечего, это конфликт (409 invalid_state).
+	// возобновлять нечего, это конфликт (409 invalid_state). Отчёт всё равно
+	// генерируем: транскрипт у прерванной сессии есть, а без запуска ReportView
+	// поллит «Считаем результаты интервью…» вечно (spec-14, BUG-20261014-021).
 	if r.PathValue("action") == "resume" && snap.Status == models.StatusAborted {
+		s.startReportGeneration(id)
 		writeError(w, http.StatusConflict, "invalid_state", "пауза дольше порога — сессия прервана")
 		return
 	}
