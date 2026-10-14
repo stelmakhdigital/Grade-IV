@@ -395,8 +395,8 @@ export function SessionView({ id }: { id: number }) {
       <section className="card transcript" aria-label="Транскрипт">
         {lines.length === 0 && <p className="muted">Диалог появится здесь.</p>}
         <ol className="transcript-list" data-testid="lines" ref={transcriptRef}>
-          {[...lines].reverse().map((l, i) => (
-            <li key={i} className={`line ${l.who}${l.interim ? ' interim' : ''}`}>
+          {[...lines].reverse().map((l) => (
+            <li key={l.id} className={`line ${l.who}${l.interim ? ' interim' : ''}`}>
               <div className="line-who">
                 {l.who === 'user' ? 'Кандидат' : l.who === 'ai' ? 'ИИ-интервьюер' : 'Система'}
               </div>

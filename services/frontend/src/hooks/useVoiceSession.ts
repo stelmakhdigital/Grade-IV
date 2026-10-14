@@ -29,7 +29,13 @@ export interface Line {
   text: string;
   /** Интеримная (stt_partial) строка кандидата — обновляется до final. */
   interim?: boolean;
+  /** spec-15: стабильный ключ для списка транскрипта (ключ по обратному
+   *  индексу вызывал churn ре-рендеров при новых строках). */
+  id: number;
 }
+
+let lineSeq = 0;
+const nextLineId = () => ++lineSeq;
 
 export function useVoiceSession(id: number) {
   const [session, setSession] = useState<Session | null>(null);
@@ -116,7 +122,7 @@ export function useVoiceSession(id: number) {
   }, [id]);
 
   const pushLine = useCallback((who: Line['who'], text: string) => {
-    setLines((prev) => [...prev.slice(-199), { who, text }]);
+    setLines((prev) => [...prev.slice(-199), { who, text, id: nextLineId() }]);
   }, []);
 
   // WS-цикл (только для активных сессий).
@@ -181,11 +187,17 @@ export function useVoiceSession(id: number) {
             break;
           case 'transcript':
             setLines((prev) => {
-              const next = { who: (m.who === 'user' ? 'user' : 'ai') as Line['who'], text: m.text };
               // final кандидата фиксирует интерим-строку (stt_partial),
-              // а не дублирует её отдельной строкой.
+              // а не дублирует её отдельной строкой; id интерима сохраняется.
               const last = prev[prev.length - 1];
-              if (m.who === 'user' && last !== undefined && last.who === 'user' && last.interim) {
+              const replacesInterim =
+                m.who === 'user' && last !== undefined && last.who === 'user' && last.interim;
+              const next: Line = {
+                who: (m.who === 'user' ? 'user' : 'ai') as Line['who'],
+                text: m.text,
+                id: replacesInterim ? last!.id : nextLineId(),
+              };
+              if (replacesInterim) {
                 return [...prev.slice(0, -1), next];
               }
               return [...prev.slice(-199), next];
@@ -205,7 +217,7 @@ export function useVoiceSession(id: number) {
               if (last !== undefined && last.who === 'user' && last.interim) {
                 return [...prev.slice(0, -1), { ...last, text: m.text }];
               }
-              return [...prev.slice(-199), { who: 'user', text: m.text, interim: true }];
+              return [...prev.slice(-199), { who: 'user', text: m.text, interim: true, id: nextLineId() }];
             });
             break;
           case 'stt_segment':
@@ -606,9 +618,9 @@ function lineFromEvent(e: SessionEvent): Line {
     : kind === 'ai_utterance' || kind === 'ai_nudge' ? 'ai'
     : 'system';
   const text = eventText(kind, e.data);
-  if (text !== '') return { who, text };
+  if (text !== '') return { who, text, id: nextLineId() };
   // события без текста — короткая системная строка
-  return { who: 'system', text: eventKindLabel(kind) };
+  return { who: 'system', text: eventKindLabel(kind), id: nextLineId() };
 }
 
 function runResultLine(m: { [k: string]: unknown }): string {
