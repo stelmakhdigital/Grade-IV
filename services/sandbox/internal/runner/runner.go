@@ -90,11 +90,18 @@ type Config struct {
 	// умолчанию выше): RLIMIT_AS (байты) и RLIMIT_CPU (сек).
 	MemLimitBytes int
 	CPUSecs       int
+	// MaxConcurrent — предел одновременных запусков (spec-14/C3: N параллельных
+	// холодных go test ≈ N×2 ГБ VA → OOM хоста). 0 → defaultMaxConcurrent.
+	MaxConcurrent int
 }
+
+// defaultMaxConcurrent — см. Config.MaxConcurrent.
+const defaultMaxConcurrent = 4
 
 // Runner — выполнение запусков.
 type Runner struct {
 	cfg Config
+	sem chan struct{} // spec-14/C3: semaphore одновременных запусков
 }
 
 // New создаёт раннер (режим и пороки — из конфига).
@@ -114,7 +121,11 @@ func New(cfg Config) *Runner {
 			"python": "python3 -m pytest -q",
 		}
 	}
-	return &Runner{cfg: cfg}
+	maxConc := cfg.MaxConcurrent
+	if maxConc <= 0 {
+		maxConc = defaultMaxConcurrent
+	}
+	return &Runner{cfg: cfg, sem: make(chan struct{}, maxConc)}
 }
 
 // Mode — активный режим.
@@ -134,6 +145,16 @@ func (r *Runner) Run(ctx context.Context, stack string, files map[string]string)
 		if !safePath(path) {
 			return Result{}, fmt.Errorf("%w: %q (пути — относительно, без ..)", ErrBadFiles, path)
 		}
+	}
+
+	// spec-14/C3: ограничиваем число одновременных запусков — каждый run
+	// порождает тяжёлое дерево процессов (холодный go test ≈ 2 ГБ VA);
+	// N одновременных POST /runs без предела → OOM хоста.
+	select {
+	case r.sem <- struct{}{}:
+		defer func() { <-r.sem }()
+	case <-ctx.Done():
+		return Result{}, fmt.Errorf("semaphore: %w", ctx.Err())
 	}
 
 	workdir, err := r.newWorkDir()
@@ -225,6 +246,19 @@ func (r *Runner) newWorkDir() (string, error) {
 	if err := os.MkdirAll(base, 0o700); err != nil {
 		return "", fmt.Errorf("workdir base: %w", err)
 	}
+	// spec-14/C5: janitor — run-* каталоги копятся, если процесс убит
+	// (SIGKILL) до defer RemoveAll. Чистим старше 24 ч по mtime.
+	if entries, err := os.ReadDir(base); err == nil {
+		stale := time.Now().Add(-24 * time.Hour)
+		for _, e := range entries {
+			if !e.IsDir() || !strings.HasPrefix(e.Name(), "run-") {
+				continue
+			}
+			if info, err := e.Info(); err == nil && info.ModTime().Before(stale) {
+				_ = os.RemoveAll(filepath.Join(base, e.Name()))
+			}
+		}
+	}
 	return os.MkdirTemp(base, "run-*")
 }
 
@@ -259,10 +293,20 @@ func (r *Runner) runSubprocess(ctx context.Context, stack, workdir string) ([]by
 	if cpuSecs <= 0 {
 		cpuSecs = defaultCPUSecs
 	}
-	// ulimit -v — виртуальная память (KB), ulimit -t — CPU-время (с).
+	// ulimit -v — виртуальная память (KB), ulimit -t — CPU-время (с), -n —
+	// число открытых файлов. spec-14/C2: `|| exit 97` — раньше при провале
+	// ulimit (запрошено > hard limit) sh печатал ошибку и ПРОДОЛЖАЛ без
+	// лимитов (молчаливый неограниченный запуск). -n (nofile) — best-effort:
+	// hard-лимит хоста может быть ниже запрошенного. Fork-bomb (pids) в
+	// subprocess-режиме не ограничиваем сознательно: RLIMIT_NPROC per-uid
+	// на busy-хосте ломает легитимные запуски (go test порождает дерево
+	// процессов) — защита pids за docker-режимом (--pids-limit).
 	// БЕЗ exec: exec ломает builtin-команды (exit/cd) и составные («&&»):
 	// ограничения установлены в sh ДО команды и наследуются ей.
-	cmdLine = fmt.Sprintf("ulimit -v %d; ulimit -t %d; %s", memLimit/1024, cpuSecs, cmdLine)
+	cmdLine = fmt.Sprintf(
+		"ulimit -v %d || exit 97; ulimit -t %d || exit 97;"+
+			" ulimit -n 512 2>/dev/null || ulimit -n $(ulimit -n -H) 2>/dev/null || true; %s",
+		memLimit/1024, cpuSecs, cmdLine)
 	// ВАЖНО: exec.Command (не CommandContext): CommandContext убивает только
 	// родительский sh, а пайп stdout/stderr продолжат удерживать дочерние
 	// процессы (python/go-компилятор) — cmd.Wait() будет ждать EOF по пайпу
@@ -338,11 +382,29 @@ func (r *Runner) runDocker(ctx context.Context, stack, workdir string) ([]byte, 
 	}
 	image := r.cfg.Images[stack]
 	cmdLine := r.cfg.Commands[stack]
-	// ENV для /tmp (rootfs read-only): HOME + кэши Go.
+	// ENV для /tmp (rootfs read-only): HOME + кэши Go. spec-14/C6: GOPROXY=off —
+	// с --network=none попытка скачать зависимости даёт честную ошибку вместо
+	// сетевого зависания dial.
 	env := []string{
 		"HOME=/tmp", "TMPDIR=/tmp",
 		"GOCACHE=/tmp/gocache", "GOPATH=/tmp/gopath", "GOTOOLCHAIN=local", "GOFLAGS=-mod=mod",
+		"GOPROXY=off",
 	}
+	// spec-14/C1: раньше --user 1000:1000 при uid хоста ≠ 1000 не мог ни читать,
+	// ни писать /work (MkdirTemp — 0700, владелец — uid хоста) → КАЖДЫЙ run падал
+	// (permission denied). Мапим контейнерного пользователя на uid/gid процесса
+	// sandbox (хост-пользователя) — каталоги 0700 полностью доступны.
+	userOpt := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	// spec-14/C4: cidfile — по таймауту CommandContext убивал только клиент
+	// `docker run`, контейнер продолжал жить на daemon (утечка CPU/памяти,
+	// --rm копился). По ctx.Done() — явный `docker kill <cid>`.
+	cidFile, err := os.CreateTemp("", "grade-sandbox-cid-*")
+	if err != nil {
+		return nil, -1, fmt.Errorf("cidfile: %w", err)
+	}
+	cidPath := cidFile.Name()
+	cidFile.Close()
+	defer func() { _ = os.Remove(cidPath) }()
 	args := []string{
 		"run", "--rm",
 		"--network=none",
@@ -351,7 +413,11 @@ func (r *Runner) runDocker(ctx context.Context, stack, workdir string) ([]byte, 
 		"--pids-limit=128",
 		"--read-only",
 		"--tmpfs", "/tmp:size=128m",
-		"--user", "1000:1000",
+		"--user", userOpt,
+		"--cidfile", cidPath,
+		// spec-14/C6: минимальные привилегии контейнера.
+		"--cap-drop=ALL",
+		"--security-opt", "no-new-privileges",
 		"-v", workdir + ":/work:rw",
 	}
 	for _, e := range env {
@@ -359,7 +425,10 @@ func (r *Runner) runDocker(ctx context.Context, stack, workdir string) ([]byte, 
 	}
 	args = append(args, image, "sh", "-c", "cd /work && "+cmdLine)
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	// spec-14/C4: exec.Command (не CommandContext) — CommandContext убивал
+	// только клиент `docker run`, контейнер продолжал жить на daemon.
+	// По ctx.Done(): явный `docker kill <cid>` + завершение клиента.
+	cmd := exec.Command("docker", args...)
 	var out bytes.Buffer
 	capped := &cappedWriter{buf: &out, limit: int64(r.cfg.MaxBytes * 2)}
 	cmd.Stdout = capped
@@ -370,20 +439,36 @@ func (r *Runner) runDocker(ctx context.Context, stack, workdir string) ([]byte, 
 		}
 		return nil, -1, fmt.Errorf("docker start: %w", err)
 	}
-	err := cmd.Wait()
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
+	select {
+	case err := <-waitDone:
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return out.Bytes(), 124, context.DeadlineExceeded
+		}
+		exitCode := 0
+		if err != nil {
+			var ee *exec.ExitError
+			if errors.As(err, &ee) {
+				exitCode = ee.ExitCode()
+			} else {
+				return out.Bytes(), -1, fmt.Errorf("docker: %w", err)
+			}
+		}
+		return out.Bytes(), exitCode, nil
+	case <-ctx.Done():
+		// Контейнер жив на daemon: убиваем по cid (--rm удалит его сам).
+		if cid, err := os.ReadFile(cidPath); err == nil {
+			if tr := strings.TrimSpace(string(cid)); tr != "" {
+				_ = exec.Command("docker", "kill", tr).Run()
+			}
+		}
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill() // завершить висящий клиент docker run
+		}
+		<-waitDone
 		return out.Bytes(), 124, context.DeadlineExceeded
 	}
-	exitCode := 0
-	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			exitCode = ee.ExitCode()
-		} else {
-			return out.Bytes(), -1, fmt.Errorf("docker: %w", err)
-		}
-	}
-	return out.Bytes(), exitCode, nil
 }
 
 // cleanEnv — минимальное окружение subprocess-режима (честный, но без хост-секретов).

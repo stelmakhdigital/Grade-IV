@@ -23,7 +23,7 @@ import time
 from collections import deque
 
 import numpy as np
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 
 from .providers import SAMPLE_RATE, STT_EXECUTOR, STTProvider
 
@@ -204,8 +204,24 @@ async def _send(ws: WebSocket, payload: dict) -> None:
         pass  # клиент отключился — best-effort
 
 
-async def _do_partial(stt: STTProvider, ws: WebSocket, pcm: bytes, cell: dict) -> None:
-    """Partial (best-effort): распознавание на текущий буфер; дубли не шлём."""
+async def _sender_loop(ws: WebSocket, q: asyncio.Queue) -> None:
+    """Единственный писатель в WS (spec-14/B1): ASGI не допускает конкурентных
+    send на одно соединение — partial-таска и final-ветка главного цикла
+    раньше отправляли параллельно, у медленного клиента кадры перемешивались
+    (partial уходил ПОСЛЕ final)."""
+    try:
+        while True:
+            payload = await q.get()
+            await _send(ws, payload)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        pass  # соединение умерло — best-effort
+
+
+async def _do_partial(stt: STTProvider, q: asyncio.Queue, pcm: bytes, cell: dict) -> None:
+    """Partial (best-effort): распознавание на текущий буфер; дубли не шлём.
+    Отправка — через очередь sender-таска (spec-14/B1)."""
     try:
         # STT_EXECUTOR (однопоточный): ctranslate2 не потокобезопасен для
         # параллельного transcribe — partial/final/REST сериализуем
@@ -215,7 +231,7 @@ async def _do_partial(stt: STTProvider, ws: WebSocket, pcm: bytes, cell: dict) -
         )
         if res.text and res.text != cell.get("text"):
             cell["text"] = res.text
-            await _send(ws, {"type": "partial", "text": res.text})
+            q.put_nowait({"type": "partial", "text": res.text})
     except Exception:
         pass  # partial — не критичен
     finally:
@@ -246,65 +262,97 @@ def register_stt_stream(app, stt: STTProvider, vad, max_speech_s: float | None =
         speech = False
         splits = 0  # число принудительных разрывов в текущей реплике
         cell = {"busy": False, "text": ""}  # состояние partial-воркера
+        partial_task: asyncio.Task | None = None  # ссылка (GC) + cancel, spec-14/B1
 
-        async for msg in ws.iter_bytes():
-            if len(msg) < 2 or len(msg) % 2:
-                continue
-            samples = np.frombuffer(msg, dtype=np.int16).astype(np.float32) / 32768
-            ring.append(bytes(msg))
+        # spec-14/B1: все отправки (state/partial/final) — через очередь и
+        # единственный sender-таск (один писатель в WS).
+        q: asyncio.Queue = asyncio.Queue()
+        sender = asyncio.create_task(_sender_loop(ws, q))
 
-            for kind, a, b in engine.feed(samples):
-                if kind == "start":
-                    speech = True
-                    splits = 0
-                    # pre-roll: предыдущий кадр (≤250 мс) — чистый старт слова.
-                    buf = bytearray(ring[-2] if len(ring) >= 2 else b"")
-                    await _send(ws, {"type": "state", "speech": True})
-                elif kind == "end":
-                    speech = False
-                    audio = bytes(buf) + msg  # весь буфер + кадр с концом (хвост ≤250 мс)
-                    buf = bytearray()
-                    if splits == 0:
-                        speech_ms = round((b - a) * 1000 / SAMPLE_RATE)  # длительность речи по VAD
-                    else:
-                        # после принудительного разрыва — хвост: длительность по фактическому аудио
+        def _cancel_partial() -> None:
+            nonlocal partial_task
+            if partial_task is not None:
+                partial_task.cancel()  # устаревший partial после final — не шлём
+                partial_task = None
+
+        try:
+            async for msg in ws.iter_bytes():
+                if len(msg) < 2 or len(msg) % 2:
+                    continue
+                samples = np.frombuffer(msg, dtype=np.int16).astype(np.float32) / 32768
+                ring.append(bytes(msg))
+
+                for kind, a, b in engine.feed(samples):
+                    if kind == "start":
+                        speech = True
+                        splits = 0
+                        _cancel_partial()
+                        cell["text"] = ""
+                        # pre-roll: предыдущий кадр (≤250 мс) — чистый старт слова.
+                        buf = bytearray(ring[-2] if len(ring) >= 2 else b"")
+                        q.put_nowait({"type": "state", "speech": True})
+                    elif kind == "end":
+                        speech = False
+                        _cancel_partial()
+                        audio = bytes(buf) + msg  # весь буфер + кадр с концом (хвост ≤250 мс)
+                        buf = bytearray()
+                        if splits == 0:
+                            speech_ms = round((b - a) * 1000 / SAMPLE_RATE)  # длительность речи по VAD
+                        else:
+                            # после принудительного разрыва — хвост: длительность по фактическому аудио
+                            speech_ms = round(len(audio) // 2 * 1000 / SAMPLE_RATE)
+                        splits = 0
+                        q.put_nowait({"type": "state", "speech": False})
+                        res = await asyncio.get_running_loop().run_in_executor(
+                            STT_EXECUTOR, lambda: stt.transcribe(audio, SAMPLE_RATE)
+                        )
+                        q.put_nowait({
+                            "type": "final",
+                            "text": res.text,
+                            "confidence": round(res.confidence, 3),
+                            "speech_ms": speech_ms,
+                        })
+
+                if speech:
+                    buf.extend(msg)
+                    # Лимит непрерывной речи: сегмент ≥ max_speech_s → принудительный final
+                    # (VAD-состояние не сбрасываем — речь продолжается, накапливаем новый сегмент).
+                    if len(buf) // 2 >= max_speech_samples:
+                        _cancel_partial()
+                        audio = bytes(buf)
+                        buf = bytearray()
+                        splits += 1
                         speech_ms = round(len(audio) // 2 * 1000 / SAMPLE_RATE)
-                    splits = 0
-                    await _send(ws, {"type": "state", "speech": False})
-                    res = await asyncio.get_running_loop().run_in_executor(
-                        STT_EXECUTOR, lambda: stt.transcribe(audio, SAMPLE_RATE)
-                    )
-                    await _send(ws, {
-                        "type": "final",
-                        "text": res.text,
-                        "confidence": round(res.confidence, 3),
-                        "speech_ms": speech_ms,
-                    })
-
-            if speech:
-                buf.extend(msg)
-                # Лимит непрерывной речи: сегмент ≥ max_speech_s → принудительный final
-                # (VAD-состояние не сбрасываем — речь продолжается, накапливаем новый сегмент).
-                if len(buf) // 2 >= max_speech_samples:
-                    audio = bytes(buf)
-                    buf = bytearray()
-                    splits += 1
-                    speech_ms = round(len(audio) // 2 * 1000 / SAMPLE_RATE)
-                    res = await asyncio.get_running_loop().run_in_executor(
-                        STT_EXECUTOR, lambda: stt.transcribe(audio, SAMPLE_RATE)
-                    )
-                    await _send(ws, {
-                        "type": "final",
-                        "text": res.text,
-                        "confidence": round(res.confidence, 3),
-                        "speech_ms": speech_ms,
-                        "split": True,
-                    })
-                if not cell["busy"] and (time.monotonic() - cell.get("t", 0.0)) >= PARTIAL_INTERVAL_S:
-                    cell["busy"] = True
-                    cell["t"] = time.monotonic()
-                    snap = bytes(buf)
-                    asyncio.get_running_loop().create_task(_do_partial(stt, ws, snap, cell))
+                        res = await asyncio.get_running_loop().run_in_executor(
+                            STT_EXECUTOR, lambda: stt.transcribe(audio, SAMPLE_RATE)
+                        )
+                        q.put_nowait({
+                            "type": "final",
+                            "text": res.text,
+                            "confidence": round(res.confidence, 3),
+                            "speech_ms": speech_ms,
+                            "split": True,
+                        })
+                    if not cell["busy"] and (time.monotonic() - cell.get("t", 0.0)) >= PARTIAL_INTERVAL_S:
+                        cell["busy"] = True
+                        cell["t"] = time.monotonic()
+                        snap = bytes(buf)
+                        partial_task = asyncio.get_running_loop().create_task(
+                            _do_partial(stt, q, snap, cell))
+        except (WebSocketDisconnect, RuntimeError):
+            # spec-14/B2: клиент отключился — раньше WebSocketDisconnect уходил
+            # наверх (трейсбек-шум), а мёртвое соединение держало VAD-состояние
+            # и partial-воркера. Ресурсы чистит finally.
+            pass
+        finally:
+            _cancel_partial()
+            sender.cancel()
+            try:
+                await sender
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass  # sender умер с ошибкой — соединение всё равно завершено
 
 
 # --- WS-эндпоинт VAD-стрима (без STT) ---------------------------------------
@@ -328,14 +376,17 @@ def register_vad_stream(app, vad) -> None:
     async def vad_stream_endpoint(ws: WebSocket) -> None:
         await ws.accept()
         engine = StreamVAD(vad.clone(), pre_silence_ms=VAD_PRE_SILENCE_MS)
-        async for msg in ws.iter_bytes():
-            if len(msg) < 2 or len(msg) % 2:
-                continue
-            samples = np.frombuffer(msg, dtype=np.int16).astype(np.float32) / 32768
-            for kind, _a, _b in engine.feed(samples):
-                if kind == "start":
-                    await _send(ws, {"type": "state", "speech": True})
-                elif kind == "pre_end":
-                    await _send(ws, {"type": "state", "speech": True, "pre_silence": True})
-                elif kind == "end":
-                    await _send(ws, {"type": "state", "speech": False})
+        try:
+            async for msg in ws.iter_bytes():
+                if len(msg) < 2 or len(msg) % 2:
+                    continue
+                samples = np.frombuffer(msg, dtype=np.int16).astype(np.float32) / 32768
+                for kind, _a, _b in engine.feed(samples):
+                    if kind == "start":
+                        await _send(ws, {"type": "state", "speech": True})
+                    elif kind == "pre_end":
+                        await _send(ws, {"type": "state", "speech": True, "pre_silence": True})
+                    elif kind == "end":
+                        await _send(ws, {"type": "state", "speech": False})
+        except (WebSocketDisconnect, RuntimeError):
+            pass  # spec-14/B2: клиент отключился — не шумим трейсбеком

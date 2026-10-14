@@ -109,11 +109,13 @@ class GigaAMSTT:
     # --------------------------------------------------------------- contract
     def transcribe(self, audio: bytes, sample_rate: int = SAMPLE_RATE) -> STTResult:
         """PCM16 mono (raw или WAV) → текст. Ошибки/молчание → text='' (не 500)."""
-        import torch
-
         sr = sample_rate or SAMPLE_RATE
         duration = (len(audio) / 2 / sr) if audio else 0.0
         try:
+            # spec-14/B4: import внутри try — сбой импорта (битая установка/OOM)
+            # раньше летел из executor наружу → 500 вместо text='' (контракт).
+            import torch
+
             extracted = extract_pcm16(audio)
             if extracted is None or not extracted[0]:
                 logger.warning("Пустое/неподдерживаемое аудио (%d байт) -> text=''", len(audio))

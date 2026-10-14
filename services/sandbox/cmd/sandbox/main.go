@@ -64,9 +64,13 @@ type runRequest struct {
 func handleRun(mode string, bank *tasks.Bank, rn *runner.Runner, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sessionID := r.PathValue("id")
+		// spec-14/C3: лимит тела запроса — клиент мог прислать гигантский files
+		// (запись на диск до удаления по таймауту). 1 МБ с запасом (банк-задачи
+		// и файлы кандидата — единицы КБ).
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		var req runRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errBody("invalid_request", "ожидается JSON {stack, action, files}"))
+			writeJSON(w, http.StatusBadRequest, errBody("invalid_request", "ожидается JSON {stack, action, files} (лимит тела 1 МБ)"))
 			return
 		}
 		if req.Action == "" {
@@ -146,7 +150,11 @@ func main() {
 		logger.Error("tasks", "err", err)
 		os.Exit(1)
 	}
-	rn := runner.New(runner.Config{Mode: mode})
+	rn := runner.New(runner.Config{
+		Mode: mode,
+		// spec-14/C3: предел одновременных запусков (N холодных go test → OOM).
+		MaxConcurrent: 4,
+	})
 
 	// BUG-20261011-014: subprocess-режим честно шлёт код через `sh -c "go test ..."`/
 	// `python3 -m pytest`, опираясь на PATH процесса. Если тулчейна нет — каждый

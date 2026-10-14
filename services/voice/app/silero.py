@@ -61,7 +61,20 @@ class SileroTTS:
         self._model_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._model_path.with_suffix(".part")
         logger.info("Скачивание TTS-модели Silero %s (%s) -> %s", self._model_id, MODEL_URL, self._model_path)
-        urllib.request.urlretrieve(MODEL_URL, tmp)  # noqa: S310 (URL фиксирован, https)
+        # spec-14/B5: таймаут (connect, read) — urlretrieve без таймаута висит
+        # сколь угодно долго под глобальным lock, блокируя ВСЕ TTS-запросы;
+        # при провале .part удаляем (иначе битый файл «претендует» на загрузку).
+        # spec-14/B5: urlopen с таймаутами (connect, read) — urlretrieve без
+        # таймаута висит сколь угодно долго под глобальным lock, блокируя ВСЕ
+        # TTS-запросы; при провале .part удаляем (иначе битый файл «претендует»
+        # на готовую модель).
+        try:
+            with urllib.request.urlopen(MODEL_URL, timeout=(5, 60)) as resp:  # noqa: S310 (URL фиксирован, https)
+                data = resp.read()
+            tmp.write_bytes(data)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
         tmp.replace(self._model_path)
 
     def _ensure_model(self):
