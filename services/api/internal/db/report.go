@@ -64,6 +64,17 @@ func (s *ReportStore) Save(ctx context.Context, sessionID int64, overall float64
 	return nil
 }
 
+// Has — существует ли отчёт сессии (для валидации share-ссылки).
+func (s *ReportStore) Has(ctx context.Context, sessionID int64) error {
+	var one int
+	err := s.db.QueryRowContext(ctx, s.d.q(`SELECT 1 FROM reports WHERE session_id = ?`), sessionID).
+		Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrReportNotFound
+	}
+	return err
+}
+
 // Get — отчёт сессии (ErrReportNotFound, если не сгенерирован).
 func (s *ReportStore) Get(ctx context.Context, sessionID int64) (overall float64,
 	gradeRecommendation string, criteria, strengths, weaknesses, recommendations []byte,

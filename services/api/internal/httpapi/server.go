@@ -204,6 +204,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/v1/sessions/{id}/whiteboard", s.requireAuth(http.HandlerFunc(s.handleWhiteboardPut)))
 	mux.Handle("GET /api/v1/sessions/{id}/whiteboard", s.requireAuth(http.HandlerFunc(s.handleWhiteboardGet)))
 	mux.Handle("GET /api/v1/sessions/{id}/report", s.requireAuth(http.HandlerFunc(s.handleReportGet)))
+	// F1-export (spec-16): публичная ссылка на отчёт — токен выдаёт владелец,
+	// публичный роут отдаёт отчёт без аутентификации (без персональных данных).
+	mux.Handle("POST /api/v1/sessions/{id}/share", s.requireAuth(http.HandlerFunc(s.handleSessionShare)))
+	mux.Handle("DELETE /api/v1/sessions/{id}/share", s.requireAuth(http.HandlerFunc(s.handleSessionShareRevoke)))
+	mux.Handle("GET /api/v1/public/reports/{token}", http.HandlerFunc(s.handlePublicReport))
 
 	// Admin (итерация 11): редактирование ВСЕХ шаблонов проекта. Только is_admin
 	// (requireAdmin = requireAuth + 403 для не-admin).

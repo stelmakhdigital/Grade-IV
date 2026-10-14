@@ -102,6 +102,10 @@ type Session struct {
 	// voice-сервиса (aidar/eugene — male; baya/kseniya/xenia — female). Пусто —
 	// дефолт voice-сервиса (ru_01 → xenia), backward-compat.
 	TTSSpeaker string
+
+	// ShareToken — токен публичной ссылки на отчёт (F1-export, spec-16);
+	// '' — ссылка не создана. GET /api/v1/public/reports/{token} без auth.
+	ShareToken string
 }
 
 // SessionEvent — событие сессии (транскрипт, смена стадии и т.д.).

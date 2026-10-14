@@ -61,7 +61,7 @@ func (s *SessionStore) Create(ctx context.Context, m models.Session) (models.Ses
 func (s *SessionStore) Get(ctx context.Context, id int64) (models.Session, error) {
 	return s.scanSession(s.db.QueryRowContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token
 			FROM sessions WHERE id = ?`), id))
 }
 
@@ -69,7 +69,7 @@ func (s *SessionStore) Get(ctx context.Context, id int64) (models.Session, error
 func (s *SessionStore) GetOwned(ctx context.Context, id, userID int64) (models.Session, error) {
 	m, err := s.scanSession(s.db.QueryRowContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token
 			FROM sessions WHERE id = ? AND user_id = ?`), id, userID))
 	if errors.Is(err, ErrSessionNotFound) {
 		return m, err
@@ -81,7 +81,7 @@ func (s *SessionStore) GetOwned(ctx context.Context, id, userID int64) (models.S
 func (s *SessionStore) ListByUser(ctx context.Context, userID int64) ([]models.Session, error) {
 	rows, err := s.db.QueryContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token
 			FROM sessions WHERE user_id = ? ORDER BY id DESC`), userID)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
@@ -151,7 +151,7 @@ func (s *SessionStore) Finalize(ctx context.Context, id int64, status models.Sta
 func (s *SessionStore) ListByStatus(ctx context.Context, status models.Status) ([]models.Session, error) {
 	rows, err := s.db.QueryContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token
 			FROM sessions WHERE status = ?`), status)
 	if err != nil {
 		return nil, fmt.Errorf("list by status: %w", err)
@@ -289,8 +289,9 @@ func (s *SessionStore) scanSession(row rowScanner) (models.Session, error) {
 	var program string
 	var profileID sql.NullInt64
 	var ttsSpeaker string
+	var shareToken string
 	err := row.Scan(&m.ID, &m.UserID, &grade, &stack, &stage, &status,
-		&m.DurationLimitS, &m.ActiveSeconds, &pausedAt, &startedAt, &finishedAt, &templateID, &program, &profileID, &ttsSpeaker)
+		&m.DurationLimitS, &m.ActiveSeconds, &pausedAt, &startedAt, &finishedAt, &templateID, &program, &profileID, &ttsSpeaker, &shareToken)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Session{}, ErrSessionNotFound
 	}
@@ -324,5 +325,23 @@ func (s *SessionStore) scanSession(row rowScanner) (models.Session, error) {
 		m.ProfileID = profileID.Int64
 	}
 	m.TTSSpeaker = ttsSpeaker
+	m.ShareToken = shareToken
 	return m, nil
+}
+
+// SetShareToken — записать/отозвать токен публичной ссылки (только владелец).
+func (s *SessionStore) SetShareToken(ctx context.Context, id, userID int64, token string) error {
+	if _, err := s.db.ExecContext(ctx,
+		s.d.q(`UPDATE sessions SET share_token = ? WHERE id = ? AND user_id = ?`), token, id, userID); err != nil {
+		return fmt.Errorf("set share token: %w", err)
+	}
+	return nil
+}
+
+// GetByShareToken — сессия по публичному токену (GET /public/reports).
+func (s *SessionStore) GetByShareToken(ctx context.Context, token string) (models.Session, error) {
+	return s.scanSession(s.db.QueryRowContext(ctx,
+		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token
+			FROM sessions WHERE share_token = ?`), token))
 }
