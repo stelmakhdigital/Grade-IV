@@ -181,6 +181,15 @@ func (e *Engine) rt(id int64) *runtime {
 	return e.rts[id]
 }
 
+// HasRuntime — есть ли живой runtime (map-чек; для списков REST — без
+// похода в БД, spec-14/A10).
+func (e *Engine) HasRuntime(id int64) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, ok := e.rts[id]
+	return ok
+}
+
 // remainingS — остаток времени сессии, с (для terminal — 0). Требует rt.connMu.
 func (e *Engine) remainingSLocked(rt *runtime) int {
 	if IsTerminalStatus(rt.status) {

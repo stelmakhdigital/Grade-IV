@@ -202,13 +202,61 @@ func (e *Engine) Detach(id int64) {
 	}
 }
 
+// reconstructFromStore — реконструкция runtime из БД без WS-соединения
+// (spec-14/A4). После рестарта сервиса recovery переводит активные сессии в
+// паузу в БД, но не создаёт runtime — REST pause/resume/finish для таких
+// сессий возвращали ErrNotAttached (409) навечно. Терминальные статусы
+// не реконструируем (nil → прежняя ошибка «не найдена в движке»).
+func (e *Engine) reconstructFromStore(id int64) *runtime {
+	ctx := context.Background()
+	m, err := e.store.Get(ctx, id)
+	if err != nil || IsTerminalStatus(m.Status) {
+		return nil
+	}
+	e.mu.Lock()
+	if rt, ok := e.rts[id]; ok { // уже реконструирован (гонка вызовов)
+		e.mu.Unlock()
+		return rt
+	}
+	rt := &runtime{
+		userID:      m.UserID,
+		grade:       m.Grade,
+		stack:       m.Stack,
+		limitS:      m.DurationLimitS,
+		stage:       m.Stage,
+		status:      m.Status,
+		active:      m.ActiveSeconds,
+		lastPersist: time.Now(),
+		lastTimer:   time.Now().Add(-TimerBroadcast),
+	}
+	if m.Status == models.StatusActive {
+		// Активная без живого таймера (создана до старта движка/другим
+		// экземпляром): консервативно в паузу — как Attach (FR-S7).
+		e.log.Warn("reconstruct: сессия active без живого таймера — ставлю в паузу", "session", id)
+		if err := e.store.MarkPaused(ctx, id, m.ActiveSeconds, e.now()); err == nil {
+			rt.status = models.StatusPaused
+			rt.pausedAt = e.now()
+		}
+	} else {
+		rt.pausedAt = e.now()
+		if m.PausedAt != nil {
+			rt.pausedAt = *m.PausedAt
+		}
+	}
+	e.rts[id] = rt
+	e.mu.Unlock()
+	return rt
+}
+
 // Pause ставит активную сессию в паузу (тарификация останавливается).
 func (e *Engine) Pause(id int64) (*Snapshot, error) { return e.pause(id, "user") }
 
 func (e *Engine) pause(id int64, reason string) (*Snapshot, error) {
 	rt := e.rt(id)
 	if rt == nil {
-		return nil, fmt.Errorf("%w: %d", ErrNotAttached, id)
+		if rt = e.reconstructFromStore(id); rt == nil { // spec-14/A4: после рестарта
+			return nil, fmt.Errorf("%w: %d", ErrNotAttached, id)
+		}
 	}
 	ctx := context.Background()
 	rt.connMu.Lock()
@@ -241,7 +289,9 @@ func (e *Engine) pause(id int64, reason string) (*Snapshot, error) {
 func (e *Engine) Resume(id int64) (*Snapshot, error) {
 	rt := e.rt(id)
 	if rt == nil {
-		return nil, fmt.Errorf("%w: %d", ErrNotAttached, id)
+		if rt = e.reconstructFromStore(id); rt == nil { // spec-14/A4: после рестарта
+			return nil, fmt.Errorf("%w: %d", ErrNotAttached, id)
+		}
 	}
 	ctx := context.Background()
 	rt.connMu.Lock()
@@ -279,7 +329,9 @@ func (e *Engine) Finish(id int64) (*Snapshot, error) { return e.finish(id, true,
 func (e *Engine) finish(id int64, byUser bool, reason string) (*Snapshot, error) {
 	rt := e.rt(id)
 	if rt == nil {
-		return nil, fmt.Errorf("%w: %d", ErrNotAttached, id)
+		if rt = e.reconstructFromStore(id); rt == nil { // spec-14/A4: после рестарта
+			return nil, fmt.Errorf("%w: %d", ErrNotAttached, id)
+		}
 	}
 	ctx := context.Background()
 	rt.connMu.Lock()
@@ -292,20 +344,25 @@ func (e *Engine) finish(id int64, byUser bool, reason string) (*Snapshot, error)
 	if rt.status == models.StatusActive {
 		rt.active += now.Sub(rt.since).Seconds()
 	}
+	active := rt.active
+	// spec-14/A5: БД под тем же замком — при ошибке записи память не мутируем
+	// (двойной finish по гонке отсечён терминальной проверкой выше; память
+	// не расходится с БД при рестарте после ошибки).
+	if err := e.store.SetStage(ctx, id, models.StageReport); err != nil {
+		rt.connMu.Unlock()
+		return nil, err
+	}
+	if err := e.store.Finalize(ctx, id, models.StatusFinished, active, now); err != nil {
+		rt.connMu.Unlock()
+		return nil, err
+	}
 	rt.status = models.StatusFinished
 	rt.stage = models.StageReport
 	rt.since = time.Time{}
 	rt.pausedAt = time.Time{}
-	active := rt.active
 	rt.lastPersist = now
 	rt.connMu.Unlock()
 
-	if err := e.store.SetStage(ctx, id, models.StageReport); err != nil {
-		return nil, err
-	}
-	if err := e.store.Finalize(ctx, id, models.StatusFinished, active, now); err != nil {
-		return nil, err
-	}
 	e.bill(ctx, rt, id, active, "session_finished")
 	evt := map[string]any{"reason": reason, "active_seconds": math.Round(active*100) / 100}
 	if byUser {
@@ -322,7 +379,9 @@ func (e *Engine) finish(id int64, byUser bool, reason string) (*Snapshot, error)
 func (e *Engine) abort(id int64, reason string) (*Snapshot, error) {
 	rt := e.rt(id)
 	if rt == nil {
-		return nil, fmt.Errorf("%w: %d", ErrNotAttached, id)
+		if rt = e.reconstructFromStore(id); rt == nil { // spec-14/A4: после рестарта
+			return nil, fmt.Errorf("%w: %d", ErrNotAttached, id)
+		}
 	}
 	ctx := context.Background()
 	rt.connMu.Lock()
@@ -335,16 +394,18 @@ func (e *Engine) abort(id int64, reason string) (*Snapshot, error) {
 	if rt.status == models.StatusActive {
 		rt.active += now.Sub(rt.since).Seconds()
 	}
+	active := rt.active
+	// spec-14/A5: БД под тем же замком — при ошибке записи память не мутируем.
+	if err := e.store.Finalize(ctx, id, models.StatusAborted, active, now); err != nil {
+		rt.connMu.Unlock()
+		return nil, err
+	}
 	rt.status = models.StatusAborted
 	rt.since = time.Time{}
 	rt.pausedAt = time.Time{}
-	active := rt.active
 	rt.lastPersist = now
 	rt.connMu.Unlock()
 
-	if err := e.store.Finalize(ctx, id, models.StatusAborted, active, now); err != nil {
-		return nil, err
-	}
 	e.bill(ctx, rt, id, active, "session_aborted")
 	_, _ = e.addEvent(ctx, id, "aborted", map[string]any{
 		"reason": reason, "active_seconds": math.Round(active*100) / 100,

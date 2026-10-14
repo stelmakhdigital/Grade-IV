@@ -289,6 +289,12 @@ func (w *wsSession) onSTTStreamEvent(s *Server, ev voicesvc.StreamEvent) {
 	switch ev.Type {
 	case "unavailable":
 		w.sttStreamDown.Store(true)
+		// spec-14/A9: деградация стрима — флаги речи в пути сбрасываем, иначе
+		// если voice умер во время речи кандидата (speech_start пришёл, end —
+		// нет), isSpeaking() застревает: nudge не работает, barge-in навечно
+		// считает речь активной.
+		w.sttSpeechSince.Store(0)
+		w.sttFinalPending.Store(false)
 		if w.fallbackWarned.CompareAndSwap(false, true) {
 			metrics.STTStreamFallbacks.Inc(nil)
 			s.log.Warn("stt-стрим: voice /stt/stream недоступен — деградация на batch-путь (/stt)", "session", w.id)
@@ -512,7 +518,13 @@ func (w *wsSession) flushSTTPending(s *Server) {
 		return
 	}
 	if w.ttsActive.Load() {
+		// spec-14/A8: как в остальных barge-in точках (streamBargeIn и др.) —
+		// stopTTS должен сопровождаться tts_stop клиенту, иначе после хода
+		// кандидат продолжал слышать уже прерванные аудио-кадры; плюс метрика.
 		w.stopTTS()
+		metrics.BargeInsTotal.Inc(nil)
+		s.log.Info("barge-in: отложенная реплика прервала речь ИИ", "session", w.id)
+		s.engine.SendTo(w.id, map[string]any{"type": "tts_stop"})
 	}
 	if !w.busy.CompareAndSwap(false, true) {
 		// редкая гонка (кто-то занял) — вернём в буфер, попробуем в следующий ход
@@ -562,6 +574,8 @@ func (w *wsSession) onVADStreamEvent(s *Server, ev voicesvc.VADEvent) {
 	switch ev.Type {
 	case "unavailable":
 		w.vadStreamDown.Store(true)
+		// spec-14/A9: см. onSTTStreamEvent — сброс флага речи в пути.
+		w.sileroSpeech.Store(false)
 		if w.vadFallbackWarned.CompareAndSwap(false, true) {
 			metrics.VADStreamFallbacks.Inc(nil)
 			s.log.Warn("vad-стрим: voice /vad/stream недоступен — деградация на energy-путь", "session", w.id)

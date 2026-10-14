@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
@@ -168,20 +169,33 @@ func (s *SessionStore) ListByStatus(ctx context.Context, status models.Status) (
 }
 
 // AddEvent — событие сессии; seq = max(seq)+1 (уникальный индекc (session_id, seq)).
+// spec-14/A3: SELECT+INSERT был неатомарен — при параллельных событиях одной
+// сессии (WS-ходы движка + REST code_run/whiteboard_save) конфликт
+// uq_events_session_seq навсегда терял событие. Ретраим по конфликту индекса.
 func (s *SessionStore) AddEvent(ctx context.Context, sessionID int64, kind string, data []byte) (int, error) {
-	var seq int
-	err := s.db.QueryRowContext(ctx,
-		s.d.q(`SELECT COALESCE(MAX(seq), 0) + 1 FROM session_events WHERE session_id = ?`),
-		sessionID).Scan(&seq)
-	if err != nil {
-		return 0, fmt.Errorf("event seq: %w", err)
+	for attempt := 0; attempt < 4; attempt++ {
+		var seq int
+		err := s.db.QueryRowContext(ctx,
+			s.d.q(`SELECT COALESCE(MAX(seq), 0) + 1 FROM session_events WHERE session_id = ?`),
+			sessionID).Scan(&seq)
+		if err != nil {
+			return 0, fmt.Errorf("event seq: %w", err)
+		}
+		if _, err := s.db.ExecContext(ctx, s.d.q(`
+			INSERT INTO session_events (session_id, seq, ts, kind, data) VALUES (?, ?, ?, ?, ?)`),
+			sessionID, seq, nowRFC3339(), kind, data); err == nil {
+			return seq, nil
+		} else if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return 0, fmt.Errorf("add event: %w", err)
+		}
+		// Конкурент вставил seq первым — пробуем заново (короткая пауза).
+		select {
+		case <-ctx.Done():
+			return 0, fmt.Errorf("add event: %w", ctx.Err())
+		case <-time.After(2 * time.Millisecond):
+		}
 	}
-	if _, err := s.db.ExecContext(ctx, s.d.q(`
-		INSERT INTO session_events (session_id, seq, ts, kind, data) VALUES (?, ?, ?, ?, ?)`),
-		sessionID, seq, nowRFC3339(), kind, data); err != nil {
-		return 0, fmt.Errorf("add event: %w", err)
-	}
-	return seq, nil
+	return 0, fmt.Errorf("add event: исчерпаны ретраи seq")
 }
 
 // ListEvents — события сессии по возрастанию seq.
@@ -210,6 +224,56 @@ func (s *SessionStore) ListEvents(ctx context.Context, sessionID int64) ([]model
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// ListEventsTail — последние N событий сессии по возрастанию seq (spec-14/A6:
+// interviewer читал ВСЮ историю событий на каждый LLM-ход; для промпта
+// достаточно хвоста — LIMIT на стороне SQL).
+func (s *SessionStore) ListEventsTail(ctx context.Context, sessionID int64, n int) ([]models.SessionEvent, error) {
+	rows, err := s.db.QueryContext(ctx,
+		s.d.q(`SELECT id, session_id, seq, ts, kind, data FROM session_events
+			WHERE session_id = ? ORDER BY seq DESC LIMIT ?`), sessionID, n)
+	if err != nil {
+		return nil, fmt.Errorf("list events tail: %w", err)
+	}
+	defer rows.Close()
+	out := make([]models.SessionEvent, 0, 16)
+	for rows.Next() {
+		var e models.SessionEvent
+		var ts string
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.Seq, &ts, &e.Kind, &e.Data); err != nil {
+			return nil, fmt.Errorf("scan event: %w", err)
+		}
+		if e.Data == nil {
+			e.Data = []byte("{}")
+		}
+		e.TS, err = parseTS(ts)
+		if err != nil {
+			return nil, fmt.Errorf("parse event ts: %w", err)
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// DESC → reverse для хронологии (без сортировки в SQL).
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
+// HasEventKind — EXISTS-проверка без чтения всех событий (spec-14/A6:
+// hasAIUtterance сканировал всю историю на каждое WS-подключение).
+func (s *SessionStore) HasEventKind(ctx context.Context, sessionID int64, kind string) (bool, error) {
+	var ok bool
+	err := s.db.QueryRowContext(ctx,
+		s.d.q(`SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id = ? AND kind = ?)`),
+		sessionID, kind).Scan(&ok)
+	if err != nil {
+		return false, fmt.Errorf("has event kind: %w", err)
+	}
+	return ok, nil
 }
 
 type rowScanner interface {

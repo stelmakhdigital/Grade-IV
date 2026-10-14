@@ -222,6 +222,9 @@ func (w *wsSession) closeSTTStream() {
 	if st != nil {
 		st.Close()
 	}
+	// spec-14/A9: стрим закрыт — флаги речи в пути сбрасываем (final уже не придёт).
+	w.sttSpeechSince.Store(0)
+	w.sttFinalPending.Store(false)
 }
 
 // closeVADStream — остановка VAD-стрим-клиента при отключении клиента.
@@ -233,6 +236,8 @@ func (w *wsSession) closeVADStream() {
 	if vs != nil {
 		vs.Close()
 	}
+	// spec-14/A9: стрим закрыт — речь в пути не завершится сама.
+	w.sileroSpeech.Store(false)
 }
 
 // vadStreamFor — ленивое создание VAD-стрим-клиента (voice /vad/stream).
@@ -582,7 +587,13 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage, ws *wsSession) {
 		var p struct {
 			On bool `json:"on"`
 		}
-		_ = json.Unmarshal(msg.Payload, &p)
+		// spec-14/A7: раньше ошибка Unmarshal подавлялась (`_ =`) — битый/пустой
+		// payload молча декодировался как On=false: режим записи выключался,
+		// recSpeechMS/recTailDiscardAt сбрасывались, диктуемый текст терялся.
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			s.engine.SendTo(id, wsErr("invalid_request", "payload.recording: {\"on\": true|false}"))
+			return
+		}
 		ws.recording.Store(p.On)
 		ws.recSpeechMS.Store(0)
 		if p.On {
@@ -806,17 +817,14 @@ func (s *Server) fetchLiveCodeTasks(ctx context.Context, stack, grade string) ([
 }
 
 // hasAIUtterance — в событиях сессии есть ai_utterance (ИИ уже приветствовал/отвечал).
+// spec-14/A6: EXISTS-запрос вместо чтения всех событий (ws-подключение на
+// каждое подключение клиента).
 func hasAIUtterance(ctx context.Context, sessions *db.SessionStore, id int64) bool {
-	events, err := sessions.ListEvents(ctx, id)
+	ok, err := sessions.HasEventKind(ctx, id, "ai_utterance")
 	if err != nil {
 		return true // при ошибке не спамим приветствием
 	}
-	for _, ev := range events {
-		if ev.Kind == "ai_utterance" {
-			return true
-		}
-	}
-	return false
+	return ok
 }
 
 func stageKnown(s models.Stage) bool {

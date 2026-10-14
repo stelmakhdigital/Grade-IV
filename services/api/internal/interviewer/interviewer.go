@@ -382,9 +382,11 @@ func (i *Interviewer) buildMessages(sess models.Session, userMsg string, images 
 }
 
 // transcript — последние реплики (user_utterance/ai_utterance/ai_nudge) в хронологии.
+// spec-14/A6: ListEventsTail вместо ListEvents — на каждый LLM-ход не читаем
+// всю историю событий (длинные интервью — сотни событий).
 func (i *Interviewer) transcript(sessionID int64, max int) []llm.Message {
 	ctx := context.Background()
-	events, err := i.sessions.ListEvents(ctx, sessionID)
+	events, err := i.sessions.ListEventsTail(ctx, sessionID, max*3)
 	if err != nil {
 		i.log.Debug("interviewer: события не прочитаны", "session", sessionID, "err", err)
 		return nil

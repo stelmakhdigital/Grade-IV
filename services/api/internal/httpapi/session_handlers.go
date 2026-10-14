@@ -128,7 +128,14 @@ func (s *Server) handleSessionsList(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]sessionDTO, 0, len(list))
 	for _, m := range list {
-		out = append(out, toDTO(m, s.engineSnapshot(m.ID)))
+		// spec-14/A10: снимок только для живых runtime (map-чек без похода в БД);
+		// раньше список из N сессий давал N+1 запрос (engineSnapshot при
+		// rt==nil делал store.Get на каждую строку).
+		var snap *session.Snapshot
+		if s.engine.HasRuntime(m.ID) {
+			snap = s.engineSnapshot(m.ID)
+		}
+		out = append(out, toDTO(m, snap))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -150,6 +157,13 @@ func (s *Server) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSessionAction(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseSessionID(w, r)
 	if !ok {
+		return
+	}
+	// spec-14/A1: pause/resume/finish меняют состояние сессии — проверка владения
+	// ДО действия (раньше GetOwned вызывался уже ПОСЛЕ действия, т.е. любой
+	// аутентифицированный пользователь мог паузить/завершать чужие сессии,
+	// включая запуск генерации отчёта и тарификацию).
+	if _, ok := s.ownedSession(w, r, id); !ok {
 		return
 	}
 	var (
