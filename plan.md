@@ -78,3 +78,30 @@
 **Актуальный порядок (с 2026-10-11):** итерации 1–10 выполнены (гигиена, code-splitting, voiceorchestrator, баги voice/live-code/mic, F1 голоса, F2-начала). Итерация 11 (T-20261011192908): A6 + admin-UI. **Итерация 12 (следующая, отдельная): F6 (вакансия/кампания) + F7 (род речи по голосу)** — затем по остатку: F2-progress, F1-export (без PDF — публичная ссылка), A5, A6-остатки, T3/T5.
 
 Каждая итерация: отдельные коммиты, тесты до/после, скриншоты при UI-изменениях, merge в master только после зелёных интеграционных тестов (по `task.md`).
+
+
+## 7. Итерация 14 — комплексный аудит (2026-10-14, spec-14)
+
+Три scout-агента (Go-бэкенд / React-фронтенд / voice+sandbox) + Playwright-аудит (12 скриншотов)
++ верификация в коде. Ограничения соблюдены: тесты/CI не тронуты (правки только под регрессию),
+новые языки в livecode не добавлялись, PDF/метрик нет.
+
+**Исправлено (9 коммитов: 834ca68 → 67b6681):**
+- A1 [critical authz] pause/resume/finish чужих сессий без проверки владения → ownedSession первой строкой.
+- A2/A4/A5 [engine] гонка rt.active; Pause/Resume/Finish после рестарта (409 навечно) → реконструкция из БД; БД-записи финализации под connMu.
+- A3 [db] TOCTOU AddEvent терял события → ретраи; interviewer читает хвост событий (LIMIT) + EXISTS вместо полного скана.
+- A7 [ws] битый payload recording молча выключал режим записи → валидация; сброс speech-флагов при unavailable/закрытии стримов; tts_stop в flushSTTPending (barge-in).
+- A10 список сессий N+1 → HasRuntime map-чек.
+- B1/B2 [voice critical] гонка конкурентных send в stt_stream (partial после final) → один sender-таск + очередь; partial-таск отменяется; WebSocketDisconnect обрабатывается.
+- B3 [voice] невалидное имя модели 'mid' → молчаливый отказ STT; провал загрузки кэшируется, healthz краснеет (error).
+- B4/B5 [voice] import torch вне try (500 вместо text=''); скачивание TTS-модели без таймаута под lock.
+- C1-C6 [sandbox] docker --user мапится на uid/gid процесса (раньше каждый run падал по правам); docker kill по cidfile (контейнер не жил после таймаута); ulimit || exit 97 (раньше молча без лимитов); semaphore запусков (4); MaxBytesReader 1 МБ; janitor run-* каталогов; cap-drop/no-new-privileges/GOPROXY=off.
+- D1-D3 [frontend critical] авто-reconnect WS с backoff + авторезум + ре-синк записи; код 1002 (session_ended); sendUi проверки в finishRecording (диктовка не теряется).
+- D4-D11: ReportView утечка таймеров поллинга; LiveCodePanel ресинк results; DesignPanel очередь блоков при неготовом холсте; 401-сообщение по контексту; admin-валидация; модалка вакансии (Escape/autoFocus/counter); debug-reporter same-origin.
+- **pause_timeout UX (BUG-20261014-021)**: отчёт генерируется для прерванных сессий (раньше «Считаем результаты…» вечно); дружелюбное сообщение при resume-abort; предупреждения «осталось N мин» / «порог паузы истёк» в кабинете; SESSION_PAUSE_TIMEOUT_S env.
+- **F2-progress реализована**: «Прогресс по итогам» — overall-чипы по завершённым интервью + дельта; бейджи баллов в истории.
+- CSS: :focus-visible, мобильная @media-раскладка (раньше нулевая).
+
+**Регрессия:** go test api+sandbox ok; tsc ok; vitest 118 ok; E2E stt-stream PASS (partial→final 2.6 с, порядок корректен); Playwright after-скриншоты: тренд/бейджи/предупреждения рендерятся, мобильная вёрстка без переполнения.
+**Баги:** BUG-20261014-019..021.
+**Документировано, не исправлено:** JWT в query-параметре WS (нужен ticket-протокол); fork-bomb в subprocess-режиме (за docker); VAD lazy-load; key={i} в транскрипте; F1-export (публичная ссылка) и A5 — следующий шаг.
