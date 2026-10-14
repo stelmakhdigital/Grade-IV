@@ -132,10 +132,18 @@ do_start() {
   do_build
 
   echo "==> sandbox :8200"
+  # Один процесс с env (инцидент 2026-10-12: дублированный запуск — второй
+  # инстанс умирал на bind: address already in use, pid-файл указывал на него
+  # → status показывал «стоп» при живом healthz).
   (cd "$ROOT" && SANDBOX_MODE=subprocess SANDBOX_WORKDIR_BASE="$RUN/sbxw" \
-    "$SBX_BIN" >>"$LOGS/sandbox.log" 2>&1 & nohup "$SBX_BIN" >>"$LOGS/sandbox.log" 2>&1 & echo $! >"$PIDS/sandbox.pid")
+    nohup "$SBX_BIN" >>"$LOGS/sandbox.log" 2>&1 & echo $! >"$PIDS/sandbox.pid")
 
-  echo "==> voice :8100 (STT: $VOICE_STT_PROVIDER${VOICE_STT_PROVIDER:+/$GIGAAM_MODEL}; TTS: $VOICE_MODELS/tts)"
+  # Описание STT в выводе: модель показываем только у gigaam
+  # (у faster-whisper модель — директория STT_MODEL; ранее всегда печаталась
+  # gigaam-модель «faster-whisper/v3_e2e_rnnt» — вводило в заблуждение).
+  stt_desc="$VOICE_STT_PROVIDER/$STT_DEVICE"
+  [[ "$VOICE_STT_PROVIDER" == "gigaam" ]] && stt_desc="gigaam/$GIGAAM_MODEL/$STT_DEVICE"
+  echo "==> voice :8100 (STT: $stt_desc; TTS: $VOICE_MODELS/tts)"
   if [[ ! -f "$VOICE_MODELS/tts/silero-tts-v5_ru.pt" ]]; then
     echo "!! TTS-модель не найдена в $VOICE_MODELS — сначала: MODELS_DIR=$PWD/services/voice/models bash scripts/download-models.sh" >&2
   fi
