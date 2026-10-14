@@ -145,8 +145,13 @@ export function ExcalidrawCanvas({ apiRef, initialState }: ExcalidrawCanvasProps
       placeBlock: (name: string) => {
         const api = excalidraw.current;
         if (api === null) return;
-        const row = Math.floor(slot.current / 4);
-        const col = slot.current % 4;
+        // spec-15: сетка адаптивная — колонки считаются от реальной ширины
+        // холста (appState.width): раньше фиксированные 4 колонки уходили за
+        // край узкого холста (мобильный: второй блок обрезан).
+        const cw = ((api.getAppState()?.width as number | undefined) ?? 900);
+        const cols = Math.max(1, Math.floor((cw - 130) / 220));
+        const row = Math.floor(slot.current / cols);
+        const col = slot.current % cols;
         slot.current += 1;
         const x = 60 + col * 220;
         const y = 80 + row * 120;
