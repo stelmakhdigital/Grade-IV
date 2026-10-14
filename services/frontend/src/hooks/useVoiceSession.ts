@@ -46,7 +46,7 @@ export function useVoiceSession(id: number) {
   const [mic, setMic] = useState<MicState>('idle');
   const [micDbg, setMicDbg] = useState<MicDebugInfo | null>(null);
   const [speaking, setSpeaking] = useState(false);
-  const [wsState, setWsState] = useState<'connecting' | 'open' | 'closed' | 'error'>('connecting');
+  const [wsState, setWsState] = useState<'connecting' | 'open' | 'reconnecting' | 'closed' | 'error'>('connecting');
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // Пауза (FR-S7): uiPaused — локальное состояние после клика; если страница
@@ -80,6 +80,13 @@ export function useVoiceSession(id: number) {
   }, [speaking]);
   // Микрофон был включён до паузы — при «Продолжить» пытаемся вернуть захват.
   const micBeforePauseRef = useRef(false);
+
+  // spec-14/D1: latest-value рефes для WS-колбэков (замыкание reconnect-цикла
+  // живёт между рендерами — статус/пауза должны читаться актуальными).
+  const statusRef = useRef<string>('');
+  statusRef.current = session?.status ?? '';
+  const uiPausedRef = useRef(false);
+  uiPausedRef.current = uiPaused;
 
   const live = session !== null && (session.status === 'active' || session.status === 'paused');
   const paused = uiPaused || session?.status === 'paused';
@@ -115,26 +122,39 @@ export function useVoiceSession(id: number) {
   // WS-цикл (только для активных сессий).
   useEffect(() => {
     if (session === null || !live) return;
-    const ws = new SessionWS();
     const micCap = new MicCapture();
     const player = new PcmPlayer();
-    wsRef.current = ws;
     micRef.current = micCap;
     playerRef.current = player;
     setWsState('connecting');
 
-    ws.connect(id, {
-      onOpen: () => {
-        setWsState('open');
-        // Ре-синк режима записи (BUG-20261012-018): при переподключении WS
-        // серверная сессия новая (recording=false), а клиент мог остаться в
-        // режиме записи — без ре-синка нагнанное в это время не попало бы в
-        // буфер, а final-ы улетали бы отдельными сообщениями.
-        if (recRef.current.active) {
-          ws.sendUi('recording', { on: true });
-        }
-      },
-      onMessage: (m: WsMessage) => {
+    // spec-14/D1: авто-reconnect с backoff. Сервер при обрыве WS ставит
+    // активную сессию в паузу (engine.Detach) — при переподключении
+    // возобновляем по REST и ре-синким режим записи (BUG-20261012-018).
+    let reconnectAttempts = 0;
+    let reconnectTimer: number | null = null;
+    let disposed = false;
+    let resumeNeeded = false; // переподключение после неожиданного обрыва
+
+    const onOpen = () => {
+      setWsState('open');
+      reconnectAttempts = 0;
+      // Ре-синк режима записи (BUG-20261012-018): при переподключении WS
+      // серверная сессия новая (recording=false), а клиент мог остаться в
+      // режиме записи — без ре-синка нагнанное в это время не попало бы в
+      // буфер, а final-ы улетали бы отдельными сообщениями.
+      if (recRef.current.active) {
+        wsRef.current?.sendUi('recording', { on: true });
+      }
+      if (resumeNeeded) {
+        resumeNeeded = false;
+        // Обрыв при активной сессии: сервер её спаузил — возобновляем по REST.
+        resumeSession(id).catch(() => {
+          void refreshStatus(); // 409 (pause_timeout/уже active) → статус-поллинг
+        });
+      }
+    };
+    const onMessage = (m: WsMessage) => {
         switch (m.type) {
           case 'stage':
             setStage(m.name);
@@ -207,8 +227,12 @@ export function useVoiceSession(id: number) {
             setSpeaking(false);
             break;
           case 'error':
-            if (m.code === 'session_aborted') {
-              setError('Сессия прервана.');
+            // spec-14/D2: серверные коды завершения сессии (wsSendError):
+            // session_ended приходит при reconnect на закрытую сессию и при
+            // pause/finish на чужой — раньше клиент ждал только session_aborted
+            // и «Сессия прервана» не срабатывала по WS.
+            if (m.code === 'session_aborted' || m.code === 'session_ended' || m.code === 'not_found') {
+              setError(m.code === 'session_ended' ? 'Сессия уже завершена.' : 'Сессия прервана.');
               void refreshStatus();
             } else {
               setError(m.msg);
@@ -223,20 +247,54 @@ export function useVoiceSession(id: number) {
             void refreshStatus();
             break;
         }
-      },
-      onAudio: (pcm, _isLast) => {
-        player.playChunk(pcm);
-        setSpeaking(true);
-      },
-      onClose: (reason) => {
-        setWsState(reason === 'error' ? 'error' : 'closed');
-        setSpeaking(false);
-        if (reason === 'aborted') {
-          setError('Сессия прервана.');
-          void refreshStatus();
-        }
-      },
-    });
+      };
+    const onAudio = (pcm: Int16Array, _isLast: boolean) => {
+      player.playChunk(pcm);
+      setSpeaking(true);
+    };
+    const onClose = (reason: 'closed' | 'error' | 'aborted') => {
+      setSpeaking(false);
+      if (reason === 'aborted') {
+        // spec-14/D2: 1011/1002 — сервер завершил сессию (finish/session_ended).
+        setWsState('closed');
+        setError('Сессия завершена сервером.');
+        void refreshStatus();
+        return;
+      }
+      // spec-14/D1: неожиданный обрыв при активной (не спаузенной нами)
+      // сессии — авто-reconnect с backoff (иначе микрофон «говорил в пустоту»,
+      // а визуализатор дышал от локального RMS).
+      if (statusRef.current === 'active' && !uiPausedRef.current) {
+        resumeNeeded = true;
+        reconnect();
+        return;
+      }
+      setWsState(reason === 'error' ? 'error' : 'closed');
+    };
+
+    function wire() {
+      const ws = new SessionWS();
+      wsRef.current = ws;
+      ws.connect(id, { onOpen, onMessage, onAudio, onClose });
+    }
+    function reconnect() {
+      if (disposed) return;
+      reconnectAttempts += 1;
+      if (reconnectAttempts > 5) {
+        // 5 попыток исчерпаны — честно: сервер спаузил сессию, «Продолжить»
+        // или перезагрузка вернут WS.
+        setWsState('closed');
+        setError('Соединение потеряно. Обновите страницу — сессия на паузе.');
+        return;
+      }
+      setWsState('reconnecting');
+      const delay = Math.min(16000, 1000 * 2 ** (reconnectAttempts - 1));
+      reconnectTimer = window.setTimeout(() => {
+        if (!disposed) wire();
+      }, delay);
+    }
+
+    wire();
 
     const speakingTimer = window.setInterval(() => {
       setSpeaking(player.isSpeaking());
@@ -263,11 +321,13 @@ export function useVoiceSession(id: number) {
     }
 
     return () => {
+      disposed = true;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       window.clearInterval(speakingTimer);
       window.clearInterval(dbgTimer);
       micCap.dispose(); // полное освобождение (tracks/контекст) при unmount
       player.dispose();
-      ws.close();
+      wsRef.current?.close();
       wsRef.current = null;
       micRef.current = null;
       playerRef.current = null;
@@ -305,24 +365,43 @@ export function useVoiceSession(id: number) {
     // Конец записи (FR-S8): recording off + склеенный транскрипт ОДНИМ
   // utterance-сообщением (WS-порядок: off раньше utterance) → AI-ход стартует.
   // «Недостаточно речи» (< MIN_SPEECH_MS или пусто) — не отправляем.
+  // spec-14/D3: результаты sendUi проверяются — при закрытом WS наговоренный
+  // текст больше не теряется молча: буфер сохраняется, повторная отправка —
+  // «Отправить» (кнопка микрофона) после восстановления соединения.
+  const sendBufferedRecording = useCallback(() => {
+    const merged = mergeRecording(recSegs, recPartial);
+    const insufficient = isInsufficientSpeech(merged, recTotalSpeechMs);
+    const ws = wsRef.current;
+    if (ws === null || !ws.sendUi('recording', { on: false })) {
+      setRecNote('Нет соединения: наговоренный текст сохранён — восстановите соединение и нажмите «Отправить» повторно.');
+      return;
+    }
+    if (insufficient) {
+      setRecSegs([]);
+      setRecPartial('');
+      setRecTotalSpeechMs(0);
+      setRecNote(`Недостаточно речи для отправки (минимум ~${Math.round(MIN_SPEECH_MS / 100) / 10} с).`);
+      return;
+    }
+    if (!ws.sendUi('utterance', { text: merged })) {
+      // WS закрылся между off и utterance — буфер цел, текст не потерян.
+      setRecNote('Соединение потеряно во время отправки — нажмите «Отправить» повторно.');
+      return;
+    }
+    setRecSegs([]);
+    setRecPartial('');
+    setRecTotalSpeechMs(0);
+    setRecNote(null);
+  }, [recSegs, recPartial, recTotalSpeechMs]);
+
   const finishRecording = useCallback(() => {
     if (!recRef.current.active) return;
     recRef.current.active = false;
     setRecActive(false);
     setRecSince(null);
-    const merged = mergeRecording(recSegs, recPartial);
-    const insufficient = isInsufficientSpeech(merged, recTotalSpeechMs);
-    setRecSegs([]);
-    setRecPartial('');
-    setRecTotalSpeechMs(0);
-    wsRef.current?.sendUi('recording', { on: false });
-    if (insufficient) {
-      setRecNote(`Недостаточно речи для отправки (минимум ~${Math.round(MIN_SPEECH_MS / 100) / 10} с).`);
-      return;
-    }
     setRecNote(null);
-    wsRef.current?.sendUi('utterance', { text: merged });
-  }, [recSegs, recPartial, recTotalSpeechMs]);
+    sendBufferedRecording();
+  }, [sendBufferedRecording]);
 
   const toggleMic = async () => {
     const micCap = micRef.current;
@@ -450,6 +529,19 @@ export function useVoiceSession(id: number) {
           setUiPaused(false);
           return;
         }
+        if (s2.status === 'aborted') {
+          // spec-14/D12 (BUG-20261014-021): пауза превысила порог — resume сам
+          // прервал сессию. Честно и без сырой 409-ошибки: отчёт ниже.
+          setUiPaused(false);
+          setError('Пауза превысила порог (30 мин) — интервью автоматически завершено. Ниже — отчёт.');
+          try {
+            const ev = await listEvents(id);
+            setLines(ev.map((e) => lineFromEvent(e)));
+          } catch {
+            // транскрипт не критичен — отчёт/события догрузит перезагрузка
+          }
+          return;
+        }
       } catch {
         // ре-синк не критичен — покажем исходную ошибку ниже
       }
@@ -502,6 +594,7 @@ export function useVoiceSession(id: number) {
     setRecCollapsed,
     recNote,
     finishRecording,
+    sendBufferedRecording,
     clearRecording,
   };
 }

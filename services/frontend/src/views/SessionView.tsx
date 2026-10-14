@@ -9,7 +9,7 @@ import { useAuth } from '../auth';
 import { MicVisualizer, type MicEqMode } from './MicVisualizer';
 import { useVoiceSession } from '../hooks/useVoiceSession';
 import { micDebugEnabled } from '../audio/mic';
-import { formatRecDuration, mergeRecording } from '../recording';
+import { formatRecDuration, mergeRecording, MIN_SPEECH_MS } from '../recording';
 import { statusLabel, stageLabel } from '../labels';
 import { PanelLoading } from './PanelLoading';
 
@@ -72,6 +72,15 @@ export function SessionView({ id }: { id: number }) {
   }, [recActive]);
   const recText = mergeRecording(recSegs, recPartial);
   const waitingForAI = live && !paused && speaking && mic !== 'running' && mic !== 'muted';
+
+  // spec-14/D14: завершение — необратимое (стоп интервью + генерация отчёта)
+  // — подтверждаем двойным кликом (окно 5 с), без window.confirm.
+  const [confirmFinish, setConfirmFinish] = useState(false);
+  useEffect(() => {
+    if (!confirmFinish) return;
+    const t = window.setTimeout(() => setConfirmFinish(false), 5000);
+    return () => window.clearTimeout(t);
+  }, [confirmFinish]);
 
   // История диалога — новые СВЕРХУ (FR-S8): lines хранятся как есть (append,
   // кап 200), рендер — перевёрнутый порядок (interim — последняя — наверху).
@@ -147,8 +156,21 @@ export function SessionView({ id }: { id: number }) {
             </button>
           )}
           {live && (
-            <button type="button" className="btn ghost small" onClick={onFinish}>
-              Завершить интервью
+            <button
+              type="button"
+              className="btn ghost small"
+              title="Завершение остановит интервью и запустит генерацию отчёта"
+              onClick={() => {
+                if (confirmFinish) {
+                  setConfirmFinish(false);
+                  onFinish();
+                } else {
+                  setConfirmFinish(true);
+                }
+              }}
+              data-testid={confirmFinish ? 'finish-confirm' : 'finish'}
+            >
+              {confirmFinish ? 'Точно завершить? (клик — подтвердить)' : 'Завершить интервью'}
             </button>
           )}
           <a className="btn ghost small" href="#/">В кабинет</a>
@@ -168,10 +190,21 @@ export function SessionView({ id }: { id: number }) {
             <span className={`conn ${wsState}`}>
               {wsState === 'open' ? 'соединение: активно'
                 : wsState === 'connecting' ? 'подключение…'
+                : wsState === 'reconnecting' ? 'переподключение…'
                 : wsState === 'error' ? 'ошибка соединения'
-                : 'соединение закрыто (сессия на паузе)'}
+                : 'соединение закрыто'}
             </span>
-            {speaking && <span className="saying">ИИ говорит — чтобы ответить, дождитесь паузы</span>}
+            {(wsState === 'closed' || wsState === 'error') && (
+              <button
+                type="button"
+                className="btn ghost small"
+                onClick={() => window.location.reload()}
+                data-testid="ws-reconnect"
+              >
+                Переподключиться
+              </button>
+            )}
+            {speaking && !recActive && <span className="saying">ИИ говорит — чтобы ответить, дождитесь паузы</span>}
             {mic === 'running' && <span className="listening">микрофон: включён</span>}
             {mic === 'muted' && (
               <span className="form-error" role="alert" data-testid="mic-muted">
@@ -275,6 +308,11 @@ export function SessionView({ id }: { id: number }) {
                   <p className="rec-text" data-testid="rec-text">
                     {recText !== '' ? recText : 'Говорите — транскрипт появится здесь…'}
                   </p>
+                  {/* spec-14/D15: живой прогресс минимума речи — раньше
+                      «недостаточно речи» выяснялось постфактум в recNote. */}
+                  <span className="rec-speech-hint" data-testid="rec-speech-hint">
+                    речи {(recTotalSpeechMs / 1000).toFixed(1)} с · нужно ≥ {(MIN_SPEECH_MS / 1000).toFixed(1)} с
+                  </span>
                   <button
                     type="button"
                     className="btn ghost small"

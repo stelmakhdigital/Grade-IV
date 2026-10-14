@@ -37,6 +37,8 @@ export interface WsEvents {
 export class SessionWS {
   private ws: WebSocket | null = null;
   private closedByUs = false;
+  private closeReported = false; // spec-14/D6: onerror+onclose — один отчёт
+  private hadError = false;
 
   /** Подключение: /ws/session/{id}?token= (JWT из localStorage). */
   static buildUrl(id: number): string {
@@ -66,13 +68,20 @@ export class SessionWS {
       }
     };
     ws.onerror = () => {
-      events.onClose?.('error');
+      // spec-14/D6: onerror шлёт 'error', затем придёт onclose ('closed') —
+      // раньше хук дважды перезаписывал wsState/speaking. Единый отчёт в onclose.
+      this.hadError = true;
     };
     ws.onclose = (e: CloseEvent) => {
       this.ws = null;
-      if (this.closedByUs) return;
-      // 4001/1008 — разлогин/недоступно; 1011 — aborted сервером.
-      events.onClose?.(e.code === 1011 ? 'aborted' : 'closed');
+      if (this.closedByUs || this.closeReported) return;
+      this.closeReported = true;
+      // spec-14/D2: сервер при session_ended/not_found шлёт код 1002
+      // (StatusProtocolError) — раньше клиент ждал только 1011, и ветка
+      // «Сессия прервана» никогда не срабатывала по WS.
+      events.onClose?.(
+        e.code === 1011 || e.code === 1002 ? 'aborted' : this.hadError ? 'error' : 'closed',
+      );
     };
   }
 

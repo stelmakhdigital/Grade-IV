@@ -237,9 +237,10 @@ describe('SessionView (WP-8)', () => {
     fake.deliver(JSON.stringify({ type: 'ai_text', text: 'Подпись' }));
     expect(await screen.findByTestId('ai-say')).toHaveTextContent('Подпись');
 
-    // finish → ui-событие в WS
+    // finish → ui-событие в WS (spec-14/D14: подтверждение двойным кликом)
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Завершить интервью' }));
+    await user.click(screen.getByRole('button', { name: /Точно завершить/ }));
     expect(JSON.parse(String(fake.sent[0]))).toEqual({
       type: 'ui',
       name: 'finish',
