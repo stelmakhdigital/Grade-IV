@@ -54,6 +54,10 @@ STT_COMPUTE_TYPE="${STT_COMPUTE_TYPE:-float16}"
 # SESSION_LIMIT_S: off — без ограничения времени сессии (dev); число — секунд;
 # пустое — лимит по грейду. Переопределяется переменной окружения.
 SESSION_LIMIT_S="${SESSION_LIMIT_S:-off}"
+# SESSION_PAUSE_TIMEOUT_S: порог паузы (SRS §7) — пауза дольше порога → resume
+# сам прерывает сессию (pause_timeout, отчёт генерируется). По умолчанию 1800 с
+# (30 мин). Кабинет предупреждает «осталось N мин» заранее (spec-14/D12).
+SESSION_PAUSE_TIMEOUT_S="${SESSION_PAUSE_TIMEOUT_S:-1800}"
 VOICE_URL="http://127.0.0.1:8100"
 SANDBOX_URL="http://127.0.0.1:8200"
 # CUDA-библиотеки ctranslate2 (nvidia-cublas/cudnn/cuda_nvrtc из voice-venv, PyPI)
@@ -169,6 +173,7 @@ do_start() {
   (cd "$ROOT" && DATABASE_URL="sqlite://FOR_RUN/run.db" \
     JWT_SECRET="${JWT_SECRET:-grade-run-secret}" MINUTES_FREE_S="${MINUTES_FREE_S:-3600000}" \
     SESSION_LIMIT_S="$SESSION_LIMIT_S" \
+    SESSION_PAUSE_TIMEOUT_S="$SESSION_PAUSE_TIMEOUT_S" \
     LLM_MOCK="$LLM_MOCK" LLM_BASE_URL="$LLM_BASE_URL" LLM_MODEL="$LLM_MODEL" \
     ENABLE_DEBUG="${ENABLE_DEBUG:-1}" \
     VOICE_URL="$VOICE_URL" SANDBOX_URL="$SANDBOX_URL" ADDR=:8000 \
