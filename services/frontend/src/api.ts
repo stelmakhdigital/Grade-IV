@@ -470,3 +470,30 @@ export async function apiHealth(): Promise<boolean> {
     return false;
   }
 }
+
+/** Публичная ссылка на отчёт (F1-export, spec-16). */
+export interface ShareInfo {
+  token: string;
+  /** Хеш-путь страницы: /share/{token}. */
+  path: string;
+}
+
+/** Публичный отчёт = Report + метаданные сессии (без персональных данных). */
+export interface PublicReport extends Report {
+  meta: { grade: string; stack: string; finished_at?: string };
+}
+
+/** Создать/переиспользовать публичную ссылку на отчёт сессии (владелец). */
+export async function shareReport(id: number): Promise<ShareInfo> {
+  return request<ShareInfo>(`/sessions/${id}/share`, { method: 'POST' });
+}
+
+/** Отозвать публичную ссылку. */
+export async function revokeShare(id: number): Promise<{ revoked: boolean }> {
+  return request<{ revoked: boolean }>(`/sessions/${id}/share`, { method: 'DELETE' });
+}
+
+/** Публичный отчёт по токену (без аутентификации). */
+export async function fetchPublicReport(token: string): Promise<PublicReport> {
+  return request<PublicReport>(`/public/reports/${encodeURIComponent(token)}`);
+}

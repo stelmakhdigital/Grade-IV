@@ -4,7 +4,7 @@
  * 202 «generating» — опрос каждые 2 с (максимум ~1 мин).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getReport, type Report } from '../../api';
+import { getReport, revokeShare, shareReport, type Report, type ShareInfo } from '../../api';
 import { apiErrorMessage } from '../LoginView';
 
 export interface ReportViewProps {
@@ -22,6 +22,10 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS }
   const [report, setReport] = useState<Report | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
+  // F1-export (spec-16): публичная ссылка на отчёт.
+  const [share, setShare] = useState<ShareInfo | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
   // spec-14/D4: id таймера в реф — цепочка setTimeout поллинга раньше не
   // очищалась: setState на размонтированный компонент + двойной поллинг при
   // смене sessionId.
@@ -65,6 +69,33 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS }
     };
   }, [load, maxPolls]);
 
+  const createShare = useCallback(async () => {
+    if (shareBusy) return;
+    setShareBusy(true);
+    setError(null);
+    try {
+      const info = await shareReport(sessionId);
+      setShare(info);
+      // Ссылка сразу в буфер обмена (страница публичная — токен и есть доступ).
+      const url = `${window.location.origin}${window.location.pathname}#${info.path}`;
+      try { await navigator.clipboard.writeText(url); setCopied(true); } catch { setCopied(false); }
+    } catch (e) {
+      setError(apiErrorMessage(e));
+    } finally {
+      setShareBusy(false);
+    }
+  }, [shareBusy, sessionId]);
+
+  const revoke = useCallback(async () => {
+    try {
+      await revokeShare(sessionId);
+      setShare(null);
+      setCopied(false);
+    } catch (e) {
+      setError(apiErrorMessage(e));
+    }
+  }, [sessionId]);
+
   if (state === 'loading') {
     return (
       <section className="card report" data-testid="report-loading">
@@ -87,6 +118,44 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS }
   const scoreColor = (s: number): string => (s >= 4 ? 'good' : s >= 2.5 ? 'mid' : 'bad');
 
   return (
+    <ReportBody
+      report={report}
+      headerExtra={
+        <div className="report-share" data-testid="report-share">
+          {share === null ? (
+            <button type="button" className="btn ghost" onClick={() => void createShare()} disabled={shareBusy}>
+              Поделиться отчётом
+            </button>
+          ) : (
+            <>
+              <input
+                className="report-share-link"
+                readOnly
+                value={`${window.location.origin}${window.location.pathname}#${share.path}`}
+                aria-label="Публичная ссылка на отчёт"
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              {copied && <span className="muted small">скопировано в буфер обмена</span>}
+              <button type="button" className="btn ghost" onClick={() => void revoke()}>
+                Отозвать
+              </button>
+            </>
+          )}
+        </div>
+      }
+    />
+  );
+}
+
+/**
+ * Тело отчёта — общий рендер для ReportView (аутентифицированный) и
+ * ShareReportView (публичная ссылка, spec-16/F1). headerExtra — блок справа
+ * от заголовка (share-контролы / метаданные).
+ */
+export function ReportBody({ report, headerExtra }: { report: Report; headerExtra?: React.ReactNode }) {
+  const scoreColor = (s: number): string => (s >= 4 ? 'good' : s >= 2.5 ? 'mid' : 'bad');
+
+  return (
     <section className="card report" data-testid="report">
       <header className="report-head">
         <div>
@@ -100,6 +169,7 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS }
             </p>
           )}
         </div>
+        {headerExtra}
       </header>
 
       <h3>Критерии</h3>

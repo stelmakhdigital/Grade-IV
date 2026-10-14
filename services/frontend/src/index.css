@@ -939,6 +939,16 @@ p {
 /* Отчёт (WP-11) */
 .report h2 { margin: 0 0 4px; }
 .report-grade { margin: 0 0 16px; font-size: 15px; }
+
+/* F1-export (spec-16): публичная ссылка на отчёт */
+.report-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.report-share { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-width: 200px; }
+.report-share-link {
+  width: 100%; max-width: 320px; font-size: 11px; color: #8b96ac;
+  background: #1a1f2b; border: 1px solid #2b3345; border-radius: 6px; padding: 6px 8px;
+  font-family: inherit;
+}
+.report-share .btn { font-size: 12px; }
 .report h3 { margin: 18px 0 8px; font-size: 15px; }
 .criteria { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
 .criterion-top { display: flex; justify-content: space-between; gap: 12px; }
