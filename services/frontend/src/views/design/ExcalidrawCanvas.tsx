@@ -73,6 +73,8 @@ type SceneElement = any;
  * (раньше текст «отставал» при перетаскивании блока). */
 function blockElements(name: string, x: number, y: number): SceneElement[] {
   const gid = nextId('grp');
+  const textId = nextId('txt');
+  const rectId = nextId('rect');
   const base = {
     angle: 0,
     strokeColor: '#e6e6e6',
@@ -91,19 +93,24 @@ function blockElements(name: string, x: number, y: number): SceneElement[] {
     updated: Date.now(),
     index: null,
   };
+  // Подпись блока — связанный текст (containerId + boundElements): каноничный
+  // «labeled rectangle» Excalidraw. Раньше текст был standalone (containerId:
+  // null) — живой холст его не рендерил (блоки пустые), хотя exportCanvasPng
+  // подписи рисовал (PNG для ИИ-ревью был с текстом, живой холст — без).
   const rect: SceneElement = {
     ...base,
-    id: nextId('rect'),
+    id: rectId,
     type: 'rectangle',
     x,
     y,
     width: 180,
     height: 60,
     backgroundColor: blockColor(name),
+    boundElements: [{ id: textId, type: 'text' }],
   };
   const text: SceneElement = {
     ...base,
-    id: nextId('txt'),
+    id: textId,
     type: 'text',
     x: x + 12,
     y: y + 18,
@@ -112,11 +119,12 @@ function blockElements(name: string, x: number, y: number): SceneElement[] {
     text: name,
     fontSize: 20,
     fontFamily: 1,
-    textAlign: 'left',
+    textAlign: 'center',
+    verticalAlign: 'middle',
     baseline: 18,
-    containerId: null,
+    containerId: rectId,
     originalText: name,
-    autoResize: true,
+    autoResize: false,
   };
   return [rect, text];
 }
@@ -126,6 +134,9 @@ export function ExcalidrawCanvas({ apiRef, initialState }: ExcalidrawCanvasProps
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const excalidraw = useRef<any>(null);
   const slot = useRef(0);
+  // Очередь placeBlock: быстрые клики сериализуются (restore должен видеть
+  // сцену с предыдущими блоками); clear() встаёт в конец очереди.
+  const placeChain = useRef<Promise<void>>(Promise.resolve());
   // Схема, которую нужно загрузить, пока ленивый Excalidraw ещё не готов.
   const pendingRestore = useRef<WhiteboardState | null>(null);
 
@@ -139,20 +150,30 @@ export function ExcalidrawCanvas({ apiRef, initialState }: ExcalidrawCanvasProps
         slot.current += 1;
         const x = 60 + col * 220;
         const y = 80 + row * 120;
-        // Excalidraw 0.18: addElements убран — расширяем сцену через updateScene.
-        const elements: SceneElement[] = api.getSceneElements() ?? [];
-        api.updateScene({ elements: [...elements, ...blockElements(name, x, y)] });
+        // Excalidraw 0.18: addElements убран. Сцену расширяем через
+        // restoreElements (экспорт модуля, динамический импорт — как
+        // exportToBlob, чтобы jsdom-тесты не тянули весь Excalidraw) +
+        // updateScene: restoreElements нормализует элементы — корректные
+        // fractional-индексы, шрифты текста и связи «подпись ↔ прямоугольник».
+        // Голый updateScene с самодельными элементами текст НЕ рендерил
+        // (блоки пустые), хотя exportCanvasPng подписи рисовал.
+        const raw = [...(api.getSceneElements() ?? []), ...blockElements(name, x, y)];
+        // Сериализация быстрых кликов: каждый restore должен видеть сцену
+        // с предыдущими блоками (иначе последний overwrite теряет блоки).
+        placeChain.current = placeChain.current.then(async () => {
+          const { restoreElements } = await import('@excalidraw/excalidraw');
+          api.updateScene({ elements: restoreElements(raw, null) });
+        });
       },
       clear: () => {
         const api = excalidraw.current;
         if (api === null) return;
         slot.current = 0; // новые блоки — снова с первой ячейки сетки
-        // restoreElements с пустым списком — штатная очистка сцены (0.18).
-        try {
-          api.restoreElements({ elements: [] });
-        } catch {
+        // Очистка после всех поставленных блоков (конец очереди placeBlock):
+        // иначе блок, поставленный параллельно с очисткой, воскрес бы после неё.
+        placeChain.current = placeChain.current.then(() => {
           api.updateScene({ elements: [] });
-        }
+        });
       },
       snapshot: async () => {
         const api = excalidraw.current;
