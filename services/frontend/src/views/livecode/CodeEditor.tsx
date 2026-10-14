@@ -3,8 +3,14 @@
  * остаётся лёгким; в jsdom-тестах компонент не используется
   (LiveCodePanel тестируется с инъектированным редактором).
  */
-import { Editor, type OnMount } from '@monaco-editor/react';
+import { Editor, loader, type OnMount } from '@monaco-editor/react';
 import { useId } from 'react';
+
+// Self-hosted Monaco (spec-15): loader по умолчанию тянет monaco с CDN
+// (jsdelivr) — оффлайн/LAN-интервью без интернета оставят «Загрузка
+// редактора…» навсегда. Пакет monaco-editor уже в зависимостях; его min/vs
+// скопирован в public/monaco/vs (vite отдаёт из public и в dev, и в build).
+loader.config({ paths: { vs: '/monaco/vs' } });
 
 export interface CodeEditorProps {
   language: string;
@@ -24,6 +30,10 @@ export function CodeEditor({ language, value, onChange, onReady }: CodeEditorPro
       height="320px"
       language={language}
       value={value}
+      // Тема — через ПРОП theme (не options): обёртка после create явно
+      // вызывает setTheme(themeProp), а проп без передачи = "light" —
+      // раньше редактор вспыхивал светлой темой в тёмном кабинете.
+      theme="vs-dark"
       onChange={(v) => onChange(v ?? '')}
       onMount={handleMount}
       loading={
@@ -38,7 +48,6 @@ export function CodeEditor({ language, value, onChange, onReady }: CodeEditorPro
         automaticLayout: true,
         scrollBeyondLastLine: false,
         tabSize: 4,
-        theme: 'vs-dark',
       }}
     />
   );
