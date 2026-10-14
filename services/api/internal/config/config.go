@@ -26,8 +26,8 @@ type Config struct {
 	// переменная "0"/"off" → -1 (без ограничения по времени).
 	SessionLimitS     int
 	VoiceURL          string // voice-сервис: /api/v1/stt, /api/v1/tts (VOICE_URL)
-	LLMBaseURL        string // OpenAI-совместимый LLM (LLM_BASE_URL)
-	LLMModel          string // модель LLM (LLM_MODEL)
+	LLMBaseURL        string // OpenAI-совместимый LLM (LLM_BASE_URL; с /v1 или без — добавится)
+	LLMModel          string // модель LLM (LLM_MODEL; пусто → авто-детект по /models)
 	LLMAPIKey         string // ключ LLM (LLM_API_KEY)
 	SandboxURL        string // sandbox-сервис (SANDBOX_URL)
 	LogLevel          string // уровень логов (LOG_LEVEL)
@@ -96,7 +96,7 @@ func Load() (*Config, error) {
 		SessionLimitS:     sessionLimitFromEnv(),
 		VoiceURL:          getEnv("VOICE_URL", "http://localhost:8100"),
 		LLMBaseURL:        getEnv("LLM_BASE_URL", "http://localhost:8300/v1"),
-		LLMModel:          getEnv("LLM_MODEL", "Qwen3-4B"),
+		LLMModel:          os.Getenv("LLM_MODEL"), // пусто → авто по /models
 		LLMAPIKey:         os.Getenv("LLM_API_KEY"),
 		SandboxURL:        getEnv("SANDBOX_URL", "http://localhost:8200"),
 		LogLevel:          getEnv("LOG_LEVEL", "info"),

@@ -19,7 +19,8 @@ func openAIMock(status int, reply string) *httptest.Server {
 			Temperature float64   `json:"temperature"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		if r.URL.Path != "/chat/completions" || r.Method != http.MethodPost {
+		// spec-14: baseURL нормализуется до {base}/v1 — OpenAI-совместимый корень.
+		if r.URL.Path != "/v1/chat/completions" || r.Method != http.MethodPost {
 			http.Error(w, "bad path", http.StatusNotFound)
 			return
 		}

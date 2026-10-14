@@ -9,7 +9,7 @@
 #
 # Переменные окружения (опционально, есть дефолты):
 #   LLM_BASE_URL  (дефолт http://192.168.1.114:8000/v1) — LLM-узел (vLLM)
-#   LLM_MODEL     (дефолт qwen3.8-27b-fp8)
+#   LLM_MODEL     (пусто → авто-детект по GET {LLM_BASE_URL}/models)
 #   LLM_MOCK      (дефолт 0; 1 — без LLM-узла, эхо-интервьюер)
 #   STT_MODEL     (дефолт — локальная директория models/stt: faster-whisper large-v3,
 #                 конвертированная под локальный ctranslate2; HF-снапшоты могут
@@ -39,7 +39,8 @@ if ! command -v go >/dev/null; then
 fi
 
 LLM_BASE_URL="${LLM_BASE_URL:-http://192.168.1.114:8000/v1}"
-LLM_MODEL="${LLM_MODEL:-qwen3.8-27b-fp8}"
+# LLM_MODEL: имя модели можно не знать — пусто → api сам спросит {LLM_BASE_URL}/models.
+LLM_MODEL="${LLM_MODEL:-}"
 LLM_MOCK="${LLM_MOCK:-0}"
 VOICE_MODELS="$ROOT/services/voice/models"
 # STT-провайдер: faster-whisper (default: large-v3 на GPU, ctranslate2) | gigaam
@@ -169,7 +170,7 @@ do_start() {
     nohup .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8100 >>"$LOGS/voice.log" 2>&1 & \
     echo $! >"$PIDS/voice.pid")
 
-  echo "==> api :8000 (LLM_MOCK=$LLM_MOCK LLM=$LLM_BASE_URL/$LLM_MODEL)"
+  echo "==> api :8000 (LLM_MOCK=$LLM_MOCK LLM=$LLM_BASE_URL модель=${LLM_MODEL:-авто по /models})"
   (cd "$ROOT" && DATABASE_URL="sqlite://FOR_RUN/run.db" \
     JWT_SECRET="${JWT_SECRET:-grade-run-secret}" MINUTES_FREE_S="${MINUTES_FREE_S:-3600000}" \
     SESSION_LIMIT_S="$SESSION_LIMIT_S" \

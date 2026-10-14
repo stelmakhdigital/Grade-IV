@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -68,10 +69,13 @@ func (e ErrLLMUnavailable) Unwrap() error { return e.Err }
 
 // Client — HTTP-клиент OpenAI-совместимого /chat/completions.
 type Client struct {
-	baseURL        string
-	apiKey         string
-	http           *http.Client
-	model          string
+	baseURL string // нормализованный корень (…/v1), см. normalizeBase
+	apiKey  string
+	http    *http.Client
+	model   string // "" → авто-детект по GET {baseURL}/models (LLM_MODEL не задан)
+	// modelMu — кэш авто-детекта: после успеха модель фиксируется; провал НЕ
+	// кэшируется (следующий запрос ретраит — сервер LLM мог подняться).
+	modelMu        sync.Mutex
 	enableThinking bool // vLLM: chat_template_kwargs.enable_thinking (дефолт false)
 }
 
@@ -88,20 +92,89 @@ type chatTemplateKwargs struct {
 	EnableThinking bool `json:"enable_thinking"`
 }
 
-// NewClient создаёт клиент (baseURL — корень, напр. http://host:8300/v1).
+// NewClient создаёт клиент (baseURL — корень OpenAI-совместимого API:
+// http://host:8000/v1 или просто http://host:8000 — normalizeBase добавит /v1).
+// model может быть пустым (""): тогда модель определяется автоматически по
+// GET {baseURL}/models — знать имя модели не обязательно.
 // Жёсткого http.Client.Timeout нет сознательно: таймаут хода задаёт ctx
 // вызывающего (в стриминге он должен покрывать весь поток, а не запрос).
 func NewClient(baseURL, model, apiKey string) *Client {
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
+		baseURL: normalizeBase(strings.TrimRight(baseURL, "/")),
 		model:   model,
 		apiKey:  apiKey,
 		http:    &http.Client{}, // таймаут задаёт вызывающий ctx
 	}
 }
 
+// normalizeBase — OpenAI-совместимый корень всегда …/v1: LLM_BASE_URL можно
+// указывать с /v1 или без него (спецификация-14: «указать просто API»).
+func normalizeBase(base string) string {
+	base = strings.TrimRight(base, "/")
+	if base == "" || strings.HasSuffix(base, "/v1") {
+		return base
+	}
+	return base + "/v1"
+}
+
+// resolveModel — модель для запроса: явная (LLM_MODEL) либо авто-детект:
+// GET {baseURL}/models → первый id из data[] (OpenAI-совместимый список;
+// vLLM/llama.cpp/LM Studio возвращают его в одном формате). Успех кэшируется.
+func (c *Client) resolveModel(ctx context.Context) (string, error) {
+	c.modelMu.Lock()
+	defer c.modelMu.Unlock()
+	if c.model != "" {
+		return c.model, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
+	if err != nil {
+		return "", ErrLLMUnavailable{Err: fmt.Errorf("запрос списка моделей: %w", err)}
+	}
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", ErrLLMUnavailable{Err: fmt.Errorf("список моделей: %w", err)}
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", ErrLLMUnavailable{Err: fmt.Errorf("чтение списка моделей: %w", err)}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", ErrLLMUnavailable{Err: fmt.Errorf("список моделей: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))}
+	}
+	var parsed struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return "", ErrLLMUnavailable{Err: fmt.Errorf("разбор списка моделей: %w", err)}
+	}
+	if len(parsed.Data) == 0 || parsed.Data[0].ID == "" {
+		return "", ErrLLMUnavailable{Err: fmt.Errorf("список моделей пуст — задайте LLM_MODEL явно")}
+	}
+	c.model = parsed.Data[0].ID
+	slog.Info("llm: модель определена автоматически по /models", "model", c.model)
+	return c.model, nil
+}
+
+// cachedModel — модель без блокирующего авто-детекта (для Name/health).
+func (c *Client) cachedModel() string {
+	c.modelMu.Lock()
+	defer c.modelMu.Unlock()
+	return c.model
+}
+
 // Name — идентификатор.
-func (c *Client) Name() string { return "openai-compat:" + c.model }
+func (c *Client) Name() string {
+	if m := c.cachedModel(); m != "" {
+		return "openai-compat:" + m
+	}
+	return "openai-compat:auto"
+}
 
 // doRequest — POST {baseURL}/chat/completions (тело — req + chat_template_kwargs).
 func (c *Client) doRequest(ctx context.Context, req Request) (*http.Response, error) {
@@ -166,7 +239,11 @@ func (c *Client) doOnce(ctx context.Context, req Request) (content string, finis
 // Chat — POST {baseURL}/chat/completions (non-streaming).
 func (c *Client) Chat(ctx context.Context, req Request) (Response, error) {
 	if req.Model == "" {
-		req.Model = c.model
+		m, err := c.resolveModel(ctx)
+		if err != nil {
+			return Response{}, err
+		}
+		req.Model = m
 	}
 	c.logf("llm: запрос model=%s msgs=%d max_tokens=%d", req.Model, len(req.Messages), req.MaxTokens)
 	content, finish, err := c.doOnce(ctx, req)
@@ -197,7 +274,11 @@ func (c *Client) Chat(ctx context.Context, req Request) (Response, error) {
 // повтор всего запроса в стрим-режиме с увеличенным бюджетом (как в Chat).
 func (c *Client) ChatStream(ctx context.Context, req Request) (<-chan string, error) {
 	if req.Model == "" {
-		req.Model = c.model
+		m, err := c.resolveModel(ctx)
+		if err != nil {
+			return nil, err
+		}
+		req.Model = m
 	}
 	req.Stream = true
 	c.logf("llm: стрим-запрос model=%s msgs=%d max_tokens=%d", req.Model, len(req.Messages), req.MaxTokens)
