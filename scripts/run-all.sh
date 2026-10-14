@@ -8,7 +8,8 @@
 #   bash scripts/run-all.sh restart # stop + start
 #
 # Переменные окружения (опционально, есть дефолты):
-#   LLM_BASE_URL  (дефолт http://192.168.1.114:8000/v1) — LLM-узел (vLLM)
+#   LLM_BASE_URL  (дефолт http://192.168.1.114:8080/v1) — LLM-узел (OpenAI-совместимый;
+#                 можно без /v1 — нормализуется; модель знать не обязательно)
 #   LLM_MODEL     (пусто → авто-детект по GET {LLM_BASE_URL}/models)
 #   LLM_MOCK      (дефолт 0; 1 — без LLM-узла, эхо-интервьюер)
 #   STT_MODEL     (дефолт — локальная директория models/stt: faster-whisper large-v3,
@@ -38,7 +39,7 @@ if ! command -v go >/dev/null; then
   exit 1
 fi
 
-LLM_BASE_URL="${LLM_BASE_URL:-http://192.168.1.114:8000/v1}"
+LLM_BASE_URL="${LLM_BASE_URL:-http://192.168.1.114:8080/v1}"
 # LLM_MODEL: имя модели можно не знать — пусто → api сам спросит {LLM_BASE_URL}/models.
 LLM_MODEL="${LLM_MODEL:-}"
 LLM_MOCK="${LLM_MOCK:-0}"
