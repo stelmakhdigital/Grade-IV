@@ -35,8 +35,15 @@ type wsMessage struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-// wsAuthUser — JWT из query-параметра token (браузеры) или заголовка Authorization.
+// wsAuthUser — аутентификация WS-upgrade: одноразовый тикет (spec-14/#12,
+// приоритет — JWT в query попадает в логи прокси) либо JWT из query/заголовка.
 func (s *Server) wsAuthUser(r *http.Request) (int64, error) {
+	if ticket := r.URL.Query().Get("ticket"); ticket != "" {
+		if id, ok := s.wsTickets.consume(ticket); ok {
+			return id, nil
+		}
+		return 0, errors.New("тикет недействителен или уже использован")
+	}
 	token := r.URL.Query().Get("token")
 	if token == "" {
 		h := r.Header.Get("Authorization")

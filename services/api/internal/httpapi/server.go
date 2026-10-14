@@ -28,12 +28,15 @@ import (
 
 // Server — HTTP-сервер: хендлеры + зависимости.
 type Server struct {
-	cfg          *config.Config
-	users        *db.UserStore
-	sessions     *db.SessionStore
-	submissions  *db.SubmissionStore
-	whiteboards  *db.WhiteboardStore
-	reports      *db.ReportStore
+	cfg         *config.Config
+	users       *db.UserStore
+	sessions    *db.SessionStore
+	submissions *db.SubmissionStore
+	whiteboards *db.WhiteboardStore
+	reports     *db.ReportStore
+	// wsTickets — одноразовые тикеты WS-upgrade (spec-14/#12: JWT в query
+	// параметре утекает в логи прокси; тикет выдаётся по REST и consumed).
+	wsTickets    *wsTicketStore
 	templates    *db.TemplateStore // итерация A: настраиваемые планы
 	profiles     *db.ProfileStore  // итерация B: профили интервьюера
 	ttsVoices    *ttsVoiceRegistry // F1 + admin (итерация 11): реестр голосов + reload
@@ -76,6 +79,7 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 	if err := templates.EnsureDefaults(context.Background(), interviewer.DefaultPrograms()); err != nil {
 		log.Warn("сид дефолтных шаблонов не удался (используется gradeProgram)", "err", err)
 	}
+	wsTickets := newWSTicketStore()
 	profiles := db.NewProfileStore(database, dialect)
 	// Пресеты профилей интервьюера (идемпотентно, итерация B).
 	if err := profiles.EnsurePresets(context.Background(), db.PresetProfiles()); err != nil {
@@ -121,6 +125,7 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		reports:      reports,
 		templates:    templates,
 		profiles:     profiles,
+		wsTickets:    wsTickets,
 		ttsVoices:    ttsVoices,
 		openingsPath: openingsPath,
 		engine:       engine,
@@ -209,6 +214,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/sessions/{id}/share", s.requireAuth(http.HandlerFunc(s.handleSessionShare)))
 	mux.Handle("DELETE /api/v1/sessions/{id}/share", s.requireAuth(http.HandlerFunc(s.handleSessionShareRevoke)))
 	mux.Handle("GET /api/v1/public/reports/{token}", http.HandlerFunc(s.handlePublicReport))
+	// spec-14/#12: одноразовый тикет WS-upgrade (JWT больше не в query).
+	mux.Handle("GET /api/v1/ws-ticket", s.requireAuth(http.HandlerFunc(s.handleWSTicket)))
 
 	// Admin (итерация 11): редактирование ВСЕХ шаблонов проекта. Только is_admin
 	// (requireAdmin = requireAuth + 403 для не-admin).
