@@ -275,7 +275,7 @@ export function SessionView({ id }: { id: number }) {
               {/* Возврат на предыдущую стадию разрешён (движок); холст при возврате
                   восстанавливается из сохранённого whiteboard. */}
               <div className="stage-nav" data-testid="stage-nav">
-                {((trackMeta !== null && trackMeta.coding) || trackMeta === null) && (
+                {(trackMeta == null || trackMeta.coding) && (
                   <button
                     type="button"
                     className="btn ghost"
@@ -419,7 +419,7 @@ export function SessionView({ id }: { id: number }) {
               </button>
             )}
             {/* spec-18: некодовый трек — из голосовой сразу на доску. */}
-            {stage === 'voice' && trackMeta !== null && !trackMeta.coding && (
+            {stage === 'voice' && trackMeta != null && !trackMeta.coding && (
               <button type="button" className="btn ghost" onClick={() => onStageAction('design')} data-testid="go-design-voice">
                 К доске
               </button>
