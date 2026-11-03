@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { setToken } from '../api';
@@ -166,6 +166,56 @@ describe('AdminView: треки собеседований (spec-18/Ф4)', () =>
     expect(body.track.shell).toBe(true);
     expect(body.track.coding).toBe(false);
     expect(body.track.stacks).toEqual([]);
+  });
+
+  it('drag-n-drop: перестановка групп за ручку', async () => {
+    const fetchMock = mockApi();
+    renderAdmin(fetchMock);
+    const user = userEvent.setup();
+    await screen.findByText('admin@example.com');
+    await user.click(screen.getByRole('tab', { name: 'Треки собеседований' }));
+    await screen.findByTestId('admin-tracks');
+    await user.click(screen.getByTestId('admin-track-new'));
+    await user.type(screen.getByTestId('admin-track-title'), 'Трек DnD');
+    // две группы: A и B
+    const groupRows = () => screen.getAllByTestId(/^admin-track-group-row-/);
+    await user.type(within(groupRows()[0]).getByLabelText('Группа'), 'Альфа');
+    await user.click(screen.getByRole('button', { name: '+ Группа' }));
+    await user.type(within(groupRows()[1]).getByLabelText('Группа'), 'Бета');
+    // drag строки 0 на строку 1 → Бета должна стать первой
+    const r0 = screen.getByTestId('admin-track-group-row-0');
+    const r1 = screen.getByTestId('admin-track-group-row-1');
+    fireEvent.dragStart(within(r0).getByLabelText('Перетащить группу'), { dataTransfer: { setData: vi.fn() } });
+    fireEvent.dragOver(r1, { dataTransfer: { getData: () => '0' } });
+    fireEvent.drop(r1, { dataTransfer: { getData: () => '0' } });
+    // порядок: первая строка теперь «Бета»
+    expect(within(screen.getByTestId('admin-track-group-row-0')).getByLabelText('Группа')).toHaveValue('Бета');
+    expect(within(screen.getByTestId('admin-track-group-row-1')).getByLabelText('Группа')).toHaveValue('Альфа');
+  });
+
+  it('drag-n-drop: перенос блока (чипа) между группами в превью', async () => {
+    const fetchMock = mockApi();
+    renderAdmin(fetchMock);
+    const user = userEvent.setup();
+    await screen.findByText('admin@example.com');
+    await user.click(screen.getByRole('tab', { name: 'Треки собеседований' }));
+    await screen.findByTestId('admin-tracks');
+    await user.click(screen.getByTestId('admin-track-new'));
+    await user.type(screen.getByTestId('admin-track-title'), 'Трек чипов');
+    const groupRows = () => screen.getAllByTestId(/^admin-track-group-row-/);
+    await user.type(within(groupRows()[0]).getByLabelText('Группа'), 'Сети');
+    await user.type(within(groupRows()[0]).getByLabelText('Имена'), 'Файрвол');
+    await user.click(screen.getByRole('button', { name: '+ Группа' }));
+    await user.type(within(groupRows()[1]).getByLabelText('Группа'), 'Серверы');
+    // превью: чип «Файрвол» из группы 0 перетаскиваем в группу 1
+    const chip = screen.getByTestId('admin-track-chip-0-0');
+    const target = screen.getByTestId('admin-track-palette-group-1');
+    fireEvent.dragStart(chip, { dataTransfer: { setData: vi.fn() } });
+    fireEvent.dragOver(target, { dataTransfer: { getData: () => '0' } });
+    fireEvent.drop(target, { dataTransfer: { getData: () => '0' } });
+    // имена ушли: у группы 0 пусто, у группы 1 — Файрвол
+    expect(within(screen.getByTestId('admin-track-group-row-0')).getByLabelText('Имена')).toHaveValue('');
+    expect(within(screen.getByTestId('admin-track-group-row-1')).getByLabelText('Имена')).toHaveValue('Файрвол');
   });
 
   it('удаление используемого трека: 409 → сообщение «используется сессиями»', async () => {

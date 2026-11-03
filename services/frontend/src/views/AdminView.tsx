@@ -3,7 +3,7 @@
  * Три секции: Шаблоны (программы интервью) / Начала разговора / Голоса.
  * Только is_admin (роут #/admin; доступ виден только админу). Дизайн — стили проекта.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   adminListTemplates,
   adminCreateTemplate,
@@ -712,6 +712,41 @@ function TracksTab() {
   const [form, setForm] = useState<TrackFormState | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // spec-20: drag-n-drop палитры — порядок групп (ручка строки) и перенос
+  // блоков между группами (чипы превью). Данные драга — в ref: в jsdom
+  // DataTransfer не реализован; в браузере чип дополнительно пишет в
+  // dataTransfer (Firefox без setData отменяет drag).
+  const dragGroup = useRef<number | null>(null); // индекс группы-источника (строки)
+  const [dragOverGroup, setDragOverGroup] = useState<number | null>(null);
+  const dragChipGroup = useRef<number | null>(null); // группа-источник чипа
+  const dragChipName = useRef<string>(''); // имя блока чипа
+
+  /** Переставить группу from на позицию to (DnD строк, дубль стрелок ↑/↓). */
+  const moveGroup = (from: number, to: number): void => {
+    if (form === null) return;
+    setF({
+      groups: form.groups.map((x, j, arr) => {
+        if (j === to) return arr[from];
+        if (j === from) return arr[to];
+        return x;
+      }),
+    });
+  };
+
+  /** Перенести блок (чип) из группы from в группу to. */
+  const moveChip = (from: number, to: number, name: string): void => {
+    if (form === null || from === to || name === '') return;
+    const list = (k: number): string[] =>
+      form.groups[k].names.split(',').map((s) => s.trim()).filter((s) => s !== '');
+    setF({
+      groups: form.groups.map((x, k) => {
+        if (k === from) return { ...x, names: list(from).filter((n) => n !== name).join(', ') };
+        if (k === to) return { ...x, names: [...list(to), name].join(', ') };
+        return x;
+      }),
+    });
+  };
+
   const load = useCallback(async () => {
     try {
       setTracks(await adminListTracks());
@@ -934,10 +969,32 @@ function TracksTab() {
           {/* spec-19/визуальный редактор: живой превью палитры — то же, что
               увидит кандидат на доске (чипы с цветом группы). */}
           <div className="palette-preview" data-testid="admin-track-palette-preview">
-            {form.groups
-              .filter((g) => g.title.trim() !== '' || g.names.trim() !== '')
-              .map((g, i) => (
-                <div key={i} className="palette-preview-group">
+            {/* Индексы — оригинальные (пустые группы скрыты, но порядок общий
+                со списком строк ниже): DnD чипов переносит блок в группу. */}
+            {form.groups.map((g, i) => {
+              if (g.title.trim() === '' && g.names.trim() === '') return null;
+              return (
+                <div
+                  key={i}
+                  className={`palette-preview-group${dragOverGroup === i ? ' drag-over' : ''}`}
+                  data-testid={`admin-track-palette-group-${i}`}
+                  onDragOver={(e) => {
+                    // подсветка — только при переносе чипа (строки групп
+                    // подсвечивает свой onDragOver)
+                    if (dragChipGroup.current === null) return;
+                    e.preventDefault();
+                    setDragOverGroup(i);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const from = dragChipGroup.current;
+                    const name = dragChipName.current;
+                    dragChipGroup.current = null;
+                    dragChipName.current = '';
+                    setDragOverGroup(null);
+                    if (from !== null) moveChip(from, i, name);
+                  }}
+                >
                   <span className="palette-preview-title">{g.title.trim() || 'Без названия'}</span>
                   <span className="palette-preview-chips">
                     {g.names
@@ -945,18 +1002,67 @@ function TracksTab() {
                       .map((s) => s.trim())
                       .filter((s) => s !== '')
                       .map((n, j) => (
-                        <span key={j} className="palette-preview-chip" style={g.color !== '' ? { borderColor: g.color } : undefined}>
+                        <span
+                          key={j}
+                          className="palette-preview-chip"
+                          style={g.color !== '' ? { borderColor: g.color } : undefined}
+                          draggable
+                          data-testid={`admin-track-chip-${i}-${j}`}
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('text/plain', `${i}`);
+                            dragChipGroup.current = i;
+                            dragChipName.current = n;
+                          }}
+                          onDragEnd={() => {
+                            dragChipGroup.current = null;
+                            dragChipName.current = '';
+                            setDragOverGroup(null);
+                          }}
+                        >
                           <i style={{ background: g.color !== '' ? g.color : '#6eb2f7' }} />
                           {n}
                         </span>
                       ))}
                   </span>
                 </div>
-              ))}
+              );
+            })}
           </div>
           <div data-testid="admin-track-groups">
             {form.groups.map((g, i) => (
-              <div key={i} className="start-form">
+              <div
+                key={i}
+                className={`start-form${dragOverGroup === i ? ' drag-over' : ''}`}
+                data-testid={`admin-track-group-row-${i}`}
+                onDragOver={(e) => {
+                  if (dragGroup.current === null) return;
+                  e.preventDefault();
+                  setDragOverGroup(i);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const from = dragGroup.current;
+                  dragGroup.current = null;
+                  setDragOverGroup(null);
+                  if (from !== null && from !== i) moveGroup(from, i);
+                }}
+              >
+                <span
+                  className="drag-handle"
+                  title="Порядок группы — перетащите"
+                  aria-label="Перетащить группу"
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', String(i));
+                    dragGroup.current = i;
+                  }}
+                  onDragEnd={() => {
+                    dragGroup.current = null;
+                    setDragOverGroup(null);
+                  }}
+                >
+                  ⠿
+                </span>
                 <label className="field">
                   <span>Группа</span>
                   <input

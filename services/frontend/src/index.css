@@ -997,6 +997,29 @@ p {
   border-radius: 3px;
   display: inline-block;
 }
+/* spec-20: drag-n-drop палитры — курсор ручки, подсветка цели сброса. */
+.drag-handle {
+  flex: none;
+  width: 18px;
+  cursor: grab;
+  color: var(--muted, #9aa4b2);
+  font-size: 15px;
+  line-height: 1;
+  user-select: none;
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.start-form.drag-over {
+  outline: 2px dashed #58a6ff;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.palette-preview-group.drag-over {
+  outline: 2px dashed #58a6ff;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
 .palette-item__dot {
   flex: none;
   width: 10px;
