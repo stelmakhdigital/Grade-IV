@@ -54,6 +54,25 @@ jobs:
           go test -count=1 ./...
           CGO_ENABLED=0 go build -o bin/sandbox ./cmd/sandbox
 
+  # spec-20: docker-пробы sandbox на реальном демоне (ubuntu-latest содержит
+  # docker): go/python/shell в контейнерах, --network=none, OOM, fork-bomb за
+  # --pids-limit. Пробы опциональны по SANDBOX_DOCKER — здесь включаем.
+  sandbox-docker:
+    name: "Sandbox docker (пробы: сеть off, OOM, fork-bomb, shell)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: services/sandbox/go.sum
+      - name: docker probes (runner)
+        working-directory: services/sandbox
+        env:
+          SANDBOX_DOCKER: "1"
+        run: go test -count=1 -run 'Docker' ./internal/runner/ -v -timeout 20m
+
   frontend:
     name: Frontend (tsc, vitest, build)
     runs-on: ubuntu-latest
