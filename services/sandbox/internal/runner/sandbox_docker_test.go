@@ -33,7 +33,7 @@ func TestSandboxDockerProbe(t *testing.T) {
 		t.Skipf("docker-демон недоступен: %v (%s)", err, out)
 	}
 
-	r := New(Config{Mode: "docker", Timeout: 120 * time.Second})
+	r := New(Config{Mode: "docker", Timeout: 120 * time.Second, Images: envImages()})
 
 	// 1. go-pass: тесты проходят, сеть отключена (dial наружу падает).
 	goFiles := map[string]string{
@@ -75,6 +75,7 @@ func TestSandboxDockerProbe(t *testing.T) {
 	rOOM := New(Config{
 		Mode:    "docker",
 		Timeout: 120 * time.Second,
+		Images:  envImages(),
 		Commands: map[string]string{
 			"python": `python3 -c 'x = [b"a" * (1 << 20) for _ in range(2048)]'`,
 		},

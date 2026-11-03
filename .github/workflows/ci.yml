@@ -84,10 +84,14 @@ jobs:
             done
           done
           docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+      # BUG-20261103-025: python:3.12-slim без pytest — строим образ задач.
+      - name: build python-tests image
+        run: docker build -t grade/python-tests:dev -f infra/docker/sandbox-python.Dockerfile .
       - name: docker probes (runner)
         working-directory: services/sandbox
         env:
           SANDBOX_DOCKER: "1"
+          SANDBOX_IMAGE_PYTHON: "grade/python-tests:dev"
         run: |
           set -o pipefail
           {

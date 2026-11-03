@@ -158,6 +158,13 @@ func main() {
 		Mode: mode,
 		// spec-14/C3: предел одновременных запусков (N холодных go test → OOM).
 		MaxConcurrent: 4,
+		// spec-20: оверрайды образов (например, python с запечённым pytest —
+		// BUG-20261103-025); частичные — мерджатся на дефолты раннера.
+		Images: map[string]string{
+			"go":     getenv("SANDBOX_IMAGE_GO", ""),
+			"python": getenv("SANDBOX_IMAGE_PYTHON", ""),
+			"shell":  getenv("SANDBOX_IMAGE_SHELL", ""),
+		},
 	})
 
 	// BUG-20261011-014: subprocess-режим честно шлёт код через `sh -c "go test ..."`/

@@ -113,14 +113,20 @@ func New(cfg Config) *Runner {
 	if cfg.MaxBytes <= 0 {
 		cfg.MaxBytes = DefaultMaxBytes
 	}
-	if cfg.Images == nil {
-		cfg.Images = map[string]string{
-			"go": "golang:1.24", "python": "python:3.12-slim",
-			// spec-19: shell — debian-slim (bash + coreutils: grep/sort/uniq/head;
-			// без awk/procps — задачи не зависят от них).
-			"shell": "debian:12-slim",
+	// spec-20: частичные оверрайды (SANDBOX_IMAGE_*) мерджатся на дефолты —
+	// переопределение одного стека (python с pytest) не сбрасывает остальные.
+	defaults := map[string]string{
+		"go": "golang:1.24", "python": "python:3.12-slim",
+		// spec-19: shell — debian-slim (bash + coreutils: grep/sort/uniq/head;
+		// без awk/procps — задачи не зависят от них).
+		"shell": "debian:12-slim",
+	}
+	for stack, img := range cfg.Images {
+		if img != "" {
+			defaults[stack] = img
 		}
 	}
+	cfg.Images = defaults
 	if cfg.Commands == nil {
 		cfg.Commands = map[string]string{
 			"go":     "go test -count=1 -json ./...",

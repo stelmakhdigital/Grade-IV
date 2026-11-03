@@ -106,6 +106,19 @@ func TestShellForkBombGroupKill(t *testing.T) {
 	}
 }
 
+// envImages — оверрайды образов из окружения (SANDBOX_IMAGE_GO/PYTHON/SHELL):
+// CI джоба sandbox-docker подставляет образ python с запечённым pytest
+// (python:3.12-slim pytest не содержит — BUG-20261103-025).
+func envImages() map[string]string {
+	images := map[string]string{}
+	for stack, env := range map[string]string{"go": "SANDBOX_IMAGE_GO", "python": "SANDBOX_IMAGE_PYTHON", "shell": "SANDBOX_IMAGE_SHELL"} {
+		if v := os.Getenv(env); v != "" {
+			images[stack] = v
+		}
+	}
+	return images
+}
+
 // countSleepProcs — число sleep 30 процессов текущего uid (fork-bomb-детект).
 func countSleepProcs(t *testing.T) int {
 	t.Helper()

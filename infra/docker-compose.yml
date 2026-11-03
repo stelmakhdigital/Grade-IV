@@ -39,10 +39,25 @@ services:
       - "8200:8200"
     environment:
       SANDBOX_MODE: "${SANDBOX_MODE:-docker}"
+      # spec-20 / BUG-20261103-025: задачи банка идут через pytest, которого
+      # нет в python:3.12-slim — образ с запечённым pytest собирается ниже.
+      SANDBOX_IMAGE_PYTHON: "grade/python-tests:dev"
     volumes:
       # WP-6: управление контейнерами сессий
       - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - python-tests
     restart: unless-stopped
+    profiles: [prod]
+
+  # Образ python-задач (сборка при up --build; сам контейнер мгновенно
+  # завершается — раннер использует только image).
+  python-tests:
+    image: grade/python-tests:dev
+    build:
+      context: ..
+      dockerfile: infra/docker/sandbox-python.Dockerfile
+    entrypoint: ["true"]
     profiles: [prod]
 
   voice:
