@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .providers import SAMPLE_RATE, STT_EXECUTOR, FakeSTT, FakeTTS
-from .stt_stream import build_vad, register_stt_stream, register_vad_stream
+from .stt_stream import LazyVAD, build_vad, register_stt_stream, register_vad_stream
 
 logger = logging.getLogger("voice")
 
@@ -76,7 +76,11 @@ def build_app(stt=None, tts=None, vad=None, max_speech_s: float | None = None) -
 
     stt = stt if stt is not None else _build_stt()
     tts = tts if tts is not None else _build_tts()
-    vad = vad if vad is not None else build_vad()
+    # Ленивая загрузка VAD (spec-18 #5): модель (onnx Silero, тяжёлый import
+    # faster-whisper) грузится при первом WS-подключении стрима, не на старте
+    # сервиса (CUDA/модельный старт и так дорогой). Health до первой загрузки:
+    # {"vad": "not loaded"} (без ошибки), после — имя провайдера.
+    vad = vad if vad is not None else LazyVAD()
     app.state.stt = stt
     app.state.tts = tts
     app.state.vad = vad

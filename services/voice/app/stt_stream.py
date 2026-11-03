@@ -53,7 +53,7 @@ __all__ = [
     "VAD_THRESHOLD", "VAD_MIN_SILENCE_MS", "VAD_MIN_SPEECH_MS", "VAD_PRE_SILENCE_MS",
     "VAD_MAX_SPEECH_S", "PARTIAL_INTERVAL_S", "WINDOW", "PREROLL_SAMPLES", "ENERGY_RMS",
     "STREAM_IDLE_TIMEOUT_S",
-    "SileroVAD", "EnergyVAD", "StreamVAD", "build_vad",
+    "SileroVAD", "EnergyVAD", "StreamVAD", "build_vad", "LazyVAD",
     "register_stt_stream", "register_vad_stream",
 ]
 
@@ -135,6 +135,52 @@ def build_vad():
     except Exception as exc:  # ImportError onnxruntime / битый onnx
         logger.warning("Silero VAD недоступен (%s) — fallback на energy VAD", exc)
         return EnergyVAD()
+
+
+class LazyVAD:
+    """Ленивая загрузка VAD-модели (spec-18 #5).
+
+    Раньше модель (onnx Silero через faster-whisper, тяжёлый import-цепочка)
+    грузилась на старте сервиса в ``build_app`` — CUDA/модельный старт и так
+    дорогой, а VAD может не понадобиться вовсе. Теперь ``build_vad``
+    вызывается при ПЕРВОМ ``clone()`` (первое WS-подключение стрима).
+
+    - health до первой загрузки: ``{"vad": "not loaded"}`` (без ошибки);
+      после — имя провайдера ("silero"/"energy").
+    - провал загрузки кэшируется (антипаттерн B3 не повторяем: без кэша
+      каждое подключение ретраило бы дорогую загрузку); health показывает
+      ``error: …``, clone() бросает RuntimeError.
+    - ``clone()`` потокобезопасен (двойная проверка под lock): параллельные
+      первые подключения ждут одну загрузку, а не грузят модель дважды.
+    """
+
+    def __init__(self, builder=None) -> None:
+        import threading
+
+        self._builder = builder if builder is not None else build_vad
+        self._lock = threading.Lock()
+        self._vad = None
+        self._error: str | None = None
+
+    @property
+    def name(self) -> str:
+        if self._error is not None:
+            return f"error: {self._error}"
+        return self._vad.name if self._vad is not None else "not loaded"
+
+    def clone(self):
+        if self._vad is None:
+            with self._lock:
+                if self._vad is None and self._error is None:
+                    try:
+                        logger.info("VAD: ленивая загрузка модели (первое подключение стрима)")
+                        self._vad = self._builder()
+                    except Exception as exc:
+                        self._error = str(exc) or type(exc).__name__
+                        logger.exception("VAD: провал ленивой загрузки (кэшируется): %s", self._error)
+                if self._vad is None:
+                    raise RuntimeError(f"VAD не загружен: {self._error}")
+        return self._vad.clone()
 
 
 class StreamVAD:
@@ -294,7 +340,16 @@ def register_stt_stream(app, stt: STTProvider, vad, max_speech_s: float | None =
     @app.websocket("/api/v1/stt/stream")
     async def stt_stream_endpoint(ws: WebSocket) -> None:
         await ws.accept()
-        engine = StreamVAD(vad.clone())  # состояние VAD — per-connection
+        # Ленивый VAD (spec-18 #5): первая загрузка модели — в executor
+        # (import-цепочка faster-whisper/ctranslate2 может занять секунды —
+        # event loop стримов блокировать нельзя). Провал — close 1011.
+        try:
+            base_vad = await asyncio.get_running_loop().run_in_executor(None, vad.clone)
+        except Exception:
+            logger.exception("stt/stream: провал загрузки VAD — закрываю соединение")
+            await ws.close(code=1011)
+            return
+        engine = StreamVAD(base_vad)  # состояние VAD — per-connection
         ring: deque[bytes] = deque(maxlen=4)  # pre-roll: последние кадры (≤1 с)
         buf = bytearray()  # аудио текущего сегмента реплики (от pre-roll)
         speech = False
@@ -422,7 +477,14 @@ def register_vad_stream(app, vad) -> None:
     @app.websocket("/api/v1/vad/stream")
     async def vad_stream_endpoint(ws: WebSocket) -> None:
         await ws.accept()
-        engine = StreamVAD(vad.clone(), pre_silence_ms=VAD_PRE_SILENCE_MS)
+        # Ленивый VAD (spec-18 #5): как в /stt/stream — первая загрузка в executor.
+        try:
+            base_vad = await asyncio.get_running_loop().run_in_executor(None, vad.clone)
+        except Exception:
+            logger.exception("vad/stream: провал загрузки VAD — закрываю соединение")
+            await ws.close(code=1011)
+            return
+        engine = StreamVAD(base_vad, pre_silence_ms=VAD_PRE_SILENCE_MS)
         # spec-14/B2: idle-watchdog — как в /stt/stream: мёртвый клиент
         # (полуоткрытый TCP) вечно держал бы VAD-состояние соединения.
         frame_seen = asyncio.Event()
