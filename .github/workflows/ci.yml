@@ -61,6 +61,8 @@ jobs:
     name: "Sandbox docker (пробы: сеть off, OOM, fork-bomb, shell)"
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      contents: write  # debug-лог падения уходит в ветку ci-debug (логи API — под auth)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -99,6 +101,17 @@ jobs:
         with:
           name: sandbox-docker-probe-log
           path: services/sandbox/probe.log
+      # Лог падения — в ветку ci-debug: API логов/артефактов требует auth,
+      # а публичная ветка читается анонимно (отладка без gh-токена).
+      - name: debug log → ветка ci-debug
+        if: failure()
+        run: |
+          git config user.email ci@grade.local
+          git config user.name ci-debug
+          git checkout -B ci-debug
+          git add -f services/sandbox/probe.log
+          git commit -m "ci-debug: лог docker-проб ${GITHUB_SHA::7}" || exit 0
+          git push origin ci-debug --force
 
   frontend:
     name: Frontend (tsc, vitest, build)
