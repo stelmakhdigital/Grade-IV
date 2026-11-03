@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS interview_templates (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+-- spec-18: трек собеседования для шаблона (backend — дефолт совместимости).
+-- ALTER перед индексами: на живых БД колонка добавляется здесь.
+ALTER TABLE interview_templates ADD COLUMN track TEXT NOT NULL DEFAULT 'backend';
 CREATE INDEX IF NOT EXISTS idx_templates_grade_stack ON interview_templates(grade, stack);
 CREATE INDEX IF NOT EXISTS idx_templates_track_grade ON interview_templates(track, grade);
 
