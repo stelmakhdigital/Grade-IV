@@ -131,6 +131,10 @@ func isTaskTestFile(name, stack string) bool {
 	case "python":
 		base := path.Base(name)
 		return strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py")
+	case "shell":
+		// spec-19: чек-скрипт банка — доверенный (кандидат правит только
+		// solution.sh; подмена check.sh из запроса игнорируется).
+		return name == "check.sh"
 	default:
 		return false
 	}

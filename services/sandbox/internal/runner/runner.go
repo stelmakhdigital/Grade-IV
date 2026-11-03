@@ -45,6 +45,7 @@ const (
 const (
 	defaultMemLimitGo     = 2048 << 20 // VA-потолок для go-запусков (см. выше)
 	defaultMemLimitPython = 512 << 20  // как docker --memory=512m
+	defaultMemLimitShell  = 256 << 20  // spec-19: shell-задачам хватает (сортировки/парсинг)
 	defaultCPUSecs        = 10         // как docker-режим: результат ≤ 10 с (ADR-003)
 )
 
@@ -113,12 +114,20 @@ func New(cfg Config) *Runner {
 		cfg.MaxBytes = DefaultMaxBytes
 	}
 	if cfg.Images == nil {
-		cfg.Images = map[string]string{"go": "golang:1.24", "python": "python:3.12-slim"}
+		cfg.Images = map[string]string{
+			"go": "golang:1.24", "python": "python:3.12-slim",
+			// spec-19: shell — debian-slim (bash + coreutils: grep/sort/uniq/head;
+			// без awk/procps — задачи не зависят от них).
+			"shell": "debian:12-slim",
+		}
 	}
 	if cfg.Commands == nil {
 		cfg.Commands = map[string]string{
 			"go":     "go test -count=1 -json ./...",
 			"python": "python3 -m pytest -q",
+			// spec-19: shell-задания — чек-скрипт банка (check.sh) запускает
+			// решение кандидата (solution.sh) и ассертит результат.
+			"shell": "bash check.sh",
 		}
 	}
 	maxConc := cfg.MaxConcurrent
@@ -134,9 +143,9 @@ func (r *Runner) Mode() string { return r.cfg.Mode }
 // Run выполняет тесты файлов задачи (action "test").
 func (r *Runner) Run(ctx context.Context, stack string, files map[string]string) (Result, error) {
 	switch stack {
-	case "go", "python":
+	case "go", "python", "shell":
 	default:
-		return Result{}, fmt.Errorf("%w: %q (ожидается go|python)", ErrUnsupportedStack, stack)
+		return Result{}, fmt.Errorf("%w: %q (ожидается go|python|shell)", ErrUnsupportedStack, stack)
 	}
 	if len(files) == 0 {
 		return Result{}, fmt.Errorf("%w: пустой набор файлов", ErrBadFiles)
@@ -219,6 +228,11 @@ func (r *Runner) Run(ctx context.Context, stack string, files map[string]string)
 			result.Stderr = outStr
 		}
 		result.Tests = []TestResult{{Name: "pytest", Passed: exitCode == 0}}
+	case "shell":
+		// spec-19: вывод чек-скрипта — сырой текст (не JSON, digest-парсер
+		// фронтенда пропускает как есть); passed = exit 0 check.sh.
+		result.Stdout = string(raw)
+		result.Tests = []TestResult{{Name: "check.sh", Passed: exitCode == 0}}
 	}
 	if result.Timeout {
 		result.ExitCode = 124
@@ -288,6 +302,9 @@ func (r *Runner) runSubprocess(ctx context.Context, stack, workdir string) ([]by
 		if stack == "go" {
 			memLimit = defaultMemLimitGo
 		}
+		if stack == "shell" {
+			memLimit = defaultMemLimitShell
+		}
 	}
 	cpuSecs := r.cfg.CPUSecs
 	if cpuSecs <= 0 {
@@ -303,6 +320,14 @@ func (r *Runner) runSubprocess(ctx context.Context, stack, workdir string) ([]by
 	// процессов) — защита pids за docker-режимом (--pids-limit).
 	// БЕЗ exec: exec ломает builtin-команды (exit/cd) и составные («&&»):
 	// ограничения установлены в sh ДО команды и наследуются ей.
+	//
+	// spec-19 (shell): ulimit -u (RLIMIT_NPROC) для shell-стека СОЗНАТЕЛЬНО
+	// не ставится — тот же per-uid аргумент, что и для go/python: лимит
+	// действует на ВСЕ процессы uid sandbox, а не на один запуск (на busy-
+	// хосте с сервисами того же uid понижение NPROC ломает их fork'и).
+	// Fork-bomb в bash-задаче гасится двумя механизмами: group-kill по
+	// таймауту (ниже, Setpgid+SIGKILL — дети умирают с родителем) и
+	// prod-режимом docker (--pids-limit=128, сеть off).
 	cmdLine = fmt.Sprintf(
 		"ulimit -v %d || exit 97; ulimit -t %d || exit 97;"+
 			" ulimit -n 512 2>/dev/null || ulimit -n $(ulimit -n -H) 2>/dev/null || true; %s",
