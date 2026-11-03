@@ -1,0 +1,42 @@
+== docker version ==
+Client: Docker Engine - Community
+ Version:           29.4.2
+ API version:       1.54
+ Go version:        go1.26.2
+ Git commit:        055a478
+ Built:             Fri May  1 10:24:04 2026
+ OS/Arch:           linux/amd64
+ Context:           default
+
+Server: Docker Engine - Community
+ Engine:
+  Version:          29.4.2
+  API version:      1.54 (minimum version 1.40)
+  Go version:       go1.26.2
+  Git commit:       d329809
+  Built:            Fri May  1 10:24:04 2026
+  OS/Arch:          linux/amd64
+  Experimental:     false
+ containerd:
+  Version:          v2.4.2
+  GitCommit:        b7a25261e029d68978bbf290df0a62fc819b3c51
+ runc:
+  Version:          1.5.2
+  GitCommit:        v1.5.2-0-g29dd3dc2
+ docker-init:
+  Version:          0.19.0
+  GitCommit:        de40ad0
+== пробы ==
+=== RUN   TestShellDockerForkBomb
+--- PASS: TestShellDockerForkBomb (4.86s)
+=== RUN   TestShellDockerRun
+--- PASS: TestShellDockerRun (0.23s)
+=== RUN   TestSandboxDockerProbe
+    sandbox_docker_test.go:60: go-pass: OK (network=none подтверждён), dur=27758 мс
+    sandbox_docker_test.go:70: py-pass: {ExitCode:1 Stdout:/usr/local/bin/python3: No module named pytest
+         Stderr: DurationMS:198 Passed:false Timeout:false Tests:[{Name:pytest Passed:false}]} (stdout: /usr/local/bin/python3: No module named pytest
+        )
+--- FAIL: TestSandboxDockerProbe (28.09s)
+FAIL
+FAIL	github.com/stelmakhdigital/grade-iv/services/sandbox/internal/runner	33.179s
+FAIL
