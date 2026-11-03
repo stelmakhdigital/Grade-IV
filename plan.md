@@ -274,4 +274,24 @@ docker-skip, TestValidateShellExclusive, TestStages на 4 стадии), vitest
   чиста, скриншот d1.
 
 **Регрессия:** vitest 131 ok (+2 DnD), tsc ok, go vet/test (api 64с,
-sandbox runner-пробы) ok. CI #64: go + frontend + voice + sandbox-docker.
+sandbox runner-пробы) ok. CI: go + frontend + voice + sandbox-docker.
+
+**Баги docker-режима, найденные и починенные первыми реальными пробами**
+(логи падений — через ветку ci-debug: API логов/артефактов GitHub под auth):
+- BUG-20261103-022: `--cidfile` существовал до `docker run` — CLI 27+ даёт
+  «container ID file found» (exit 125) на КАЖДЫЙ запуск; temp-файл только
+  уникальное имя, удаляется до запуска.
+- BUG-20261103-023: GOCACHE на tmpfs /tmp (128m) переполнялся холодной
+  сборкой net-стека («link: no space left on device») — кэш на bind-mount
+  workdir, CGO_ENABLED=0.
+- BUG-20261103-024: docker `--tmpfs` монтируется noexec — собранный
+  go-бинарник на /tmp не запускался («fork/exec permission denied»); опция
+  exec для одноразового контейнера.
+- BUG-20261103-025: в python:3.12-slim нет pytest — python-задачи в
+  docker-режиме падали всегда; образ задач с запечённым pytest
+  (infra/docker/sandbox-python.Dockerfile), env-оверрайды
+  SANDBOX_IMAGE_GO/PYTHON/SHELL (мердж на дефолты), compose собирает
+  python-tests, CI-джоба строит образ для проб.
+Итог: CI-прогон на 64370d8 зелёный (go, frontend, voice, sandbox-docker с
+реальным демоном: go-pass с network=none, py-pass/py-oom на образе с
+pytest, shell, fork-bomb за --pids-limit).
