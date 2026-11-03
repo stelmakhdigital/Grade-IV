@@ -245,3 +245,33 @@ backend-трек регрессией — без изменений. Админ:
 **Регрессия:** go test ./... ok (новые: пробы shell проход/провал/fork-bomb/
 docker-skip, TestValidateShellExclusive, TestStages на 4 стадии), vitest
 129 ok (палитра-превью, shell-payload), tsc ok.
+
+## 13. Итерация 20 — docker-путь shell под наблюдением, drag-n-drop палитры (spec-20)
+
+**Docker-режим shell-задач:**
+- Прогрев образов: runner.WarmupImage + асинхронный pull образов стека
+  (go/python/shell) на старте sandbox в docker-режиме (SANDBOX_WARMUP=0 —
+  выключить) — первый кандидат больше не ждёт холодный pull debian-slim.
+- Проба TestShellDockerForkBomb: бесконечная fork-bomb в решении
+  (b(){ b | b & }) гасится --pids-limit=128 и docker kill по cidfile по
+  таймауту; --rm зачищает контейнер (assert: нет остатков debian:12-slim).
+- CI: добавлена джоба sandbox-docker (ubuntu-latest, реальный демон):
+  TestSandboxDockerProbe (сеть off через dial, OOM) + shell-прогон +
+  fork-bomb. Джоба была обещана в шапке ci.yml с T-20261009133832, но
+  отсутствовала — docker-путь до сих пор не гонялся нигде.
+- Деплой без изменений: infra/docker-compose.yml поднимает sandbox с
+  SANDBOX_MODE=docker и смонтированным /var/run/docker.sock; образ содержит
+  docker-cli (T-20261009133832).
+
+**Drag-n-drop палитры (админ-редактор):**
+- Ручка ⠿ на строках групп: HTML5 DnD перестановка порядка (стрелки ↑/↓
+  остаются как доступный fallback); подсветка цели сброса.
+- Перенос блоков между группами прямо в превью: чип перетаскивается в
+  другую группу (данные драга в ref — jsdom не реализует DataTransfer;
+  в браузере чип дополнительно пишет в dataTransfer для Firefox).
+- Витесты: перестановка групп, перенос чипа (fireEvent dragStart/Over/drop);
+  E2E playwright dragAndDrop в реальном chromium — оба сценария, консоль
+  чиста, скриншот d1.
+
+**Регрессия:** vitest 131 ok (+2 DnD), tsc ok, go vet/test (api 64с,
+sandbox runner-пробы) ok. CI #64: go + frontend + voice + sandbox-docker.
