@@ -125,8 +125,10 @@ var gradeProgram = map[models.Grade]string{
 
 // stagePrompt — system-промпт по стадии. voiceStyle — блок формата голосовой
 // реплики (варианты A/B, T-20261009121144; пустая строка — без ограничения).
-// program — программа интервью (из шаблона или gradeProgram); пустая — gradeProgram[grade].
-func stagePrompt(grade models.Grade, stack string, stage models.Stage, voiceStyle, program string) string {
+// program — программа интервью (из шаблона или gradeProgram); пустая —
+// gradeProgram[grade], для трека — track-шаблон.
+// track — профиль роли (spec-18); nil — backend-хардкод промптов.
+func stagePrompt(grade models.Grade, stack string, stage models.Stage, voiceStyle, program string, track *models.Track) string {
 	switch stage {
 	case models.StageVoice:
 		prog := program
@@ -140,15 +142,32 @@ func stagePrompt(grade models.Grade, stack string, stage models.Stage, voiceStyl
 		if voiceStyle != "" {
 			style = " " + voiceStyle
 		}
-		return fmt.Sprintf("Стадия: голосовое интервью. Стек: %s. "+
-			"Веди диалог по программе грейда: вопрос → на реплику кандидата реагуй, уточняй, переходи к следующему. "+
-			"Одна мысль за раз.%s \n\n%s", stack, style, prog)
+		// spec-18: контекст роли вместо стека; для некодовых треков стека нет.
+		role := fmt.Sprintf("Собеседование, стек %s", stack)
+		if track != nil {
+			role = fmt.Sprintf("Собеседование на позицию «%s»", track.Title)
+			if track.Coding {
+				role += fmt.Sprintf(", стек %s", stack)
+			}
+		}
+		return fmt.Sprintf("Стадия: голосовое интервью. %s. "+
+			"Веди диалог по программе: вопрос → на реплику кандидата реагуй, уточняй, переходи к следующему. "+
+			"Одна мысль за раз.%s \n\n%s", role, style, prog)
 	case models.StageLiveCode:
 		return fmt.Sprintf("Стадия: Live-Code, стек %s. Кандидат решает задачу в редакторе, запускать тесты будет сам. "+
 			"Твои роли: (1) при входе — представить задачу и дать старт; (2) по результатам запуска кода — короткое ревью "+
 			"(что работает, что нет, где узкие места) и 1 follow-up вопрос; (3) на вопросы кандидата по задаче — подсказывай, "+
 			"не решай за него. После принятого решения — подвести итог стадии.", stack)
 	case models.StageDesign:
+		// spec-18/Ф3: промпт ревью доски из трека; для backend-трека — хардкод.
+		if track != nil {
+			p := fmt.Sprintf("Стадия: %s. Кандидат собирает схему на whiteboard и объясняет её устно.\n%s",
+				track.Board.Title, track.Board.ReviewPrompt)
+			if c := track.Board.CaseForGrade(grade); c != nil {
+				p += fmt.Sprintf("\nКейс стадии: «%s». %s", c.Title, c.Statement)
+			}
+			return p
+		}
 		return "Стадия: System Design. Кандидат проектирует систему на whiteboard и объясняет её устно. " +
 			"Оценивай: декомпозицию, выбор компонентов, потоки данных, отказоустойчивость, масштабируемость. " +
 			"Задавай стресс-вопросы (нагрузка x10, сбой узла), но давай кандидату высказаться. Итог — краткая оценка схемы и устного ответа."
@@ -208,7 +227,7 @@ func systemPromptWithStyle(grade models.Grade, stack string, stage models.Stage,
 		gradeFocus[grade],
 		toneBlocks[tone],
 		difficultyBlocks[difficulty],
-		stagePrompt(grade, stack, stage, voiceStyle, ""),
+		stagePrompt(grade, stack, stage, voiceStyle, "", nil),
 	}
 	if vacancyStages[stage] {
 		if vb := vacancyBlock(vacancy, grade); vb != "" {
@@ -238,13 +257,13 @@ func SystemPrompt(grade models.Grade, stack string, stage models.Stage) string {
 // SystemPromptWithProgram — system-промпт с программой из шаблона (итерация A).
 // Профиль (tone/difficulty) — из сессии; пустая программа — дефолтная gradeProgram.
 func SystemPromptWithProgram(grade models.Grade, stack string, stage models.Stage, program string) string {
-	return SystemPromptWithProfileProgram(grade, stack, stage, "balanced", "standard", program, "", "")
+	return SystemPromptWithProfileProgram(grade, stack, stage, "balanced", "standard", program, "", "", nil)
 }
 
 // SystemPromptWithProfileProgram — полный промпт: профиль (tone/difficulty) +
 // программа из шаблона + род персоны (F7) + блок вакансии (F6). program="" —
 // дефолтная gradeProgram. gender/vacancy — "" — мужская persona, без блока вакансии.
-func SystemPromptWithProfileProgram(grade models.Grade, stack string, stage models.Stage, tone, difficulty, program, gender, vacancy string) string {
+func SystemPromptWithProfileProgram(grade models.Grade, stack string, stage models.Stage, tone, difficulty, program, gender, vacancy string, track *models.Track) string {
 	if _, ok := toneBlocks[tone]; !ok {
 		tone = "balanced"
 	}
@@ -257,7 +276,7 @@ func SystemPromptWithProfileProgram(grade models.Grade, stack string, stage mode
 		gradeFocus[grade],
 		toneBlocks[tone],
 		difficultyBlocks[difficulty],
-		stagePrompt(grade, stack, stage, activeVoiceStyle, program),
+		stagePrompt(grade, stack, stage, activeVoiceStyle, program, track),
 	}
 	if vacancyStages[stage] {
 		if vb := vacancyBlock(vacancy, grade); vb != "" {

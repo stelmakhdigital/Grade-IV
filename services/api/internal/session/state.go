@@ -33,6 +33,15 @@ var stageOrder = []models.Stage{
 	models.StageReport,
 }
 
+// stagesForTrack — программа стадий по треку и грейду (spec-18).
+// track nil → по грейду (движок без хранилища треков, совместимость).
+func stagesForTrack(track *models.Track, g models.Grade) []models.Stage {
+	if track == nil {
+		return stagesForGrade(g)
+	}
+	return track.Stages(g)
+}
+
 // stagesForGrade — состав программы сессии по грейду.
 func stagesForGrade(g models.Grade) []models.Stage {
 	switch g {
@@ -52,11 +61,11 @@ func stageIndex(s models.Stage) int {
 	return -1
 }
 
-// CanTransitionStage — допустим ли переход from → to для данного грейда.
-// Перемещение вперёд разрешается только по программе грейда (без «перескоков»,
-// но Junior пропускает design); возврат на предыдущую стадию разрешён,
-// кроме report (терминальная).
-func CanTransitionStage(grade models.Grade, from, to models.Stage) error {
+// CanTransitionStage — допустим ли переход from → to по программе трека
+// (spec-18) и грейда. Перемещение вперёд разрешается только по программе
+// (без «перескоков», но Junior backend-трека пропускает design); возврат на
+// предыдущую стадию разрешён, кроме report (терминальная).
+func CanTransitionStage(track *models.Track, grade models.Grade, from, to models.Stage) error {
 	fromIdx, toIdx := stageIndex(from), stageIndex(to)
 	if fromIdx < 0 || toIdx < 0 {
 		return ErrUnknownStage
@@ -64,7 +73,7 @@ func CanTransitionStage(grade models.Grade, from, to models.Stage) error {
 	if toIdx == stageIndex(models.StageReport) {
 		// report — только вперёд из последней рабочей стадии программы
 		// (программа всегда завершается report, рабочая стадия — предпоследняя).
-		prog := stagesForGrade(grade)
+		prog := stagesForTrack(track, grade)
 		if len(prog) < 2 || prog[len(prog)-2] != from {
 			return fmt.Errorf("%w: %s → report", ErrIllegalStage, from)
 		}
@@ -73,7 +82,7 @@ func CanTransitionStage(grade models.Grade, from, to models.Stage) error {
 	if from == models.StageReport {
 		return fmt.Errorf("%w: report → %s", ErrIllegalStage, to)
 	}
-	prog := stagesForGrade(grade)
+	prog := stagesForTrack(track, grade)
 	fromPos, toPos := -1, -1
 	for i, st := range prog {
 		switch st {

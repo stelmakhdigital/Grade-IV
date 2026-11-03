@@ -71,6 +71,7 @@ func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Grade      models.Grade `json:"grade"`
 		Stack      models.Stack `json:"stack"`
+		TrackID    string       `json:"track_id,omitempty"`    // spec-18: трек роли; пусто = backend
 		TemplateID int64        `json:"template_id,omitempty"` // итерация A: 0 = дефолтный шаблон грейда
 		ProfileID  int64        `json:"profile_id,omitempty"`  // итерация B: 0 = balanced/standard
 		TTSSpeaker string       `json:"tts_speaker,omitempty"` // F1: голос интервьюера; пусто = дефолт
@@ -80,6 +81,9 @@ func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var opts []session.CreateOption
+	if body.TrackID != "" {
+		opts = append(opts, session.WithTrack(strings.TrimSpace(body.TrackID)))
+	}
 	if body.TemplateID > 0 {
 		opts = append(opts, session.WithTemplate(body.TemplateID))
 	}
@@ -106,6 +110,7 @@ func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"id": m.ID, "ws_url": "/ws/session/" + strconv.FormatInt(m.ID, 10),
 			"duration_limit_s": m.DurationLimitS, "template_id": m.TemplateID,
+			"track_id": m.TrackID,
 		})
 	case errors.Is(err, session.ErrNoMinutes):
 		writeError(w, http.StatusPaymentRequired, "out_of_minutes",

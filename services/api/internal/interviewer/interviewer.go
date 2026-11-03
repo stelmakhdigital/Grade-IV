@@ -92,6 +92,31 @@ type Interviewer struct {
 	maxHistory      int
 	genderResolver  func(speaker string) string                    // F7: speaker→gender (реестр tts-voices); пусто/nil → male
 	vacancyResolver func(ctx context.Context, userID int64) string // F6: userID→текст вакансии; пусто/nil → без блока
+	tracks          TrackSource                                    // spec-18: источник треков; nil → хардкод-критерии/промпты
+}
+
+// TrackSource — источник треков собеседований (spec-18): trackID → трек
+// (nil, nil — не найден). nil-источник → fallback на хардкод грейда.
+type TrackSource func(trackID string) (*models.Track, error)
+
+// WithTrackSource — резолвер треков (spec-18).
+func WithTrackSource(f TrackSource) Option {
+	return func(i *Interviewer) { i.tracks = f }
+}
+
+// trackFor — трек сессии (spec-18). nil — источник не задан, id пустой или
+// неизвестный: промпты/критерии — по грейду (совместимость).
+func (i *Interviewer) trackFor(sess models.Session) *models.Track {
+	if i.tracks == nil || sess.TrackID == "" {
+		return nil
+	}
+	t, err := i.tracks(sess.TrackID)
+	if err != nil || t == nil {
+		i.log.Warn("interviewer: трек не разрешён — fallback на грейд",
+			"session", sess.ID, "track", sess.TrackID, "err", err)
+		return nil
+	}
+	return t
 }
 
 // New создаёт движок интервьюера.
@@ -369,8 +394,9 @@ func (i *Interviewer) buildMessages(sess models.Session, userMsg string, images 
 		vacancy = i.vacancyResolver(context.Background(), sess.UserID)
 	}
 	// Программа — из сессии (шаблон, итерация A); пустая — дефолтная gradeProgram.
+	// spec-18: контекст трека (роль, доска) в промптах стадии.
 	sys := SystemPromptWithProfileProgram(sess.Grade, string(sess.Stack), sess.Stage,
-		tone, difficulty, sess.Program, gender, vacancy)
+		tone, difficulty, sess.Program, gender, vacancy, i.trackFor(sess))
 	msgs := []llm.Message{{Role: llm.RoleSystem, Content: sys}}
 	msgs = append(msgs, i.transcript(sess.ID, i.maxHistory)...)
 	msg := llm.Message{Role: llm.RoleUser, Content: userMsg}

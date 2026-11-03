@@ -15,6 +15,7 @@ import (
 type CreateOption func(*createParams)
 
 type createParams struct {
+	trackID    string
 	templateID int64
 	profileID  int64
 	ttsspeaker string
@@ -29,6 +30,11 @@ func WithProfile(profileID int64) CreateOption {
 // WithTemplate — шаблон интервью (итерация A); 0 — дефолтный шаблон грейда.
 func WithTemplate(templateID int64) CreateOption {
 	return func(p *createParams) { p.templateID = templateID }
+}
+
+// WithTrack — трек собеседования (spec-18); пусто — backend (дефолт).
+func WithTrack(trackID string) CreateOption {
+	return func(p *createParams) { p.trackID = trackID }
 }
 
 // WithTTSSpeaker — выбранный голос интервьюера (F1, Итерация 10); пусто — дефолт
@@ -55,11 +61,42 @@ func (e *Engine) CreateWithTemplate(ctx context.Context, userID int64, grade mod
 
 func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, stack models.Stack, cp *createParams) (models.Session, error) {
 	templateID := cp.templateID
+	// spec-18: трек сессии (пусто → backend; неизвестный id → 400).
+	trackID := cp.trackID
+	if trackID == "" {
+		trackID = models.DefaultTrackID
+	}
+	var track *models.Track
+	if e.tracks != nil {
+		t, err := e.tracks(trackID)
+		if err != nil {
+			return models.Session{}, fmt.Errorf("%w: трек %q: %v", ErrInvalidParams, trackID, err)
+		}
+		if t == nil {
+			return models.Session{}, fmt.Errorf("%w: трек %q не найден", ErrInvalidParams, trackID)
+		}
+		track = t
+		if !track.HasGrade(grade) {
+			return models.Session{}, fmt.Errorf("%w: грейд %q не входит в трек %q", ErrInvalidParams, grade, trackID)
+		}
+		if track.Coding {
+			if !track.HasStack(stack) {
+				return models.Session{}, fmt.Errorf("%w: стек %q не входит в трек %q", ErrInvalidParams, stack, trackID)
+			}
+		} else {
+			// Некодовый трек: стек не используется; присланный — ошибка клиента.
+			if stack != "" {
+				return models.Session{}, fmt.Errorf("%w: трек %q некодовый — стек не принимается", ErrInvalidParams, trackID)
+			}
+		}
+	}
 	if !grade.Valid() {
 		return models.Session{}, fmt.Errorf("%w: грейд %q", ErrInvalidParams, grade)
 	}
-	if !stack.Valid() {
-		return models.Session{}, fmt.Errorf("%w: стек %q", ErrInvalidParams, stack)
+	if track == nil || track.Coding {
+		if !stack.Valid() {
+			return models.Session{}, fmt.Errorf("%w: стек %q", ErrInvalidParams, stack)
+		}
 	}
 	minutes, err := e.users.MinutesRemaining(ctx, userID)
 	if err != nil {
@@ -89,7 +126,7 @@ func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, s
 				return models.Session{}, fmt.Errorf("%w: шаблон %d не для грейда %s", ErrInvalidParams, templateID, grade)
 			}
 		} else {
-			tpl, err = e.templates.Default(ctx, grade, string(stack))
+			tpl, err = e.templates.Default(ctx, grade, string(stack), trackID)
 			if err != nil {
 				return models.Session{}, err
 			}
@@ -119,6 +156,7 @@ func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, s
 		Program:        program,
 		ProfileID:      cp.profileID,
 		TTSSpeaker:     cp.ttsspeaker,
+		TrackID:        trackID,
 	})
 	if err != nil {
 		return models.Session{}, err
@@ -128,6 +166,7 @@ func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, s
 		userID:      userID,
 		grade:       grade,
 		stack:       stack,
+		track:       track,
 		limitS:      m.DurationLimitS,
 		stage:       models.StageVoice,
 		status:      models.StatusActive,
@@ -414,6 +453,25 @@ func (e *Engine) abort(id int64, reason string) (*Snapshot, error) {
 	return e.snapshotLocked(rt)
 }
 
+// ResendStage — повтор текущей стадии (WS-reconnect): та же сборка сообщения,
+// что и в Transition (spec-18: board в stage для design).
+func (e *Engine) ResendStage(id int64) {
+	rt := e.rt(id)
+	if rt == nil {
+		return
+	}
+	rt.connMu.Lock()
+	stage := rt.stage
+	msg := map[string]any{"type": "stage", "name": stage, "task": nil}
+	if stage == models.StageDesign {
+		if b := boardStagePayload(rt.track, rt.grade); b != nil {
+			msg["board"] = b
+		}
+	}
+	rt.connMu.Unlock()
+	e.sendJSON(id, msg)
+}
+
 // Transition — смена стадии (валидация машиной состояний, с учётом программы грейда).
 func (e *Engine) Transition(id int64, to models.Stage) (*Snapshot, error) {
 	rt := e.rt(id)
@@ -427,7 +485,7 @@ func (e *Engine) Transition(id int64, to models.Stage) (*Snapshot, error) {
 		rt.connMu.Unlock()
 		return nil, fmt.Errorf("%w: %s (стадия %s)", ErrSessionEnded, cur, from)
 	}
-	if err := CanTransitionStage(rt.grade, rt.stage, to); err != nil {
+	if err := CanTransitionStage(rt.track, rt.grade, rt.stage, to); err != nil {
 		rt.connMu.Unlock()
 		return nil, err
 	}
@@ -443,6 +501,13 @@ func (e *Engine) Transition(id int64, to models.Stage) (*Snapshot, error) {
 	if to == models.StageReport {
 		return e.finish(id, true, "stage_report")
 	}
-	e.sendJSON(id, map[string]any{"type": "stage", "name": to, "task": nil})
+	msg := map[string]any{"type": "stage", "name": to, "task": nil}
+	// spec-18/Ф3: конфиг доски идёт в stage-сообщении (палитра/заголовок/кейс).
+	if to == models.StageDesign {
+		if b := boardStagePayload(rt.track, rt.grade); b != nil {
+			msg["board"] = b
+		}
+	}
+	e.sendJSON(id, msg)
 	return e.snapshotLocked(rt)
 }

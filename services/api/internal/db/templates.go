@@ -32,6 +32,7 @@ type Template struct {
 	Name      string          `json:"name"`
 	Grade     models.Grade    `json:"grade"`
 	Stack     string          `json:"stack"`
+	Track     string          `json:"track"` // spec-18: трек ('backend' — дефолт)
 	DurationS int             `json:"duration_s"`
 	Blocks    []TemplateBlock `json:"blocks"`
 	IsDefault bool            `json:"is_default"`
@@ -65,14 +66,14 @@ func NewTemplateStore(dbx *sql.DB, d Dialect) *TemplateStore {
 	return &TemplateStore{db: dbx, d: d}
 }
 
-const templateCols = `id, name, grade, stack, duration_s, blocks, is_default, created_at, updated_at`
+const templateCols = `id, name, grade, stack, track, duration_s, blocks, is_default, created_at, updated_at`
 
 func (s *TemplateStore) scan(row interface{ Scan(...any) error }) (Template, error) {
 	var t Template
 	var blocksJSON string
 	var isDefault int
 	var created, updated string
-	err := row.Scan(&t.ID, &t.Name, &t.Grade, &t.Stack, &t.DurationS,
+	err := row.Scan(&t.ID, &t.Name, &t.Grade, &t.Stack, &t.Track, &t.DurationS,
 		&blocksJSON, &isDefault, &created, &updated)
 	if err != nil {
 		return t, err
@@ -122,12 +123,19 @@ func (s *TemplateStore) List(ctx context.Context, grade models.Grade, stack stri
 	return out, rows.Err()
 }
 
-// Default — дефолтный шаблон для (грейд, стек); если дефолтов несколько — первый.
-func (s *TemplateStore) Default(ctx context.Context, grade models.Grade, stack string) (*Template, error) {
+// Default — дефолтный шаблон для (грейд, стек, трек); если дефолтов несколько —
+// первый. spec-18: track-специфичный шаблон приоритетнее, fallback — на
+// track='backend' (совместимость со старыми строками).
+func (s *TemplateStore) Default(ctx context.Context, grade models.Grade, stack, track string) (*Template, error) {
+	if track == "" {
+		track = "backend"
+	}
 	row := s.db.QueryRowContext(ctx, s.d.q(
 		"SELECT "+templateCols+" FROM interview_templates "+
 			"WHERE grade = ? AND (stack = ? OR stack = '*') AND is_default = 1 "+
-			"ORDER BY id ASC LIMIT 1"), grade, stack)
+			"AND (track = ? OR track = 'backend') "+
+			"ORDER BY (CASE WHEN track = ? THEN 0 ELSE 1 END) ASC, id ASC LIMIT 1"),
+		grade, stack, track, track)
 	t, err := s.scan(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -145,8 +153,11 @@ func (s *TemplateStore) Default(ctx context.Context, grade models.Grade, stack s
 func (s *TemplateStore) EnsureDefaults(ctx context.Context, defs []Template) error {
 	for _, def := range defs {
 		var n int
+		// spec-18: идемпотентность в scope (grade, track) — дефолты разных
+		// треков сидируются независимо.
 		err := s.db.QueryRowContext(ctx, s.d.q(
-			"SELECT COUNT(*) FROM interview_templates WHERE grade = ?"), def.Grade).Scan(&n)
+			"SELECT COUNT(*) FROM interview_templates WHERE grade = ? AND track = ?"),
+			def.Grade, trackOf(def.Track)).Scan(&n)
 		if err != nil {
 			return err
 		}
@@ -163,9 +174,9 @@ func (s *TemplateStore) EnsureDefaults(ctx context.Context, defs []Template) err
 			isDefault = 1
 		}
 		_, err = s.db.ExecContext(ctx, s.d.q(
-			"INSERT INTO interview_templates (name, grade, stack, duration_s, blocks, is_default, created_at, updated_at) "+
-				"VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
-			def.Name, def.Grade, def.Stack, def.DurationS, string(blocksJSON), isDefault, now, now)
+			"INSERT INTO interview_templates (name, grade, stack, track, duration_s, blocks, is_default, created_at, updated_at) "+
+				"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+			def.Name, def.Grade, def.Stack, trackOf(def.Track), def.DurationS, string(blocksJSON), isDefault, now, now)
 		if err != nil {
 			return err
 		}
@@ -191,17 +202,18 @@ func (s *TemplateStore) Create(ctx context.Context, t *Template) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	if isDefault == 1 {
+		// spec-18: сброс дефолта в scope трека (шаблоны разных треков живут рядом).
 		if _, err := tx.ExecContext(ctx, s.d.q(
 			"UPDATE interview_templates SET is_default = 0, updated_at = ? "+
-				"WHERE grade = ? AND (stack = ? OR stack = '*')"),
-			now, t.Grade, t.Stack); err != nil {
+				"WHERE grade = ? AND (stack = ? OR stack = '*') AND track = ?"),
+			now, t.Grade, t.Stack, trackOf(t.Track)); err != nil {
 			return err
 		}
 	}
 	res, err := tx.ExecContext(ctx, s.d.q(
-		"INSERT INTO interview_templates (name, grade, stack, duration_s, blocks, is_default, created_at, updated_at) "+
-			"VALUES (?, ?, ?, ?, ?, ?, ?, ?)"),
-		t.Name, t.Grade, t.Stack, t.DurationS, string(blocksJSON), isDefault, now, now)
+		"INSERT INTO interview_templates (name, grade, stack, track, duration_s, blocks, is_default, created_at, updated_at) "+
+			"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+		t.Name, t.Grade, t.Stack, trackOf(t.Track), t.DurationS, string(blocksJSON), isDefault, now, now)
 	if err != nil {
 		return err
 	}
@@ -253,17 +265,18 @@ func (s *TemplateStore) Update(ctx context.Context, t *Template) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	if isDefault == 1 {
+		// spec-18: сброс дефолта в scope трека.
 		if _, err := tx.ExecContext(ctx, s.d.q(
 			"UPDATE interview_templates SET is_default = 0, updated_at = ? "+
-				"WHERE grade = ? AND (stack = ? OR stack = '*') AND id != ?"),
-			now, t.Grade, t.Stack, t.ID); err != nil {
+				"WHERE grade = ? AND (stack = ? OR stack = '*') AND track = ? AND id != ?"),
+			now, t.Grade, t.Stack, trackOf(t.Track), t.ID); err != nil {
 			return err
 		}
 	}
 	if _, err := tx.ExecContext(ctx, s.d.q(
-		"UPDATE interview_templates SET name = ?, grade = ?, stack = ?, duration_s = ?, "+
+		"UPDATE interview_templates SET name = ?, grade = ?, stack = ?, track = ?, duration_s = ?, "+
 			"blocks = ?, is_default = ?, updated_at = ? WHERE id = ?"),
-		t.Name, t.Grade, t.Stack, t.DurationS, string(blocksJSON), isDefault, now, t.ID); err != nil {
+		t.Name, t.Grade, t.Stack, trackOf(t.Track), t.DurationS, string(blocksJSON), isDefault, now, t.ID); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -290,4 +303,12 @@ func (s *TemplateStore) CountDefaults(ctx context.Context, grade models.Grade) (
 		"SELECT COUNT(*) FROM interview_templates WHERE grade = ? AND is_default = 1"),
 		grade).Scan(&n)
 	return n, err
+}
+
+// trackOf — нормализация трека шаблона (пусто → backend, совместимость).
+func trackOf(track string) string {
+	if track == "" {
+		return "backend"
+	}
+	return track
 }

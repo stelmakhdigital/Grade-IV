@@ -103,6 +103,10 @@ type Session struct {
 	// дефолт voice-сервиса (ru_01 → xenia), backward-compat.
 	TTSSpeaker string
 
+	// TrackID — профиль роли собеседования (spec-18); 'backend' — дефолт
+	// совместимости. Определяет состав стадий, доску и критерии отчёта.
+	TrackID string
+
 	// ShareToken — токен публичной ссылки на отчёт (F1-export, spec-16);
 	// '' — ссылка не создана. GET /api/v1/public/reports/{token} без auth.
 	ShareToken string

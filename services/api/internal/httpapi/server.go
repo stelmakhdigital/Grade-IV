@@ -21,7 +21,9 @@ import (
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/interviewer"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/metrics"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/session"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/tracks"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/voiceorchestrator"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/voicesvc"
 )
@@ -36,7 +38,9 @@ type Server struct {
 	reports     *db.ReportStore
 	// wsTickets — одноразовые тикеты WS-upgrade (spec-14/#12: JWT в query
 	// параметре утекает в логи прокси; тикет выдаётся по REST и consumed).
-	wsTickets    *wsTicketStore
+	wsTickets *wsTicketStore
+	// tracks — треки собеседований (spec-18): файл + admin-CRUD.
+	tracks       *tracks.Store
 	templates    *db.TemplateStore // итерация A: настраиваемые планы
 	profiles     *db.ProfileStore  // итерация B: профили интервьюера
 	ttsVoices    *ttsVoiceRegistry // F1 + admin (итерация 11): реестр голосов + reload
@@ -80,6 +84,19 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		log.Warn("сид дефолтных шаблонов не удался (используется gradeProgram)", "err", err)
 	}
 	wsTickets := newWSTicketStore()
+	// spec-18: треки собеседований (config/roles.json; оверрайд
+	// ROLE_TRACKS_FILE) — до построения engine/interviewer (DI резолверов).
+	// Ошибка файла — не валит старт: in-memory дефолты (сигнатуры New не
+	// возвращают error; файл восстанавливается при первой admin-записи).
+	tracksStore, trackErr := tracks.Load(resolveConfigPath("ROLE_TRACKS_FILE", "config/roles.json"), log)
+	if trackErr != nil {
+		log.Error("tracks: файл не загружен — in-memory дефолты", "err", trackErr)
+		tracksStore, trackErr = tracks.Load("", log)
+		if trackErr != nil {
+			log.Error("tracks: дефолты не провалидировались", "err", trackErr)
+			tracksStore = tracks.NewMemory()
+		}
+	}
 	profiles := db.NewProfileStore(database, dialect)
 	// Пресеты профилей интервьюера (идемпотентно, итерация B).
 	if err := profiles.EnsurePresets(context.Background(), db.PresetProfiles()); err != nil {
@@ -88,7 +105,11 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 	engine := session.New(sessions, users, log,
 		session.WithPauseTimeout(time.Duration(cfg.PauseTimeoutS)*time.Second),
 		session.WithSessionLimit(cfg.SessionLimitS),
-		session.WithTemplates(templates))
+		session.WithTemplates(templates),
+		// spec-18: резолвер треков (программа стадий/доска/критерии).
+		session.WithTracks(func(trackID string) (*models.Track, error) {
+			return tracksStore.Get(trackID)
+		}))
 	// F2 (Итерация 10) + Admin (итерация 11): настраиваемые случайные начала
 	// (по грейду). Путь — env INTRO_OPENINGS_FILE, дефолт config/openings.json
 	// (CWD-независимо, BUG-012). Итерация 11: путь хранится для admin-записи.
@@ -108,6 +129,10 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		interviewer.WithProfiles(profiles),
 		interviewer.WithReports(reports),
 		interviewer.WithOpenings(openings),
+		// spec-18: треки для промптов и критериев отчёта.
+		interviewer.WithTrackSource(func(trackID string) (*models.Track, error) {
+			return tracksStore.Get(trackID)
+		}),
 		interviewer.WithGenderResolver(ttsVoices.GenderOf),
 		interviewer.WithVacancyResolver(func(ctx context.Context, userID int64) string {
 			if t, err := users.GetVacancy(ctx, userID); err == nil {
@@ -125,6 +150,7 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		reports:      reports,
 		templates:    templates,
 		profiles:     profiles,
+		tracks:       tracksStore,
 		wsTickets:    wsTickets,
 		ttsVoices:    ttsVoices,
 		openingsPath: openingsPath,
@@ -216,6 +242,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/public/reports/{token}", http.HandlerFunc(s.handlePublicReport))
 	// spec-14/#12: одноразовый тикет WS-upgrade (JWT больше не в query).
 	mux.Handle("GET /api/v1/ws-ticket", s.requireAuth(http.HandlerFunc(s.handleWSTicket)))
+	// spec-18: треки собеседований (кабинет) + admin-CRUD.
+	mux.Handle("GET /api/v1/tracks", s.requireAuth(http.HandlerFunc(s.handleTracksList)))
+	mux.Handle("GET /api/v1/admin/tracks", s.requireAdmin(http.HandlerFunc(s.handleAdminTracksList)))
+	mux.Handle("POST /api/v1/admin/tracks", s.requireAdmin(http.HandlerFunc(s.handleAdminTrackCreate)))
+	mux.Handle("PUT /api/v1/admin/tracks/{id}", s.requireAdmin(http.HandlerFunc(s.handleAdminTrackUpdate)))
+	mux.Handle("DELETE /api/v1/admin/tracks/{id}", s.requireAdmin(http.HandlerFunc(s.handleAdminTrackDelete)))
 
 	// Admin (итерация 11): редактирование ВСЕХ шаблонов проекта. Только is_admin
 	// (requireAdmin = requireAuth + 403 для не-admin).

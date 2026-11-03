@@ -84,7 +84,7 @@ func TestInterviewerUtterance(t *testing.T) {
 	}
 	// system-промпт: персона + грейд middle + стадия voice.
 	sys := e.mock.LastSystem()
-	for _, part := range []string{"интервьюер", "Middle", "голосовое интервью", "Стек: go"} {
+	for _, part := range []string{"интервьюер", "Middle", "голосовое интервью", "стек go"} {
 		if !strings.Contains(sys, part) {
 			t.Errorf("system-промпт без %q: %s", part, sys)
 		}

@@ -25,7 +25,7 @@ func TestParseReportJSONNewFields(t *testing.T) {
   "study_plan_2weeks": ["кэш-паттерны", "нагрузочное тестирование"],
   "grade_gap": "До senior не хватает глубины кросс-системного дизайна"
 }`
-	r, ok := parseReportJSON(content, models.GradeMiddle)
+	r, ok := parseReportJSON(content, criteriaForGrade(models.GradeMiddle), 0)
 	if !ok {
 		t.Fatal("parse: ok = false")
 	}
@@ -62,7 +62,7 @@ func TestParseReportJSONNewFields(t *testing.T) {
 func TestParseReportJSONDefaults(t *testing.T) {
 	content := `{"criteria":[{"name":"CS-фундамент (ООП, структуры данных, сложность)","weight":0.2,
 		"score":2,"comment":"слабо"}],"strengths":[],"weaknesses":[],"recommendations":[]}`
-	r, ok := parseReportJSON(content, models.GradeMiddle)
+	r, ok := parseReportJSON(content, criteriaForGrade(models.GradeMiddle), 0)
 	if !ok {
 		t.Fatal("parse: ok = false")
 	}
@@ -81,7 +81,7 @@ func TestParseReportJSONDefaults(t *testing.T) {
 func TestHeuristicReportNewFields(t *testing.T) {
 	sess := models.Session{Grade: models.GradeMiddle, Stack: models.StackGo}
 	mat := reportMaterial{Transcript: []string{"кандидат: привет"}}
-	r := heuristicReport(sess, mat)
+	r := heuristicReport(sess, mat, nil)
 	if r.Verdict != "Детальный разбор — после подключения LLM-оценщика" {
 		t.Errorf("verdict = %q", r.Verdict)
 	}

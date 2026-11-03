@@ -125,6 +125,8 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 			"ALTER TABLE reports ADD COLUMN livecode_tasks TEXT NOT NULL DEFAULT '[]'",
 			// F1-export (spec-16): публичная ссылка на отчёт.
 			"ALTER TABLE sessions ADD COLUMN share_token TEXT NOT NULL DEFAULT ''",
+			// spec-18: трек собеседования (дефолт backend — совместимость).
+			"ALTER TABLE sessions ADD COLUMN track_id TEXT NOT NULL DEFAULT 'backend'",
 		}
 	case DialectPostgres:
 		raw = schemaPostgres + "\n" + schemaPostgresProfiles
@@ -140,6 +142,8 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS livecode_tasks TEXT NOT NULL DEFAULT '[]'",
 			// F1-export (spec-16): публичная ссылка на отчёт.
 			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS share_token TEXT NOT NULL DEFAULT ''",
+			// spec-18: трек собеседования (дефолт backend — совместимость).
+			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS track_id TEXT NOT NULL DEFAULT 'backend'",
 		}
 	default:
 		return fmt.Errorf("неподдерживаемый диалект: %q", d)
@@ -180,13 +184,17 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 		if strings.HasPrefix(s, "ALTER TABLE") {
 			// SQLite: ADD COLUMN (идемпотентность — проверка колонки); Postgres: IF NOT EXISTS.
 			col := "template_id"
+			table := "sessions"
 			if strings.Contains(s, "program") {
 				col = "program"
+			}
+			if strings.Contains(s, "track") { // spec-18: track у шаблонов
+				col, table = "track", "interview_templates"
 			}
 			if d == DialectPostgres {
 				s = strings.Replace(s, "ADD COLUMN "+col, "ADD COLUMN IF NOT EXISTS "+col, 1)
 				s = strings.Replace(s, "INTEGER REFERENCES", "BIGINT REFERENCES", 1)
-			} else if columnExists(ctx, dbx, "sessions", col, d) {
+			} else if columnExists(ctx, dbx, table, col, d) {
 				continue
 			}
 		}

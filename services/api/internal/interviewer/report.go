@@ -56,6 +56,20 @@ type ProgressEntry struct {
 	CriteriaDelta map[string]float64 `json:"criteria_delta"` // {критерий: delta}
 }
 
+// criteriaFor — критерии отчёта (spec-18/Ф2): из трека, при nil — хардкод
+// по грейду (REQUIREMENTS.md §12, v1.1) для сессий без трека/движка без
+// хранилища. Веса трека нормализованы при валидации.
+func criteriaFor(sess models.Session, track *models.Track) []CriterionScore {
+	if track == nil {
+		return criteriaForGrade(sess.Grade)
+	}
+	out := make([]CriterionScore, 0, len(track.Criteria))
+	for _, c := range track.Criteria {
+		out = append(out, CriterionScore{Name: c.Name, Weight: c.Weight, Score: 3})
+	}
+	return out
+}
+
 // criteriaForGrade — критерии и веса по грейду (REQUIREMENTS.md §12, v1.1).
 func criteriaForGrade(grade models.Grade) []CriterionScore {
 	type def struct {
@@ -103,10 +117,14 @@ func criteriaForGrade(grade models.Grade) []CriterionScore {
 	return out
 }
 
-// gradeRecommendation — рекомендация погрэй (пороги §12).
-func gradeRecommendation(overall float64) string {
+// gradeRecommendation — рекомендация погрэй (пороги §12; confirm — порог
+// подтверждения, 0 → глобальный 4.2; spec-18: трек может переопределить).
+func gradeRecommendation(overall, confirm float64) string {
+	if confirm <= 0 {
+		confirm = 4.2
+	}
 	switch {
-	case overall >= 4.2:
+	case overall >= confirm:
 		return "грейд подтверждён с запасом"
 	case overall >= 3.5:
 		return "грейд подтверждён, есть точки роста"
@@ -194,8 +212,12 @@ func (i *Interviewer) reportMaterialFromEvents(ctx context.Context, sessionID in
 
 // heuristicReport — детерминированный отчёт (fallback, когда LLM не вернул JSON:
 // mock-режим, ошибки парсинга). Шкала 1–5 по данным сессии.
-func heuristicReport(sess models.Session, mat reportMaterial) ReportData {
-	crit := criteriaForGrade(sess.Grade)
+func heuristicReport(sess models.Session, mat reportMaterial, track *models.Track) ReportData {
+	crit := criteriaFor(sess, track)
+	confirm := 0.0
+	if track != nil {
+		confirm = track.GradeConfirm
+	}
 	scoreOf := func(substr string, fallback float64) float64 { return fallback }
 	_ = scoreOf
 	// Live-Code: были проходы — 4, запуски без проходов — 3, нет запусков — 2.
@@ -233,7 +255,12 @@ func heuristicReport(sess models.Session, mat reportMaterial) ReportData {
 			crit[i].Score = codeScore
 		case strings.Contains(crit[i].Name, "System Design"),
 			strings.Contains(crit[i].Name, "Кросс-системный"),
-			strings.Contains(crit[i].Name, "Архитектурные"):
+			strings.Contains(crit[i].Name, "Архитектурные"),
+			// spec-18: некодовые треки — практическая стадия доски под иным
+			// названием (схема инфраструктуры, план проекта).
+			strings.Contains(crit[i].Name, "Схем"),
+			strings.Contains(crit[i].Name, "План проекта"),
+			strings.Contains(crit[i].Name, "Декомпозиция"):
 			crit[i].Score = designScore
 		case strings.Contains(crit[i].Name, "Коммуникация"):
 			crit[i].Score = speech
@@ -250,7 +277,7 @@ func heuristicReport(sess models.Session, mat reportMaterial) ReportData {
 	overall = round2(overall)
 	report := ReportData{
 		Overall:             overall,
-		GradeRecommendation: gradeRecommendation(overall),
+		GradeRecommendation: gradeRecommendation(overall, confirm),
 		Criteria:            crit,
 		Strengths:           []string{fmt.Sprintf("активное участие в интервью (%d реплик)", len(mat.Transcript))},
 		Weaknesses:          []string{"детальный разбор — после подключения LLM-оценщика"},
@@ -392,6 +419,11 @@ func (i *Interviewer) GenerateReport(ctx context.Context, sessionID int64) (Repo
 		return ReportData{}, err
 	}
 	prev := i.previousReports(ctx, sess)
+	track := i.trackFor(sess)
+	confirm := 0.0
+	if track != nil {
+		confirm = track.GradeConfirm
+	}
 	finish := func(r ReportData) ReportData {
 		// Прогресс — детерминированно (числовые delta не доверяем LLM).
 		r.ProgressVsPrevious = buildProgress(sess, r.Criteria, prev)
@@ -416,21 +448,28 @@ func (i *Interviewer) GenerateReport(ctx context.Context, sessionID int64) (Repo
 	}
 	codeJSON, _ := json.Marshal(mat.CodeRuns)
 	designJSON, _ := json.Marshal(mat.Design)
-	critJSON, _ := json.Marshal(criteriaForGrade(sess.Grade))
+	critJSON, _ := json.Marshal(criteriaFor(sess, track))
 	prevJSON, _ := json.Marshal(prev)
 	if prevJSON == nil {
 		prevJSON = []byte("[]")
 	}
+	role := fmt.Sprintf("грейд %s", sess.Grade)
+	if sess.Stack != "" {
+		role += fmt.Sprintf(", стек %s", sess.Stack)
+	}
+	if track != nil {
+		role += fmt.Sprintf(", позиция «%s»", track.Title)
+	}
 	userMsg := fmt.Sprintf(
-		"Оцени кандидата (грейд %s, стек %s). Критерии и веса: %s. "+
-			"Транскрипт:\n%s\nКодовые запуски: %s\nСхема System Design: %s\n"+
+		"Оцени кандидата (%s). Критерии и веса: %s. "+
+			"Транскрипт:\n%s\nКодовые запуски: %s\nСхема доски: %s\n"+
 			"Прошлые интервью: %s\n"+
 			"Ответь СТРОГО JSON без пояснений: {\"criteria\":[{\"name\":...,\"weight\":...,\"score\":1-5,\"comment\":...,"+
 			"\"evidence\":[2-3 примера из сессии],\"gap_to_grade\":3-score,\"study_plan\":[2-3 пункта]}],"+
 			"\"verdict\":1-2 предложения,\"strengths\":[...],\"weaknesses\":[...],\"recommendations\":[...],"+
 			"\"study_plan_2weeks\":[10-15 пунктов, приоритет по gap × weight],"+
 			"\"grade_gap\":\"До X не хватает Y\"} — тексты на русском.",
-		sess.Grade, sess.Stack, string(critJSON), tr, string(codeJSON), string(designJSON), string(prevJSON))
+		role, string(critJSON), tr, string(codeJSON), string(designJSON), string(prevJSON))
 	sys := "Ты — технический интервьюер-оценщик. Оцениваешь кандидата по критериям с весами, " +
 		"шкала 1–5 (1 — не соответствует уровню грейда, 3 — соответствует, 5 — существенно выше). " +
 		"Тон конструктивный, для кандидата (не для HR). Каждый критерий: evidence (2–3 примера из " +
@@ -446,16 +485,18 @@ func (i *Interviewer) GenerateReport(ctx context.Context, sessionID int64) (Repo
 		MaxTokens:   2500,
 	})
 	if err == nil {
-		if r, ok := parseReportJSON(resp.Content, sess.Grade); ok {
+		if r, ok := parseReportJSON(resp.Content, criteriaFor(sess, track), confirm); ok {
 			return finish(r), nil
 		}
 	}
-	h := heuristicReport(sess, mat)
+	h := heuristicReport(sess, mat, track)
 	return finish(h), nil
 }
 
 // parseReportJSON — извлечение отчёта из ответа LLM (первая {...} блок).
-func parseReportJSON(content string, grade models.Grade) (ReportData, bool) {
+// crits — эталонные критерии (веса LLM-ответа не доверяются); confirm —
+// порог подтверждения грейда (0 — глобальный).
+func parseReportJSON(content string, crits []CriterionScore, confirm float64) (ReportData, bool) {
 	start := strings.Index(content, "{")
 	end := strings.LastIndex(content, "}")
 	if start < 0 || end <= start {
@@ -483,7 +524,7 @@ func parseReportJSON(content string, grade models.Grade) (ReportData, bool) {
 	}
 	// Веса из таблицы §12 (защита от «слитых» весов LLM), баллы — из ответа.
 	byName := map[string]float64{}
-	for _, c := range criteriaForGrade(grade) {
+	for _, c := range crits {
 		byName[c.Name] = c.Weight
 	}
 	crit := make([]CriterionScore, 0, len(raw.Criteria))
@@ -524,7 +565,7 @@ func parseReportJSON(content string, grade models.Grade) (ReportData, bool) {
 	}
 	return ReportData{
 		Overall:             overall,
-		GradeRecommendation: gradeRecommendation(overall),
+		GradeRecommendation: gradeRecommendation(overall, confirm),
 		Verdict:             raw.Verdict,
 		Criteria:            crit,
 		Strengths:           raw.Strengths,

@@ -92,7 +92,8 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Стартовое сообщение: текущая стадия.
-	s.engine.SendTo(id, map[string]any{"type": "stage", "name": snap.Stage, "task": nil})
+	// spec-18: ResendStage — та же сборка, что и в Transition (board для design).
+	s.engine.ResendStage(id)
 	s.log.Info("ws: клиент подключился", "session", id, "user", userID, "stage", snap.Stage)
 
 	vadCfg := vad.DefaultConfig()
@@ -567,8 +568,8 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage, ws *wsSession) {
 		case models.StageLiveCode:
 			s.enterLiveCode(ctx, id, ws)
 		case models.StageDesign:
-			text, err := s.interviewer.OnStageChanged(ctx, id,
-				"Кандидат переходит к System Design. Представь формат стадии и задай первую задачу на проектирование.")
+			// spec-18: текст входа — по треку (заголовок доски, кейс грейда).
+			text, err := s.interviewer.OnStageChanged(ctx, id, s.designEntryNote(id))
 			s.speak(ctx, id, ws, text, err) // озвучка формата стадии (TTS)
 		}
 
@@ -858,4 +859,25 @@ func pcm16RMS(pcm []byte) int {
 		return 0
 	}
 	return int(math.Sqrt(sum / float64(n)))
+}
+
+// designEntryNote — контекст входа на стадию доски для LLM (spec-18): трек
+// (заголовок + кейс грейда) или legacy-текст для backend-хардкода.
+func (s *Server) designEntryNote(sessionID int64) string {
+	snap, err := s.engine.Snapshot(sessionID)
+	if err != nil || snap == nil {
+		return "Кандидат переходит к System Design. Представь формат стадии и задай первую задачу на проектирование."
+	}
+	t, terr := s.tracks.Get(snap.TrackID)
+	if terr != nil || t == nil {
+		return "Кандидат переходит к System Design. Представь формат стадии и задай первую задачу на проектирование."
+	}
+	note := "Кандидат переходит к стадии доски «" + t.Board.Title + "». Представь формат стадии"
+	if c := t.Board.CaseForGrade(snap.Grade); c != nil {
+		note += " и объяви кейс: «" + c.Title + "». " + c.Statement
+	} else {
+		note += " и задай первую задачу."
+	}
+	note += " Попроси собирать схему на доске и объяснять решения вслух."
+	return note
 }

@@ -37,6 +37,7 @@ type Snapshot struct {
 	UserID         int64
 	Grade          models.Grade
 	Stack          models.Stack
+	TrackID        string // spec-18: профиль роли ('backend' — дефолт)
 	Stage          models.Stage
 	Status         models.Status
 	DurationLimitS int
@@ -52,6 +53,7 @@ type runtime struct {
 	userID   int64
 	grade    models.Grade
 	stack    models.Stack
+	track    *models.Track // spec-18: nil — движок без хранилища треков (fallback на грейд)
 	limitS   int
 	stage    models.Stage
 	status   models.Status
@@ -70,6 +72,7 @@ type Engine struct {
 	store     *db.SessionStore
 	users     *db.UserStore
 	templates *db.TemplateStore // итерация A: настраиваемые планы (может быть nil)
+	tracks    TrackResolver     // spec-18: источник треков (может быть nil)
 	log       *slog.Logger
 
 	now           func() time.Time
@@ -107,6 +110,30 @@ func WithPauseTimeout(d time.Duration) Opt {
 // При Create с templateID≠0 сессия получает программу шаблона; при templateID=0
 // — дефолтный шаблон грейда (если хранилище задано).
 func WithTemplates(ts *db.TemplateStore) Opt { return func(e *Engine) { e.templates = ts } }
+
+// TrackResolver — источник треков собеседований (spec-18): trackID → трек.
+// nil — все сессии считаются backend-треком (совместимость с тестами).
+type TrackResolver func(trackID string) (*models.Track, error)
+
+// WithTracks — резолвер треков (spec-18).
+func WithTracks(r TrackResolver) Opt { return func(e *Engine) { e.tracks = r } }
+
+// boardStagePayload — payload доски для stage-сообщения (spec-18/Ф3/Ф5).
+// Чек-лист кейса кандидату не отдаётся (это рубрика ревью, не задание).
+func boardStagePayload(t *models.Track, g models.Grade) map[string]any {
+	if t == nil {
+		return nil
+	}
+	groups := make([]map[string]any, 0, len(t.Board.Groups))
+	for _, gr := range t.Board.Groups {
+		groups = append(groups, map[string]any{"title": gr.Title, "names": gr.Names, "color": gr.Color})
+	}
+	p := map[string]any{"title": t.Board.Title, "groups": groups}
+	if c := t.Board.CaseForGrade(g); c != nil {
+		p["case"] = map[string]any{"title": c.Title, "statement": c.Statement}
+	}
+	return p
+}
 
 // New создаёт движок.
 func New(store *db.SessionStore, users *db.UserStore, log *slog.Logger, opts ...Opt) *Engine {
@@ -216,6 +243,7 @@ func (e *Engine) Snapshot(id int64) (*Snapshot, error) {
 	}
 	return &Snapshot{
 		ID: m.ID, UserID: m.UserID, Grade: m.Grade, Stack: m.Stack,
+		TrackID: m.TrackID,
 		Stage: m.Stage, Status: m.Status, DurationLimitS: m.DurationLimitS,
 		ActiveSeconds: m.ActiveSeconds, TimeLeftS: 0,
 		StartedAt: m.StartedAt, FinishedAt: m.FinishedAt, PausedAt: m.PausedAt,
@@ -228,6 +256,7 @@ func (e *Engine) snapshotLocked(rt *runtime) (*Snapshot, error) {
 	return &Snapshot{
 		Grade:          rt.grade,
 		Stack:          rt.stack,
+		TrackID:        models.DefaultTrackIDIf(rt.track),
 		Stage:          rt.stage,
 		Status:         rt.status,
 		DurationLimitS: rt.limitS,
