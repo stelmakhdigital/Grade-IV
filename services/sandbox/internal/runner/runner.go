@@ -455,6 +455,14 @@ func (r *Runner) runDocker(ctx context.Context, stack, workdir string) ([]byte, 
 	cidPath := cidFile.Name()
 	cidFile.Close()
 	defer func() { _ = os.Remove(cidPath) }()
+	// BUG-20261103-022: docker создаёт cidfile сам; если файл УЖЕ существует
+	// (пустой тем более), современный CLI (27+) отказывает: «container ID file
+	// found…» exit 125 — в docker-режиме падал КАЖДЫЙ запуск (на старом
+	// docker 20.x пустой файл проходил, поэтому проба T-20261009133832 была
+	// зелёной). Файл нужен только как уникальное имя — удаляем до запуска.
+	if err := os.Remove(cidPath); err != nil {
+		return nil, -1, fmt.Errorf("cidfile: %w", err)
+	}
 	args := []string{
 		"run", "--rm",
 		"--network=none",
