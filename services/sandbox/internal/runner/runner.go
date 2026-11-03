@@ -477,7 +477,11 @@ func (r *Runner) runDocker(ctx context.Context, stack, workdir string) ([]byte, 
 		"--memory=512m",
 		"--pids-limit=128",
 		"--read-only",
-		"--tmpfs", "/tmp:size=128m",
+		// BUG-20261103-024: docker --tmpfs по умолчанию noexec — собранный
+		// go тестовый бинарник на /tmp не исполнялся («fork/exec … permission
+		// denied»). Явно разрешаем exec: контейнер одноразовый, за
+		// pids/mem/network-лимитами.
+		"--tmpfs", "/tmp:size=128m,exec",
 		"--user", userOpt,
 		"--cidfile", cidPath,
 		// spec-14/C6: минимальные привилегии контейнера.
