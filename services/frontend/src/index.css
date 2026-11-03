@@ -616,6 +616,29 @@ p {
   margin-top: 12px;
 }
 
+/* Текстовый ввод реплик на голосовой стадии (spec-18 #5): fallback
+   микрофона (шумная среда / нет доступа к устройству). */
+.text-answer-box {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 1 1 220px;
+  min-width: 200px;
+}
+.text-answer {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid #2a3140;
+  border-radius: 8px;
+  background: #0b0e14;
+  color: #d6dbe5;
+  font: inherit;
+}
+.text-answer::placeholder {
+  color: #6b7280;
+}
+
 /* Навигация между стадиями (кнопки перехода) в панелях livecode/design. */
 .stage-nav {
   display: flex;

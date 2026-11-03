@@ -415,6 +415,16 @@ export function useVoiceSession(id: number) {
     sendBufferedRecording();
   }, [sendBufferedRecording]);
 
+  // Текстовый ввод реплик на voice-стадии (spec-18 #5, fallback при недоступном
+  // микрофоне: шумная среда/нет доступа): тот же канал «utterance», что и у
+  // записи — сервер валидирует непустоту и busy-гейтом отбрасывает ход при
+  // занятости. false — WS закрыт (текст остаётся в поле, отправка повторная).
+  const sendTextUtterance = useCallback((text: string): boolean => {
+    const trimmed = text.trim();
+    if (trimmed === '') return false;
+    return wsRef.current?.sendUi('utterance', { text: trimmed }) ?? false;
+  }, []);
+
   const toggleMic = async () => {
     const micCap = micRef.current;
     if (micCap === null) return;
@@ -608,6 +618,7 @@ export function useVoiceSession(id: number) {
     finishRecording,
     sendBufferedRecording,
     clearRecording,
+    sendTextUtterance,
   };
 }
 

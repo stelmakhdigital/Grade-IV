@@ -61,6 +61,7 @@ export function SessionView({ id }: { id: number }) {
     recNote,
     recTotalSpeechMs,
     clearRecording,
+    sendTextUtterance,
   } = useVoiceSession(id);
 
   // Окно записи (FR-S8): «мм:сс» — тик каждую секунду, пока запись активна.
@@ -72,6 +73,18 @@ export function SessionView({ id }: { id: number }) {
   }, [recActive]);
   const recText = mergeRecording(recSegs, recPartial);
   const waitingForAI = live && !paused && speaking && mic !== 'running' && mic !== 'muted';
+
+  // Текстовый ввод реплик (spec-18 #5, fallback микрофона): отправка — кнопкой
+  // или Enter через существующий канал 'utterance'. Очищаем поле только при
+  // УСПЕШНОЙ отправке — при обрыве WS текст остаётся (повторная отправка,
+  // как у D3 с наговоренным буфером). Ход занят (waitingForAI) — кнопка
+  // заблокирована; повторная реплика при занятом ходе всё равно
+  // отбрасывается busy-гейтом сервера.
+  const [typedAnswer, setTypedAnswer] = useState('');
+  const submitTypedAnswer = () => {
+    if (typedAnswer.trim() === '') return;
+    if (sendTextUtterance(typedAnswer)) setTypedAnswer('');
+  };
 
   // spec-14/D14: завершение — необратимое (стоп интервью + генерация отчёта)
   // — подтверждаем двойным кликом (окно 5 с), без window.confirm.
@@ -360,6 +373,41 @@ export function SessionView({ id }: { id: number }) {
                   ? 'Ожидание ИИ…'
                   : 'Включить микрофон'}
             </button>
+            {/* Текстовый ввод реплик (spec-18 #5): fallback микрофона —
+                шумная среда / нет доступа к устройству. Канал — тот же
+                'utterance', что и у записи. Скрыт на паузе (реплики не
+                обрабатываются, FR-S7) и не на голосовой стадии. */}
+            {!paused && (
+              <span className="text-answer-box">
+                <input
+                  type="text"
+                  className="text-answer"
+                  placeholder="Ответ текстом (необязательно)"
+                  value={typedAnswer}
+                  onChange={(e) => setTypedAnswer(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      submitTypedAnswer();
+                    }
+                  }}
+                  aria-label="Ответ текстом"
+                  data-testid="text-answer"
+                />
+                <button
+                  type="button"
+                  className="btn ghost small"
+                  onClick={submitTypedAnswer}
+                  disabled={
+                    waitingForAI || wsState !== 'open' || typedAnswer.trim() === ''
+                  }
+                  title={waitingForAI ? 'Дождитесь ответа ИИ-интервьюера' : undefined}
+                  data-testid="text-answer-send"
+                >
+                  Отправить
+                </button>
+              </span>
+            )}
             {stage === 'voice' && (
               <button type="button" className="btn ghost" onClick={() => onStageAction('livecode')}>
                 К Live-Code
