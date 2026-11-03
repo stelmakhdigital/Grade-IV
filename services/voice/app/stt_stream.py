@@ -328,6 +328,14 @@ def register_stt_stream(app, stt: STTProvider, vad, max_speech_s: float | None =
     ``max_speech_s`` — лимит непрерывной речи в реплике (сек). None → VAD_MAX_SPEECH_S
     (из env ``VAD_MAX_SPEECH_S`` или константы). При превышении реплика режется
     на сегменты, каждый — свой final.
+
+    Состояние стрима полностью per-connection: VAD-машина, pre-roll, буфер
+    реплики, speech-флаги, partial-воркер — локальные переменные обработчика WS,
+    чистятся в finally при любом завершении. Реконнект api↔voice создаёт новое
+    соединение с чистым состоянием — сброс (reset-endpoint) не требуется
+    (spec-18 #11, решение: endpoint не добавляем — был бы мёртвый код). Общее
+    между соединениями только немутабельное: модель VAD (onnx-сессия read-only,
+    свой контекст на clone) и однопоточный STT_EXECUTOR (очередь вызовов).
     """
     if max_speech_s is None:
         import os
