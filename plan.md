@@ -205,3 +205,43 @@ sysadmin-палитрой и кейсом «Сеть нового офиса» �
 и сеть чистые. Скриншоты t1–t4, f03/f06.
 **Регрессия:** go test ./... ok (httpapi 64с + новые трек-тесты), vitest 127 ok,
 tsc ok. API E2E: TestTracksListAndCreateSession/TestAdminTrackCRUD.
+
+## 12. Итерация 19 — shell-практика за sandbox, визуальная палитра, вычитка программ (spec-19)
+
+**Shell-задания сисадмина (за docker):**
+- sandbox: третий стек `shell` — subprocess-режим bash с group-kill по таймауту
+  (Setpgid+SIGKILL гасит fork-bomb с детьми; ulimit -u сознательно не ставится —
+  per-uid NPROC ломал бы сервисы того же uid), prod-режим — docker debian:12-slim
+  с лимитами ADR-003 (--network=none --pids-limit=128); чек-скрипты банка
+  (check.sh) доверенные, подмена из запроса игнорируется.
+- Банк: shell-sum-avg (junior, сумма/среднее по stdin, чистый bash) и
+  shell-top-ip (middle, топ-3 IP из access.log, grep/sort/uniq — без awk —
+  совпадает с образом debian-slim). Чеки проверены эталонными решениями.
+- Треки: `Track.Shell` (coding/shell взаимоисключающие, Validate), sysadmin
+  теперь голос → практика(bash) → доска → отчёт (config/roles.json + дефолты);
+  `trackView.shell`, `trackStageMeta.shell`.
+- api: livecode-стадия для пустого stack берёт стек из трека (выбор задач
+  `?stack=shell`, runs-прокси stack=shell); промпты: «Стадия: практика — bash»,
+  анонс следующей стадии в голосе; EnsureDefaults доезжает вычитку программ
+  по контенту (сравнение блоков дефолт-шаблона, кастомные не трогаются).
+- Вычитка голосовых программ: PM junior 8→6 вопросов, sysadmin middle 8→6
+  (в рамках целей 4–6/6–8), правки формулировок.
+
+**Фронтенд:**
+- стек `shell` в редакторе: solution.sh, Monaco shell-режим, дефолт-заготовка;
+  пустой stack сессии на livecode = shell-трек; кнопка «К практике (bash)»
+  вместо «К Live-Code», с доски — возврат к практике (как у кодовых).
+- Админ-редактор: чекбокс «Практика: bash (shell)» (взаимоисключающ с кодовой),
+  живой превью палитры чипами с цветом группы (как на доске кандидата),
+  порядок групп ↑/↓; бейдж «практика» в списке треков.
+
+**E2E (playwright):** sysadmin middle сквозняком: голос → «К практике (bash)» →
+задача «Топ-3 IP из лога» → решение в Monaco → прогон → «✓ check.sh OK» → доска
+(sysadmin-палитра, кейс «Сеть нового офиса») → ревью → отчёт с трек-критериями
+30/25/20/15/10 и оценкой «Соответствует middle»; консоль и сеть чистые.
+backend-трек регрессией — без изменений. Админ: превью палитры и shell-чекбокс
+скриншотами a1/a2 (QA-админ-флаг поднят и снят обратно).
+
+**Регрессия:** go test ./... ok (новые: пробы shell проход/провал/fork-bomb/
+docker-skip, TestValidateShellExclusive, TestStages на 4 стадии), vitest
+129 ok (палитра-превью, shell-payload), tsc ok.
