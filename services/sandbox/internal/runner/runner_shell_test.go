@@ -119,11 +119,11 @@ func countSleepProcs(t *testing.T) int {
 	return n
 }
 
-// TestShellDockerForkBomb — spec-20: бесконечная fork-bomb в решении
-// гасится контейнером: --pids-limit=128 не даёт расти дереву процессов,
-// таймаут раннера убивает контейнер по cidfile (docker kill), --rm зачищает
-// остатки. Ключевые assertions: раннер завершился за ограниченное время,
-// timeout=true, после прогона не осталось контейнеров нашего образа.
+// TestShellDockerForkBomb — spec-20: fork-bomb в решении гасится
+// контейнером: --pids-limit=128 ограничивает дерево (EAGAIN схлопывает
+// бомбу; вечный спин гасится таймаутом раннера + docker kill по cidfile),
+// --rm зачищает остатки. Assertions: раннер завершился за ограниченное
+// время, после прогона не осталось контейнеров нашего образа.
 func TestShellDockerForkBomb(t *testing.T) {
 	if testing.Short() {
 		t.Skip("docker-проба (не -short)")
@@ -148,11 +148,13 @@ func TestShellDockerForkBomb(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !res.Timeout {
-		t.Fatalf("форк-бомба в контейнере не дала timeout: %+v (%v)", res, elapsed)
-	}
+	// За --pids-limit=128 бомба НЕ обязана давать timeout: fork с EAGAIN
+	// схлопывает дерево быстро (проба 2026-11-03: ExitCode 0 за ~7 c — дети,
+	// не поместившиеся в лимит, умирают, решение завершается). Контракт
+	// защиты: раннер завершился за ограниченное время (не висит) и контейнер
+	// зачищен; вечный спин (например, retry-fork) гасится таймаутом+kill.
 	if elapsed > 40*time.Second {
-		t.Fatalf("контейнер не был убит вовремя: %v", elapsed)
+		t.Fatalf("раннер не завершился вовремя: %v (результат %+v)", elapsed, res)
 	}
 	time.Sleep(2 * time.Second) // время на --rm и зачистку
 	out, _ := exec.Command("docker", "ps", "-a", "--filter", "ancestor=debian:12-slim", "--format", "{{.ID}}").CombinedOutput()

@@ -435,10 +435,17 @@ func (r *Runner) runDocker(ctx context.Context, stack, workdir string) ([]byte, 
 	// ENV для /tmp (rootfs read-only): HOME + кэши Go. spec-14/C6: GOPROXY=off —
 	// с --network=none попытка скачать зависимости даёт честную ошибку вместо
 	// сетевого зависания dial.
+	// BUG-20261103-023: GOCACHE переехал с /tmp (tmpfs 128m) на bind-mount
+	// workdir: холодная сборка нет-стека (net + crypto, ~150 МБ кэша) влезала
+	// в tmpfs только на старых версиях образа golang:1.24 — на свежем linker
+	// падал «mapping output file failed: no space left on device». Bind-mount
+	// — дисковый (не RAM), зачищается с workdir после прогона. CGO_ENABLED=0 —
+	// сборка без gcc (в 2-3 раза меньше кэш; cgo-задачи не поддерживались
+	// и раньше: GOPROXY=off).
 	env := []string{
 		"HOME=/tmp", "TMPDIR=/tmp",
-		"GOCACHE=/tmp/gocache", "GOPATH=/tmp/gopath", "GOTOOLCHAIN=local", "GOFLAGS=-mod=mod",
-		"GOPROXY=off",
+		"GOCACHE=/work/.gocache", "GOPATH=/tmp/gopath", "GOTOOLCHAIN=local", "GOFLAGS=-mod=mod",
+		"GOPROXY=off", "CGO_ENABLED=0",
 	}
 	// spec-14/C1: раньше --user 1000:1000 при uid хоста ≠ 1000 не мог ни читать,
 	// ни писать /work (MkdirTemp — 0700, владелец — uid хоста) → КАЖДЫЙ run падал
