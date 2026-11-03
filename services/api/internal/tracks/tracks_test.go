@@ -12,10 +12,10 @@ import (
 
 func validTrack() models.Track {
 	return models.Track{
-		ID:      "qa",
-		Title:   "QA-инженер",
-		Coding:  false,
-		Grades:  []models.Grade{models.GradeJunior, models.GradeMiddle},
+		ID:     "qa",
+		Title:  "QA-инженер",
+		Coding: false,
+		Grades: []models.Grade{models.GradeJunior, models.GradeMiddle},
 		Board: models.BoardConfig{
 			Title:        "Схема тест-плана",
 			ReviewPrompt: "Оцени полноту покрытия.",

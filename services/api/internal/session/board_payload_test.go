@@ -13,7 +13,7 @@ func TestBoardStagePayload(t *testing.T) {
 		t.Fatalf("nil-трек → nil payload, получено %v", b)
 	}
 	sysadmin := models.Track{
-		ID:    "sysadmin",
+		ID: "sysadmin",
 		Board: models.BoardConfig{
 			Title: "Схема инфраструктуры",
 			Groups: []models.BlockGroup{

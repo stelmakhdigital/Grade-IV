@@ -256,7 +256,7 @@ func (e *Engine) Snapshot(id int64) (*Snapshot, error) {
 	return &Snapshot{
 		ID: m.ID, UserID: m.UserID, Grade: m.Grade, Stack: m.Stack,
 		TrackID: m.TrackID,
-		Stage: m.Stage, Status: m.Status, DurationLimitS: m.DurationLimitS,
+		Stage:   m.Stage, Status: m.Status, DurationLimitS: m.DurationLimitS,
 		ActiveSeconds: m.ActiveSeconds, TimeLeftS: 0,
 		StartedAt: m.StartedAt, FinishedAt: m.FinishedAt, PausedAt: m.PausedAt,
 	}, nil
