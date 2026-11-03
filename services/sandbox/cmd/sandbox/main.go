@@ -176,6 +176,25 @@ func main() {
 		}
 	}
 
+	// spec-20: docker-режим — прогрев образов стека в фоне (холодный pull
+	// в момент первого запуска кандидата давал минуту ожидания; pull идёт
+	// параллельно с поднятием HTTP). Best-effort: провал — только WARN,
+	// run сам сделает pull при отсутствии. SANDBOX_WARMUP=0 — выключить
+	// (например, на хосте без сети до registry).
+	if mode == "docker" && getenv("SANDBOX_WARMUP", "1") == "1" {
+		for _, stack := range []string{"go", "python", "shell"} {
+			go func(stack string) {
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+				defer cancel()
+				if err := rn.WarmupImage(ctx, stack); err != nil {
+					logger.Warn("warmup: образ не затянут (run сделает pull сам)", "stack", stack, "err", err)
+					return
+				}
+				logger.Info("warmup: образ готов", "stack", stack)
+			}(stack)
+		}
+	}
+
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           withLogging(buildMux(mode, bank, rn, logger), logger),

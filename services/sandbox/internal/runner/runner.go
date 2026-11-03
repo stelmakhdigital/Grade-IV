@@ -140,6 +140,31 @@ func New(cfg Config) *Runner {
 // Mode — активный режим.
 func (r *Runner) Mode() string { return r.cfg.Mode }
 
+// WarmupImage — предзатягивание образа стека в docker-режиме (spec-20):
+// первый запуск задачи с холодным образом тянет pull на время кандидата
+// (debian-slim ~30 МБ, golang ~350 МБ) — «первый кандидат ждёт минуту».
+// Прогрев на старте сервиса (асинхронно) убирает холодный pull. Возвращает
+// ошибку по-образу (run сам сделает pull при отсутствии — прогрев best-effort).
+func (r *Runner) WarmupImage(ctx context.Context, stack string) error {
+	if r.cfg.Mode != "docker" {
+		return nil
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		return ErrNoDocker
+	}
+	img := r.cfg.Images[stack]
+	if img == "" {
+		return nil
+	}
+	pullCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(pullCtx, "docker", "pull", "--quiet", img)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("pull %s: %w: %s", img, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // Run выполняет тесты файлов задачи (action "test").
 func (r *Runner) Run(ctx context.Context, stack string, files map[string]string) (Result, error) {
 	switch stack {
