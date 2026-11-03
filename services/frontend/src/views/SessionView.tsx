@@ -37,6 +37,7 @@ export function SessionView({ id }: { id: number }) {
     runReview,
     designReview,
     board,
+    trackMeta,
     task,
     tasks,
     lastAiText,
@@ -137,7 +138,8 @@ export function SessionView({ id }: { id: number }) {
       <header className="header session-head">
         <div>
           <h1>
-            Интервью: {session.grade} / {session.stack}
+            Интервью: {session.grade}
+            {session.stack ? ` / ${session.stack}` : ''}
           </h1>
           <p className="muted small">
             {user?.email} · <span className={`status ${paused ? 'paused' : session.status}`}>{statusLabel(paused ? 'paused' : session.status)}</span>
@@ -273,14 +275,16 @@ export function SessionView({ id }: { id: number }) {
               {/* Возврат на предыдущую стадию разрешён (движок); холст при возврате
                   восстанавливается из сохранённого whiteboard. */}
               <div className="stage-nav" data-testid="stage-nav">
-                <button
-                  type="button"
-                  className="btn ghost"
-                  onClick={() => onStageAction('livecode')}
-                  data-testid="go-livecode-back"
-                >
-                  К Live-Code (назад)
-                </button>
+                {((trackMeta !== null && trackMeta.coding) || trackMeta === null) && (
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    onClick={() => onStageAction('livecode')}
+                    data-testid="go-livecode-back"
+                  >
+                    К Live-Code (назад)
+                  </button>
+                )}
               </div>
             </>
           ) : (
@@ -409,9 +413,15 @@ export function SessionView({ id }: { id: number }) {
                 </button>
               </span>
             )}
-            {stage === 'voice' && (
+            {stage === 'voice' && (trackMeta?.coding ?? true) && (
               <button type="button" className="btn ghost" onClick={() => onStageAction('livecode')}>
                 К Live-Code
+              </button>
+            )}
+            {/* spec-18: некодовый трек — из голосовой сразу на доску. */}
+            {stage === 'voice' && trackMeta !== null && !trackMeta.coding && (
+              <button type="button" className="btn ghost" onClick={() => onStageAction('design')} data-testid="go-design-voice">
+                К доске
               </button>
             )}
             {stage === 'livecode' && (

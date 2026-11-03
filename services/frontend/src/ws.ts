@@ -9,6 +9,13 @@ import { parseTtsFrame } from './audio/resample';
 
 /** Конфиг доски в stage-сообщении (spec-18/Ф3/Ф5). Чек-лист кейса сервер не
  * отдаёт — это рубрика ревью. */
+/** Метаданные трека в stage-сообщении (spec-18): UI строит навигацию стадий. */
+export interface TrackStageMeta {
+  id: string;
+  title: string;
+  coding: boolean;
+}
+
 export interface BoardStageInfo {
   title: string;
   groups: { title: string; names: string[]; color?: string }[];
@@ -30,6 +37,7 @@ export type WsMessage =
       task?: StageTask | null;
       tasks?: StageTask[];
       board?: BoardStageInfo | null;
+      track?: TrackStageMeta | null;
     }
   | { type: 'timer'; remaining_s: number }
   | { type: 'ai_text'; text: string }

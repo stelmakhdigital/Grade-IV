@@ -15,7 +15,7 @@ import {
 } from '../api';
 import { MicCapture, type MicDebugInfo, type MicState } from '../audio/mic';
 import { PcmPlayer } from '../audio/player';
-import { SessionWS, type BoardStageInfo, type StageTask, type WsMessage } from '../ws';
+import { SessionWS, type BoardStageInfo, type StageTask, type TrackStageMeta, type WsMessage } from '../ws';
 import {
   MIN_SPEECH_MS,
   isInsufficientSpeech,
@@ -47,6 +47,8 @@ export function useVoiceSession(id: number) {
   const [task, setTask] = useState<StageTask | null>(null);
   // Конфиг доски (spec-18/Ф3): палитра/заголовок/кейс из stage-сообщения трека.
   const [board, setBoard] = useState<BoardStageInfo | null>(null);
+  // Метаданные трека (spec-18): некодовый трек — голос → доска, без Live-Code.
+  const [trackMeta, setTrackMeta] = useState<TrackStageMeta | null>(null);
   // Задачи стадии Live-Code (spec-13B T2): tasks из stage-сообщения; task = tasks[0] (совместимость).
   const [tasks, setTasks] = useState<StageTask[]>([]);
   const [remainingS, setRemainingS] = useState<number | null>(null);
@@ -168,6 +170,7 @@ export function useVoiceSession(id: number) {
             setStage(m.name);
             stageRef.current = m.name;
             setBoard(m.board ?? null);
+            setTrackMeta(m.track ?? null);
             {
               const list = m.tasks ?? (m.task ? [m.task] : []);
               setTasks(list);
@@ -592,6 +595,7 @@ export function useVoiceSession(id: number) {
     runReview,
     designReview,
     board,
+    trackMeta,
     task,
     tasks,
     remainingS,

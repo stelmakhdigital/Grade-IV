@@ -198,7 +198,7 @@ export function DesignPanel({
                 type="button"
                 className="palette-item"
                 onClick={() => placeBlock(name)}
-                data-testid={`block-${name.toLowerCase()}`}
+                data-testid={`block-${name.toLowerCase().replace(/\s+/g, '-')}`}
                 title={canvasReady ? undefined : 'Холст загружается — блок будет поставлен автоматически'}
               >
                 <span
