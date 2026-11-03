@@ -37,6 +37,7 @@ const TRACKS = [
     id: 'sysadmin',
     title: 'Сисадмин',
     coding: false,
+    shell: true,
     grades: ['junior', 'middle'],
     board: { title: 'Схема сети', review_prompt: 'Оцени полноту схемы', groups: [] },
     criteria: [{ name: 'Порядок', weight: 1 }],
@@ -99,6 +100,7 @@ describe('AdminView: треки собеседований (spec-18/Ф4)', () =>
     expect(screen.getByText('Сисадмин')).toBeInTheDocument();
     expect(screen.getByText('кодовый')).toBeInTheDocument();
     expect(screen.getByText('некодовый')).toBeInTheDocument();
+    expect(screen.getByText('практика')).toBeInTheDocument();
     // GET /admin/tracks вызван
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/admin/tracks'))).toBe(true);
   });
@@ -123,6 +125,47 @@ describe('AdminView: треки собеседований (spec-18/Ф4)', () =>
     expect(body.track.id).toBe('data-analyst');
     expect(body.track.title).toBe('Аналитик данных');
     expect(body.track.coding).toBe(true);
+  });
+
+  it('палитра-превью: чипы групп как на доске кандидата', async () => {
+    const fetchMock = mockApi();
+    renderAdmin(fetchMock);
+    const user = userEvent.setup();
+    await screen.findByText('admin@example.com');
+    await user.click(screen.getByRole('tab', { name: 'Треки собеседований' }));
+    await screen.findByTestId('admin-tracks');
+    await user.selectOptions(screen.getByTestId('admin-track-select'), 'backend');
+    const preview = await screen.findByTestId('admin-track-palette-preview');
+    expect(preview).toBeInTheDocument();
+    expect(screen.getByText('Трафик')).toBeInTheDocument();
+    expect(screen.getByText('Клиент')).toBeInTheDocument();
+    expect(screen.getByText('Load Balancer')).toBeInTheDocument();
+  });
+
+  it('shell-практика: чекбокс выключает coding, в payload уходит shell:true', async () => {
+    const fetchMock = mockApi();
+    renderAdmin(fetchMock);
+    const user = userEvent.setup();
+    await screen.findByText('admin@example.com');
+    await user.click(screen.getByRole('tab', { name: 'Треки собеседований' }));
+    await screen.findByTestId('admin-tracks');
+
+    await user.click(screen.getByTestId('admin-track-new'));
+    await user.type(screen.getByTestId('admin-track-title'), 'Сисадмин сети');
+    await user.type(screen.getByLabelText('ID'), 'netops');
+    const shell = screen.getByTestId('admin-track-shell') as HTMLInputElement;
+    await user.click(shell);
+    // coding выключился автоматически (взаимоисключающие)
+    expect(shell.checked).toBe(true);
+    const coding = shell.closest('.start-form')?.querySelector('input[type=checkbox]') as HTMLInputElement;
+    expect(coding.checked).toBe(false);
+    await user.click(screen.getByTestId('admin-track-save'));
+    await waitForPost(fetchMock);
+    const post = fetchMock.mock.calls.find((c) => c[1]?.method === 'POST' && String(c[0]).endsWith('/admin/tracks'));
+    const body = JSON.parse((post as unknown as [string, RequestInit])[1].body as string);
+    expect(body.track.shell).toBe(true);
+    expect(body.track.coding).toBe(false);
+    expect(body.track.stacks).toEqual([]);
   });
 
   it('удаление используемого трека: 409 → сообщение «используется сессиями»', async () => {

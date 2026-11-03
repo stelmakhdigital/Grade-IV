@@ -14,6 +14,8 @@ export interface TrackStageMeta {
   id: string;
   title: string;
   coding: boolean;
+  /** Практика: bash (spec-19, сисадмин) — livecode-стадия со стеком shell. */
+  shell?: boolean;
 }
 
 export interface BoardStageInfo {

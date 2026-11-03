@@ -18,6 +18,7 @@ import { parseGoTestJSON } from './goTestDigest';
 export const MAIN_FILE: Record<Stack, string> = {
   go: 'main.go',
   python: 'main.py',
+  shell: 'solution.sh',
 };
 
 export const DEFAULT_CODE: Record<Stack, string> = {
@@ -38,11 +39,15 @@ func main() {
 if __name__ == "__main__":
     main()
 `,
+  shell: `#!/usr/bin/env bash
+# ваше решение (проверка запускает ваш скрипт и ассертит вывод)
+`,
 };
 
 export const LANGUAGE_BY_STACK: Record<Stack, string> = {
   go: 'go',
   python: 'python',
+  shell: 'shell',
 };
 
 /**
@@ -95,7 +100,7 @@ export interface LiveCodePanelProps {
 /** Решение кандидата — файл-«solution», если он есть в задаче, иначе main. */
 export function solutionFile(stack: Stack, files?: Record<string, string> | null): string {
   if (files !== undefined && files !== null) {
-    const sol = Object.keys(files).find((n) => n.startsWith('solution') && n.endsWith('.go') || (n.startsWith('solution') && n.endsWith('.py')));
+    const sol = Object.keys(files).find((n) => n.startsWith('solution') && (n.endsWith('.go') || n.endsWith('.py') || n.endsWith('.sh')));
     if (sol !== undefined) return sol;
     const main = Object.keys(files).find((n) => n === MAIN_FILE[stack]);
     if (main !== undefined) return main;

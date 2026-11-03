@@ -239,9 +239,10 @@ export function SessionView({ id }: { id: number }) {
           {stage === 'livecode' && session !== null ? (
             <>
               <Suspense fallback={<PanelLoading />}>
+                {/* spec-19: пустой stack сессии на livecode-стадии — shell-трек (сисадмин). */}
                 <LiveCodePanel
                   sessionId={id}
-                  stack={session.stack}
+                  stack={session.stack || 'shell'}
                   tasks={tasks}
                   taskId={task?.id}
                   taskTitle={task?.title}
@@ -418,8 +419,14 @@ export function SessionView({ id }: { id: number }) {
                 К Live-Code
               </button>
             )}
-            {/* spec-18: некодовый трек — из голосовой сразу на доску. */}
-            {stage === 'voice' && trackMeta != null && !trackMeta.coding && (
+            {/* spec-19: shell-трек — из голосовой на практику (bash). */}
+            {stage === 'voice' && trackMeta != null && trackMeta.shell === true && (
+              <button type="button" className="btn ghost" onClick={() => onStageAction('livecode')} data-testid="go-livecode-voice">
+                К практике (bash)
+              </button>
+            )}
+            {/* spec-18: некодовый трек без практики — из голосовой сразу на доску. */}
+            {stage === 'voice' && trackMeta != null && !trackMeta.coding && trackMeta.shell !== true && (
               <button type="button" className="btn ghost" onClick={() => onStageAction('design')} data-testid="go-design-voice">
                 К доске
               </button>

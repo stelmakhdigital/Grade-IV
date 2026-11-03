@@ -952,6 +952,51 @@ p {
 .palette-item:hover {
   border-color: #58a6ff;
 }
+/* spec-19: превью палитры в админ-редакторе трека — как на доске кандидата. */
+.palette-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px dashed var(--border, #333);
+  border-radius: 8px;
+  min-height: 44px;
+}
+.palette-preview-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.palette-preview-title {
+  flex: none;
+  min-width: 148px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted, #9aa4b2);
+}
+.palette-preview-chips {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.palette-preview-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #333);
+  background: var(--panel, #1c1e22);
+  font-size: 12px;
+}
+.palette-preview-chip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  display: inline-block;
+}
 .palette-item__dot {
   flex: none;
   width: 10px;

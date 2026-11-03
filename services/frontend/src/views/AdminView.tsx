@@ -609,6 +609,8 @@ interface TrackFormState {
   id: string;
   title: string;
   coding: boolean;
+  /** Практика: bash-задания (spec-19, сисадмин). Взаимоисключающа с coding. */
+  shell: boolean;
   stacks: Stack[];
   grades: Grade[];
   boardTitle: string;
@@ -625,6 +627,7 @@ function trackFromApi(t: AdminTrack): TrackFormState {
     id: t.id,
     title: t.title,
     coding: t.coding,
+    shell: t.shell === true,
     stacks: t.stacks ?? [],
     grades: [...t.grades],
     boardTitle: t.board.title,
@@ -652,6 +655,7 @@ const emptyTrack = (): TrackFormState => ({
   id: '',
   title: '',
   coding: true,
+  shell: false,
   stacks: ['go'],
   grades: ['junior', 'middle', 'senior', 'staff'],
   boardTitle: '',
@@ -677,6 +681,7 @@ function buildTrackPayload(f: TrackFormState): AdminTrack {
     id: f.id.trim(),
     title: f.title.trim(),
     coding: f.coding,
+    ...(f.shell && !f.coding ? { shell: true } : {}),
     stacks: f.coding ? f.stacks : [],
     grades: f.grades,
     board: {
@@ -821,6 +826,7 @@ function TracksTab() {
                   <td>{t.title}</td>
                   <td>
                     <span className={t.coding ? 'badge ok' : 'badge'}>{t.coding ? 'кодовый' : 'некодовый'}</span>
+                    {t.shell === true && <span className="badge">практика</span>}
                   </td>
                   <td className="muted small">{t.grades.map(gradeLabel).join(', ')}</td>
                   <td>
@@ -848,8 +854,21 @@ function TracksTab() {
               <input value={form.id} disabled={!form.isNew} onChange={(e) => setF({ id: e.target.value })} />
             </label>
             <label className="field" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <input type="checkbox" checked={form.coding} onChange={(e) => setF({ coding: e.target.checked })} />
-              <span>Кодовая стадия</span>
+              <input
+                type="checkbox"
+                checked={form.coding}
+                onChange={(e) => setF({ coding: e.target.checked, ...(e.target.checked ? { shell: false } : {}) })}
+              />
+              <span>Кодовая стадия (Go/Python)</span>
+            </label>
+            <label className="field" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="checkbox"
+                data-testid="admin-track-shell"
+                checked={form.shell}
+                onChange={(e) => setF({ shell: e.target.checked, ...(e.target.checked ? { coding: false, stacks: [] } : {}) })}
+              />
+              <span>Практика: bash (shell)</span>
             </label>
           </div>
           {form.coding && (
@@ -912,6 +931,29 @@ function TracksTab() {
           </div>
 
           <p className="muted small">Группы палитры (имена блоков через запятую):</p>
+          {/* spec-19/визуальный редактор: живой превью палитры — то же, что
+              увидит кандидат на доске (чипы с цветом группы). */}
+          <div className="palette-preview" data-testid="admin-track-palette-preview">
+            {form.groups
+              .filter((g) => g.title.trim() !== '' || g.names.trim() !== '')
+              .map((g, i) => (
+                <div key={i} className="palette-preview-group">
+                  <span className="palette-preview-title">{g.title.trim() || 'Без названия'}</span>
+                  <span className="palette-preview-chips">
+                    {g.names
+                      .split(',')
+                      .map((s) => s.trim())
+                      .filter((s) => s !== '')
+                      .map((n, j) => (
+                        <span key={j} className="palette-preview-chip" style={g.color !== '' ? { borderColor: g.color } : undefined}>
+                          <i style={{ background: g.color !== '' ? g.color : '#6eb2f7' }} />
+                          {n}
+                        </span>
+                      ))}
+                  </span>
+                </div>
+              ))}
+          </div>
           <div data-testid="admin-track-groups">
             {form.groups.map((g, i) => (
               <div key={i} className="start-form">
@@ -948,13 +990,45 @@ function TracksTab() {
                     ))}
                   </select>
                 </label>
-                <button
-                  type="button"
-                  className="btn ghost small"
-                  onClick={() => setF({ groups: form.groups.filter((_, j) => j !== i) })}
-                >
-                  Убрать
-                </button>
+                <span style={{ display: 'flex', gap: 4 }}>
+                  <button
+                    type="button"
+                    className="btn ghost small"
+                    aria-label="Выше"
+                    disabled={i === 0}
+                    onClick={() =>
+                      setF({
+                        groups: form.groups.map((x, j, arr) =>
+                          j === i - 1 ? arr[i] : j === i ? arr[i - 1] : x,
+                        ),
+                      })
+                    }
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ghost small"
+                    aria-label="Ниже"
+                    disabled={i === form.groups.length - 1}
+                    onClick={() =>
+                      setF({
+                        groups: form.groups.map((x, j, arr) =>
+                          j === i + 1 ? arr[i] : j === i ? arr[i + 1] : x,
+                        ),
+                      })
+                    }
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ghost small"
+                    onClick={() => setF({ groups: form.groups.filter((_, j) => j !== i) })}
+                  >
+                    Убрать
+                  </button>
+                </span>
               </div>
             ))}
             <button

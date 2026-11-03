@@ -40,7 +40,7 @@ export interface MeResult {
 }
 
 export type Grade = 'junior' | 'middle' | 'senior' | 'staff';
-export type Stack = 'go' | 'python';
+export type Stack = 'go' | 'python' | 'shell';
 export type Stage = 'voice' | 'livecode' | 'design' | 'report';
 export type SessionStatus = 'active' | 'paused' | 'finished' | 'aborted';
 
@@ -49,6 +49,8 @@ export interface Track {
   id: string;
   title: string;
   coding: boolean;
+  /** Практика — bash-задания (spec-19, сисадмин): livecode-стадия со стеком shell. */
+  shell?: boolean;
   stacks?: Stack[];
   grades: Grade[];
   board: {
