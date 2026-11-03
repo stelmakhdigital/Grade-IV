@@ -28,12 +28,20 @@ export const DESIGN_BLOCKS: readonly string[] = DESIGN_BLOCK_GROUPS.flatMap(
   (g) => g.names,
 );
 
+export interface BoardInfo {
+  title: string;
+  groups: { title: string; names: string[]; color?: string }[];
+  case?: { title: string; statement: string };
+}
+
 export interface DesignPanelProps {
   sessionId: number;
   /** Холст: по умолчанию Excalidraw; в тестах — мок. */
   canvas?: ComponentType<CanvasProps>;
   /** ИИ-оценка (последний ai_text стадии design). */
   review: string;
+  /** Конфиг доски из stage-сообщения трека (spec-18/Ф3); null — дефолт backend. */
+  board?: BoardInfo | null;
 }
 
 export interface CanvasProps {
@@ -51,7 +59,14 @@ export function DesignPanel({
   sessionId,
   canvas,
   review,
+  board,
 }: DesignPanelProps) {
+  // spec-18: палитра и задание — из трека; дефолт — текущие группы backend.
+  const groups: ReadonlyArray<{ title: string; names: readonly string[]; color?: string }> =
+    board && board.groups.length > 0
+      ? board.groups
+      : DESIGN_BLOCK_GROUPS.map((g) => ({ title: g.title, names: g.names }));
+  const taskText = board?.case?.statement;
   const Canvas = canvas ?? ExcalidrawCanvas;
   const apiRef = useRef<DesignCanvasApi | null>(null);
   const [placed, setPlaced] = useState<string[]>([]);
@@ -164,14 +179,17 @@ export function DesignPanel({
   return (
     <div className="design" data-testid="design-panel">
       <p className="design-hint" data-testid="design-hint">
+        {board?.case ? (
+          <>
+            <b>{board.case.title}.</b> {board.case.statement}{' '}
+          </>
+        ) : null}
         1. Поставьте блоки из палитры. 2. Соедините их стрелками (инструмент «Стрелка»
-        на панели слева: клик по блоку → клик по следующему): клиент → балансировка →
-        сервисы → БД/кэш/очереди, мониторинг. 3. «Оценить схему» сохранит холст и
-        попросит ИИ-ревью по рубрике: покрытие, масштабируемость, отказоустойчивость,
-        trade-offs.
+        на панели слева: клик по блоку → клик по следующему). 3. «Оценить схему»
+        сохранит холст и попросит ИИ-ревью по рубрике трека.
       </p>
       <div className="palette" aria-label="Палитра блоков">
-        {DESIGN_BLOCK_GROUPS.map((group) => (
+        {groups.map((group) => (
           <div className="palette-group" key={group.title}>
             <span className="palette-group__title">{group.title}</span>
             {group.names.map((name) => (
@@ -185,7 +203,7 @@ export function DesignPanel({
               >
                 <span
                   className="palette-item__dot"
-                  style={{ background: blockColor(name) }}
+                  style={{ background: group.color ?? blockColor(name) }}
                   aria-hidden="true"
                 />
                 {name}

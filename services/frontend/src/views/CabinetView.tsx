@@ -13,6 +13,7 @@ import {
   listSessions,
   listTemplates,
   listTTSVoices,
+  listTracks,
   saveVacancy,
   ApiError,
   type Grade,
@@ -20,6 +21,7 @@ import {
   type InterviewTemplate,
   type Session,
   type Stack,
+  type Track,
   type TTSVoice,
 } from '../api';
 import { useAuth } from '../auth';
@@ -61,6 +63,30 @@ export function CabinetView() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [grade, setGrade] = useState<Grade>('middle');
   const [stack, setStack] = useState<Stack>('go');
+  // spec-18: трек собеседования (backend — дефолт); список — из /tracks.
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [trackId, setTrackId] = useState<string>('backend');
+  useEffect(() => {
+    let alive = true;
+    listTracks()
+      .then((ts) => {
+        if (alive) setTracks(ts);
+      })
+      .catch(() => {
+        /* список треков необязателен: селект скрывается, дефолт — backend */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const track = tracks.find((t) => t.id === trackId) ?? null;
+  // Грейды трека (fallback — все); при смене трека некорректный грейд сбрасывается.
+  const gradeOptions = track ? GRADES.filter((g) => track.grades.includes(g.value)) : GRADES;
+  useEffect(() => {
+    if (track && !track.grades.includes(grade)) {
+      setGrade(track.grades[0]);
+    }
+  }, [track, grade]);
   const [templates, setTemplates] = useState<InterviewTemplate[]>([]);
   const [templateId, setTemplateId] = useState<number | undefined>(undefined);
   const [profiles, setProfiles] = useState<InterviewProfile[]>([]);
@@ -185,7 +211,14 @@ export function CabinetView() {
     setStarting(true);
     setStartError(null);
     try {
-      const s = await createSession(grade, stack, templateId, profileId, ttsSpeaker);
+      const s = await createSession(
+        grade,
+        track?.coding === false ? '' : stack,
+        templateId,
+        profileId,
+        ttsSpeaker,
+        trackId,
+      );
       window.location.hash = sessionPath(s.id);
     } catch (err) {
       setStartError(apiErrorMessage(err));
@@ -258,16 +291,33 @@ export function CabinetView() {
       <section className="card" aria-labelledby="new-interview">
         <h2 id="new-interview">Новое интервью</h2>
         <form className="start-form" onSubmit={onStart}>
+          {tracks.length > 0 && (
+            <label className="field">
+              <span>Роль</span>
+              <select
+                value={trackId}
+                onChange={(e) => setTrackId(e.target.value)}
+                data-testid="track-select"
+              >
+                {tracks.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="field">
             <span>Грейды</span>
             <select value={grade} onChange={(e) => setGrade(e.target.value as Grade)}>
-              {GRADES.map((g) => (
+              {gradeOptions.map((g) => (
                 <option key={g.value} value={g.value}>
                   {g.label}
                 </option>
               ))}
             </select>
           </label>
+          {track?.coding === false ? null : (
           <label className="field">
             <span>Стек</span>
             <select value={stack} onChange={(e) => setStack(e.target.value as Stack)}>
@@ -278,6 +328,7 @@ export function CabinetView() {
               ))}
             </select>
           </label>
+          )}
           {templates.length > 1 && (
             <label className="field">
               <span>Шаблон интервью</span>

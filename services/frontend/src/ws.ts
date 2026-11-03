@@ -7,6 +7,14 @@
 import { fetchWSTicket, getToken } from './api';
 import { parseTtsFrame } from './audio/resample';
 
+/** Конфиг доски в stage-сообщении (spec-18/Ф3/Ф5). Чек-лист кейса сервер не
+ * отдаёт — это рубрика ревью. */
+export interface BoardStageInfo {
+  title: string;
+  groups: { title: string; names: string[]; color?: string }[];
+  case?: { title: string; statement: string };
+}
+
 export interface StageTask {
   id?: string;
   title?: string;
@@ -16,7 +24,13 @@ export interface StageTask {
 }
 
 export type WsMessage =
-  | { type: 'stage'; name: string; task?: StageTask | null; tasks?: StageTask[] }
+  | {
+      type: 'stage';
+      name: string;
+      task?: StageTask | null;
+      tasks?: StageTask[];
+      board?: BoardStageInfo | null;
+    }
   | { type: 'timer'; remaining_s: number }
   | { type: 'ai_text'; text: string }
   | { type: 'transcript'; who: 'user' | 'ai'; text: string }

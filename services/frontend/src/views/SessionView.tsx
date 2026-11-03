@@ -36,6 +36,7 @@ export function SessionView({ id }: { id: number }) {
     stage,
     runReview,
     designReview,
+    board,
     task,
     tasks,
     lastAiText,
@@ -267,7 +268,7 @@ export function SessionView({ id }: { id: number }) {
           ) : stage === 'design' ? (
             <>
               <Suspense fallback={<PanelLoading />}>
-                <DesignPanel sessionId={id} review={designReview} />
+                <DesignPanel sessionId={id} review={designReview} board={board} />
               </Suspense>
               {/* Возврат на предыдущую стадию разрешён (движок); холст при возврате
                   восстанавливается из сохранённого whiteboard. */}

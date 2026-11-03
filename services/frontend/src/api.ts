@@ -44,10 +44,35 @@ export type Stack = 'go' | 'python';
 export type Stage = 'voice' | 'livecode' | 'design' | 'report';
 export type SessionStatus = 'active' | 'paused' | 'finished' | 'aborted';
 
+/** Трек собеседования (spec-18): профиль роли — состав стадий/доска/критерии. */
+export interface Track {
+  id: string;
+  title: string;
+  coding: boolean;
+  stacks?: Stack[];
+  grades: Grade[];
+  board: {
+    title: string;
+    groups: { title: string; names: string[]; color?: string }[];
+  };
+  criteria: { name: string; weight: number }[];
+}
+
+/** Полный трек для админ-редактора (с промптами и кейсами). */
+export interface AdminTrack extends Track {
+  board: Track['board'] & {
+    review_prompt: string;
+    cases?: { grade: Grade; title: string; statement: string; checklist?: string[] }[];
+  };
+  criteria: Track['criteria'] & { hint?: string }[];
+  grade_confirm?: number;
+}
+
 export interface Session {
   id: number;
   grade: Grade;
   stack: Stack;
+  track_id?: string;
   stage: Stage;
   status: SessionStatus;
   duration_limit_s: number;
@@ -280,16 +305,40 @@ export function adminPutTTSVoices(reg: TTSVoiceRegistry): Promise<TTSVoiceRegist
 
 export function createSession(
   grade: Grade,
-  stack: Stack,
+  stack: Stack | '',
   templateId?: number,
   profileId?: number,
   ttsSpeaker?: string,
+  trackId?: string,
 ): Promise<Session> {
   const body: Record<string, unknown> = { grade, stack };
+  if (trackId) body.track_id = trackId;
   if (templateId) body.template_id = templateId;
   if (profileId) body.profile_id = profileId;
   if (ttsSpeaker) body.tts_speaker = ttsSpeaker;
   return request<Session>('/sessions', { body });
+}
+
+/** Список треков (кабинет: выбор роли перед интервью). */
+export function listTracks(): Promise<Track[]> {
+  return request<Track[]>('/tracks', { auth: true });
+}
+
+/** Полный список треков (админ-редактор, spec-18/Ф4). */
+export function adminListTracks(): Promise<AdminTrack[]> {
+  return request<AdminTrack[]>('/admin/tracks', { auth: true });
+}
+
+export function adminCreateTrack(t: AdminTrack): Promise<AdminTrack> {
+  return request<AdminTrack>('/admin/tracks', { body: { track: t }, auth: true });
+}
+
+export function adminUpdateTrack(t: AdminTrack): Promise<AdminTrack> {
+  return request<AdminTrack>(`/admin/tracks/${t.id}`, { body: { track: t }, auth: true });
+}
+
+export function adminDeleteTrack(id: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/admin/tracks/${id}`, { method: 'DELETE', auth: true });
 }
 
 export function listSessions(): Promise<Session[]> {

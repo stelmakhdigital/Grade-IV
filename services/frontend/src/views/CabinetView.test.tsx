@@ -101,6 +101,7 @@ describe('CabinetView (WP-7)', () => {
     expect(JSON.parse((fetchMock.mock.calls.find((c) => c[1]?.method === 'POST')?.[1] as RequestInit).body as string)).toEqual({
       grade: 'junior',
       stack: 'python',
+      track_id: 'backend',
       profile_id: 2,
     });
   });
@@ -117,6 +118,7 @@ describe('CabinetView (WP-7)', () => {
     expect(JSON.parse((fetchMock.mock.calls.find((c) => c[1]?.method === 'POST')?.[1] as RequestInit).body as string)).toEqual({
       grade: 'middle',
       stack: 'go',
+      track_id: 'backend',
       profile_id: 1,
     });
   });
