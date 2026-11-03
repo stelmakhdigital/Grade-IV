@@ -41,6 +41,10 @@ VAD_PRE_SILENCE_MS = 400     # тишина ≥ 400 мс в речи (но < min
 # речь продолжается). Защита от сверхдлинного аудио-буфера (память + задержка STT).
 VAD_MAX_SPEECH_S = 30
 PARTIAL_INTERVAL_S = 0.5     # partial не чаще раза в 500 мс
+# spec-14/B2: нет входящих аудио-кадров столько секунд → чистое закрытие WS
+# (close code 1001): мёртвый клиент (полуоткрытый TCP) не рвёт async for и
+# вечно держит VAD-состояние и слот executor'а.
+STREAM_IDLE_TIMEOUT_S = 60.0
 WINDOW = 512                 # окно Silero, сэмплы @ 16 кГц (32 мс)
 PREROLL_SAMPLES = 1600       # pre-roll перед стартом слова (100 мс)
 ENERGY_RMS = 0.005           # энергетический VAD: rms-порог (≈ -46 дБFS)
@@ -48,6 +52,7 @@ ENERGY_RMS = 0.005           # энергетический VAD: rms-порог 
 __all__ = [
     "VAD_THRESHOLD", "VAD_MIN_SILENCE_MS", "VAD_MIN_SPEECH_MS", "VAD_PRE_SILENCE_MS",
     "VAD_MAX_SPEECH_S", "PARTIAL_INTERVAL_S", "WINDOW", "PREROLL_SAMPLES", "ENERGY_RMS",
+    "STREAM_IDLE_TIMEOUT_S",
     "SileroVAD", "EnergyVAD", "StreamVAD", "build_vad",
     "register_stt_stream", "register_vad_stream",
 ]
@@ -219,6 +224,39 @@ async def _sender_loop(ws: WebSocket, q: asyncio.Queue) -> None:
         pass  # соединение умерло — best-effort
 
 
+async def _idle_watchdog(ws: WebSocket, frame_seen: asyncio.Event,
+                         cancel_pending, label: str) -> None:
+    """spec-14/B2: idle-watchdog WS-стримов — мёртвый клиент держит ресурсы.
+
+    Полуоткрытый TCP (клиент умер без close: обрыв сети, kill -9, зависший
+    мобильный браузер) не порождает ошибки в ``ws.iter_bytes()`` — соединение
+    висит неограниченно, удерживая per-connection VAD-состояние (машина +
+    кольцо pre-roll + буфер реплики) и слот однопоточного STT_EXECUTOR.
+
+    Нет входящих кадров ``STREAM_IDLE_TIMEOUT_S`` секунд → чистое закрытие
+    соединения (close code 1001 «going away»): ``iter_bytes`` главного цикла
+    завершается исключением → finally отменяет pending-таски и освобождает
+    per-connection состояние. Пока транскрибация уже идёт в executor'е —
+    она завершается естественно (ограничено длительностью одной распознавалки).
+    """
+    while True:
+        try:
+            await asyncio.wait_for(frame_seen.wait(), timeout=STREAM_IDLE_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            break
+        frame_seen.clear()
+    logger.warning(
+        "%s: нет аудио-кадров %.0f с (мёртвый клиент?) — закрываю соединение "
+        "(close 1001), отменяю pending-таски, освобождаю VAD-состояние",
+        label, STREAM_IDLE_TIMEOUT_S,
+    )
+    cancel_pending()  # partial-таск (stt/stream); в vad/stream отменять нечего
+    try:
+        await ws.close(code=1001)
+    except Exception:
+        pass  # соединение уже мертво — best-effort
+
+
 async def _do_partial(stt: STTProvider, q: asyncio.Queue, pcm: bytes, cell: dict) -> None:
     """Partial (best-effort): распознавание на текущий буфер; дубли не шлём.
     Отправка — через очередь sender-таска (spec-14/B1)."""
@@ -275,8 +313,16 @@ def register_stt_stream(app, stt: STTProvider, vad, max_speech_s: float | None =
                 partial_task.cancel()  # устаревший partial после final — не шлём
                 partial_task = None
 
+        # spec-14/B2: idle-watchdog — мёртвый клиент (полуоткрытый TCP, peer
+        # без close) не рвёт async for: без него соединение висело бы вечно,
+        # удерживая VAD-состояние и слот executor'а.
+        frame_seen = asyncio.Event()
+        watchdog = asyncio.create_task(
+            _idle_watchdog(ws, frame_seen, _cancel_partial, "stt/stream"))
+
         try:
             async for msg in ws.iter_bytes():
+                frame_seen.set()  # любой входящий кадр — признак живого клиента
                 if len(msg) < 2 or len(msg) % 2:
                     continue
                 samples = np.frombuffer(msg, dtype=np.int16).astype(np.float32) / 32768
@@ -345,6 +391,7 @@ def register_stt_stream(app, stt: STTProvider, vad, max_speech_s: float | None =
             # и partial-воркера. Ресурсы чистит finally.
             pass
         finally:
+            watchdog.cancel()
             _cancel_partial()
             sender.cancel()
             try:
@@ -376,8 +423,14 @@ def register_vad_stream(app, vad) -> None:
     async def vad_stream_endpoint(ws: WebSocket) -> None:
         await ws.accept()
         engine = StreamVAD(vad.clone(), pre_silence_ms=VAD_PRE_SILENCE_MS)
+        # spec-14/B2: idle-watchdog — как в /stt/stream: мёртвый клиент
+        # (полуоткрытый TCP) вечно держал бы VAD-состояние соединения.
+        frame_seen = asyncio.Event()
+        watchdog = asyncio.create_task(
+            _idle_watchdog(ws, frame_seen, lambda: None, "vad/stream"))
         try:
             async for msg in ws.iter_bytes():
+                frame_seen.set()  # любой входящий кадр — признак живого клиента
                 if len(msg) < 2 or len(msg) % 2:
                     continue
                 samples = np.frombuffer(msg, dtype=np.int16).astype(np.float32) / 32768
@@ -390,3 +443,5 @@ def register_vad_stream(app, vad) -> None:
                         await _send(ws, {"type": "state", "speech": False})
         except (WebSocketDisconnect, RuntimeError):
             pass  # spec-14/B2: клиент отключился — не шумим трейсбеком
+        finally:
+            watchdog.cancel()
