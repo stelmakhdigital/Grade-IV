@@ -77,6 +77,24 @@ func TestValidateCodingStacks(t *testing.T) {
 	}
 }
 
+// TestValidateShellExclusive — spec-19: coding и shell — взаимоисключающие
+// практические стадии; shell-некодовый трек валиден.
+func TestValidateShellExclusive(t *testing.T) {
+	tk := validTrack()
+	tk.Coding = true
+	tk.Stacks = []models.Stack{models.StackGo}
+	tk.Shell = true
+	if err := tk.Validate(); err == nil {
+		t.Fatal("coding+shell должен быть отвергнут (одна практическая стадия)")
+	}
+	shell := validTrack()
+	shell.Coding = false
+	shell.Shell = true
+	if err := shell.Validate(); err != nil {
+		t.Fatalf("shell-некодовый трек: %v", err)
+	}
+}
+
 func TestStages(t *testing.T) {
 	sys := DefaultTracks()
 	var sysTrack *models.Track
@@ -88,9 +106,10 @@ func TestStages(t *testing.T) {
 	if sysTrack == nil {
 		t.Fatal("нет трека sysadmin")
 	}
+	// spec-19: sysadmin — shell-трек: voice → livecode (bash) → design → report.
 	st := sysTrack.Stages(models.GradeJunior)
-	if len(st) != 3 || st[1] != models.StageDesign {
-		t.Fatalf("некодовый трек: voice→design→report, получено %v", st)
+	if len(st) != 4 || st[1] != models.StageLiveCode || st[2] != models.StageDesign {
+		t.Fatalf("shell-трек: voice→livecode→design→report, получено %v", st)
 	}
 	var backend *models.Track
 	for i := range sys {

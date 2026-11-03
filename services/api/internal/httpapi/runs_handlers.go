@@ -100,7 +100,8 @@ func (s *Server) handleSessionRuns(w http.ResponseWriter, r *http.Request) {
 	proxyCtx, cancel := context.WithTimeout(r.Context(), runsProxyTimeout)
 	defer cancel()
 	reqBody, err := json.Marshal(runProxyRequest{
-		Stack: string(m.Stack), Action: body.Action, Files: body.Files, TaskID: body.TaskID,
+		// spec-19: стек стадии — сессии или shell-трека (сисадмин).
+		Stack: s.liveCodeStack(m), Action: body.Action, Files: body.Files, TaskID: body.TaskID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "сериализация запроса к sandbox")

@@ -125,7 +125,9 @@ func trackStageMeta(t *models.Track) map[string]any {
 	if t == nil {
 		return nil
 	}
-	return map[string]any{"id": t.ID, "title": t.Title, "coding": t.Coding}
+	// spec-19: shell — для UI-навигации («Практика» вместо «Live-Code»,
+	// пустой stack сессии → стек shell).
+	return map[string]any{"id": t.ID, "title": t.Title, "coding": t.Coding, "shell": t.Shell}
 }
 
 // boardStagePayload — payload доски для stage-сообщения (spec-18/Ф3/Ф5).

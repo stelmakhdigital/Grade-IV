@@ -16,6 +16,7 @@ type trackView struct {
 	ID       string         `json:"id"`
 	Title    string         `json:"title"`
 	Coding   bool           `json:"coding"`
+	Shell    bool           `json:"shell,omitempty"` // spec-19: практика bash (сисадмин)
 	Stacks   []models.Stack `json:"stacks,omitempty"`
 	Grades   []models.Grade `json:"grades"`
 	Board    trackBoardView `json:"board"`
@@ -43,6 +44,7 @@ func toTrackView(t models.Track) trackView {
 		ID:     t.ID,
 		Title:  t.Title,
 		Coding: t.Coding,
+		Shell:  t.Shell,
 		Grades: t.Grades,
 		Board:  trackBoardView{Title: t.Board.Title},
 	}

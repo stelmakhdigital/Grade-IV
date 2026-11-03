@@ -229,6 +229,7 @@ func DefaultTracks() []models.Track {
 	// criteriaForGrade для сессий без трека.
 	sysadmin := models.Track{
 		ID:     "sysadmin",
+		Shell:  true,
 		Title:  "Системный администратор",
 		Coding: false,
 		Grades: []models.Grade{models.GradeJunior, models.GradeMiddle, models.GradeSenior},

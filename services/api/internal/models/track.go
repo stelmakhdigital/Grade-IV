@@ -20,9 +20,14 @@ import (
 type Track struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
-	// Coding — трек с кодовой стадией (Live-Code + sandbox). Для некодовых
-	// ролей (сисадмин, PM) стадия livecode не входит в программу.
+	// Coding — трек с кодовой стадией (Live-Code go/python + sandbox). Для
+	// некодовых ролей (PM) стадия livecode не входит в программу.
 	Coding bool `json:"coding"`
+	// Shell — практическая shell-стадия (spec-19): bash-задания из банка
+	// sandbox (solution.sh + чек-скрипт), стадия livecode в редакторе.
+	// Только для некодовых ролей (сисадмин): coding и shell — взаимоисключающие
+	// практические стадии (одна стадия livecode, выбор задач — по треку).
+	Shell bool `json:"shell,omitempty"`
 	// Stacks — допустимые стеки кодовой стадии (для coding-треков).
 	Stacks []Stack `json:"stacks,omitempty"`
 	// Grades — допустимые грейды трека (выбор в кабинете фильтруется).
@@ -112,6 +117,9 @@ func (t *Track) Validate() error {
 		}
 	} else if len(t.Stacks) != 0 {
 		return fmt.Errorf("track %s: некодовый трек со стеками", t.ID)
+	}
+	if t.Shell && t.Coding {
+		return fmt.Errorf("track %s: coding и shell взаимоисключающие (одна практическая стадия)", t.ID)
 	}
 	if len(t.Criteria) == 0 {
 		return fmt.Errorf("track %s: критерии пусты", t.ID)
@@ -209,10 +217,18 @@ func (t *Track) Stages(g Grade) []Stage {
 		}
 		return []Stage{StageVoice, StageLiveCode, StageDesign, StageReport}
 	}
+	if t.Shell {
+		// spec-19: практическая shell-стадия для некодовых ролей (сисадмин):
+		// голос → bash-задание в редакторе → доска (архитектура) → отчёт.
+		return []Stage{StageVoice, StageLiveCode, StageDesign, StageReport}
+	}
 	return []Stage{StageVoice, StageDesign, StageReport}
 }
 
 // DefaultTrackIDIf — trackID трека или 'backend' (nil → дефолт совместимости).
+// ShellStage — имя практической shell-стадии для UI-навигации.
+const ShellStage = "shell"
+
 func DefaultTrackIDIf(t *Track) string {
 	if t == nil {
 		return DefaultTrackID

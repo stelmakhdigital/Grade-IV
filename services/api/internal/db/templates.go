@@ -148,22 +148,12 @@ func (s *TemplateStore) Default(ctx context.Context, grade models.Grade, stack, 
 
 // EnsureDefaults — сидирует дефолтные шаблоны (по одному на грейд) при пустой
 // таблице. Дефолты передаёт вызывающий (из interviewer.DefaultPrograms) —
-// db не зависит от interviewer. Идемпотентно: если для грейда есть хотя бы
-// один шаблон — не трогаем.
+// db не зависит от interviewer. Идемпотентно в scope (grade, track); если
+// существующий дефолт отличается по контенту (блоки/имя/длительность) —
+// обновляется (spec-19: вычитка программ доезжает на существующие базы
+// без миграции).
 func (s *TemplateStore) EnsureDefaults(ctx context.Context, defs []Template) error {
 	for _, def := range defs {
-		var n int
-		// spec-18: идемпотентность в scope (grade, track) — дефолты разных
-		// треков сидируются независимо.
-		err := s.db.QueryRowContext(ctx, s.d.q(
-			"SELECT COUNT(*) FROM interview_templates WHERE grade = ? AND track = ?"),
-			def.Grade, trackOf(def.Track)).Scan(&n)
-		if err != nil {
-			return err
-		}
-		if n > 0 {
-			continue
-		}
 		blocksJSON, err := json.Marshal(def.Blocks)
 		if err != nil {
 			return err
@@ -173,12 +163,34 @@ func (s *TemplateStore) EnsureDefaults(ctx context.Context, defs []Template) err
 		if def.IsDefault {
 			isDefault = 1
 		}
-		_, err = s.db.ExecContext(ctx, s.d.q(
-			"INSERT INTO interview_templates (name, grade, stack, track, duration_s, blocks, is_default, created_at, updated_at) "+
-				"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
-			def.Name, def.Grade, def.Stack, trackOf(def.Track), def.DurationS, string(blocksJSON), isDefault, now, now)
-		if err != nil {
+		// spec-18: идемпотентность в scope (grade, track) — дефолты разных
+		// треков сидируются независимо. Сравнение по контенту (spec-19):
+		// имя дефолт-шаблона детерминировано (name+grade+track) — правим
+		// только «наш» дефолт, кастомные шаблоны не трогаем.
+		var id int64
+		var haveName, haveBlocks string
+		var haveDur int
+		row := s.db.QueryRowContext(ctx, s.d.q(
+			"SELECT id, name, duration_s, blocks FROM interview_templates WHERE grade = ? AND track = ? AND name = ?"),
+			def.Grade, trackOf(def.Track), def.Name)
+		switch err := row.Scan(&id, &haveName, &haveDur, &haveBlocks); {
+		case err == sql.ErrNoRows:
+			if _, err := s.db.ExecContext(ctx, s.d.q(
+				"INSERT INTO interview_templates (name, grade, stack, track, duration_s, blocks, is_default, created_at, updated_at) "+
+					"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+				def.Name, def.Grade, def.Stack, trackOf(def.Track), def.DurationS, string(blocksJSON), isDefault, now, now); err != nil {
+				return err
+			}
+		case err != nil:
 			return err
+		case haveName == def.Name && haveDur == def.DurationS && haveBlocks == string(blocksJSON):
+			// без изменений
+		default:
+			if _, err := s.db.ExecContext(ctx, s.d.q(
+				"UPDATE interview_templates SET duration_s = ?, blocks = ?, updated_at = ? WHERE id = ?"),
+				def.DurationS, string(blocksJSON), now, id); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

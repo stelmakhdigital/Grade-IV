@@ -748,7 +748,7 @@ func (s *Server) enterLiveCode(ctx context.Context, id int64, ws *wsSession) {
 		return
 	}
 	var tasks []liveCodeTask
-	if pool, err := s.fetchLiveCodeTasks(ctx, string(sess.Stack), string(sess.Grade)); err != nil {
+	if pool, err := s.fetchLiveCodeTasks(ctx, s.liveCodeStack(sess), string(sess.Grade)); err != nil {
 		s.log.Warn("livecode: банк задач недоступен", "session", id, "err", err)
 	} else {
 		var stretchPool []liveCodeTask
@@ -780,6 +780,22 @@ func (s *Server) enterLiveCode(ctx context.Context, id int64, ws *wsSession) {
 	}
 	text, err := s.interviewer.OnStageChanged(ctx, id, stageNote(tasks))
 	s.speak(ctx, id, ws, text, err) // озвучка задачи (TTS)
+}
+
+// liveCodeStack — стек практической стадии (spec-19): у кодовых треков — стек
+// сессии; у shell-треков сисадмина stack сессии пуст, стек задач берём из
+// банка shell (tasks?stack=shell). Не-shell некодовые задачи не дойдут сюда:
+// стадия livecode не входит в их программу.
+func (s *Server) liveCodeStack(sess models.Session) string {
+	if sess.Stack != "" {
+		return string(sess.Stack)
+	}
+	if s.tracks != nil && sess.TrackID != "" {
+		if t, err := s.tracks.Get(sess.TrackID); err == nil && t != nil && t.Shell {
+			return "shell"
+		}
+	}
+	return ""
 }
 
 // stageNote — контекст входа на Live-Code для LLM (список задач, если выбраны):
