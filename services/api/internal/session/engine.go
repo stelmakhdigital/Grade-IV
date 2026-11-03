@@ -118,6 +118,16 @@ type TrackResolver func(trackID string) (*models.Track, error)
 // WithTracks — резолвер треков (spec-18).
 func WithTracks(r TrackResolver) Opt { return func(e *Engine) { e.tracks = r } }
 
+// trackStageMeta — метаданные трека в stage-сообщении (spec-18): UI строит
+// навигацию стадий (некодовый трек: голос → доска, без Live-Code). nil-трек —
+// без track (legacy-поведение, движок без хранилища).
+func trackStageMeta(t *models.Track) map[string]any {
+	if t == nil {
+		return nil
+	}
+	return map[string]any{"id": t.ID, "title": t.Title, "coding": t.Coding}
+}
+
 // boardStagePayload — payload доски для stage-сообщения (spec-18/Ф3/Ф5).
 // Чек-лист кейса кандидату не отдаётся (это рубрика ревью, не задание).
 func boardStagePayload(t *models.Track, g models.Grade) map[string]any {

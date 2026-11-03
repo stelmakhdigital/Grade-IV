@@ -463,6 +463,9 @@ func (e *Engine) ResendStage(id int64) {
 	rt.connMu.Lock()
 	stage := rt.stage
 	msg := map[string]any{"type": "stage", "name": stage, "task": nil}
+	if tm := trackStageMeta(rt.track); tm != nil {
+		msg["track"] = tm
+	}
 	if stage == models.StageDesign {
 		if b := boardStagePayload(rt.track, rt.grade); b != nil {
 			msg["board"] = b
