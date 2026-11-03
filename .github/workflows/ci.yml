@@ -86,7 +86,19 @@ jobs:
         working-directory: services/sandbox
         env:
           SANDBOX_DOCKER: "1"
-        run: go test -count=1 -run 'Docker' ./internal/runner/ -v -timeout 20m
+        run: |
+          set -o pipefail
+          {
+            echo "== docker version =="; docker version
+            echo "== пробы =="
+            go test -count=1 -run 'Docker' ./internal/runner/ -v -timeout 20m
+          } 2>&1 | tee probe.log
+      - name: upload probe log (диагностика падения)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-docker-probe-log
+          path: services/sandbox/probe.log
 
   frontend:
     name: Frontend (tsc, vitest, build)
