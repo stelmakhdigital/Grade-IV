@@ -13,10 +13,16 @@ import {
   adminPutOpenings,
   adminListTTSVoices,
   adminPutTTSVoices,
+  adminListTracks,
+  adminCreateTrack,
+  adminUpdateTrack,
+  adminDeleteTrack,
   ApiError,
   type Grade,
+  type Stack,
   type AdminTemplate,
   type AdminOpening,
+  type AdminTrack,
   type TemplateBlock,
   type TTSVoiceRegistry,
   type TTSVoice,
@@ -48,7 +54,7 @@ function gradeLabel(g: string): string {
 
 export function AdminView() {
   const { user, logout } = useAuth();
-  const [tab, setTab] = useState<'templates' | 'openings' | 'voices'>('templates');
+  const [tab, setTab] = useState<'templates' | 'openings' | 'voices' | 'tracks'>('templates');
 
   // Защита: прямой заход на #/admin без прав — запрет (роут публичный, доступ по is_admin).
   if (user !== null && user.is_admin === false) {
@@ -83,6 +89,7 @@ export function AdminView() {
             ['templates', 'Шаблоны'],
             ['openings', 'Начала разговора'],
             ['voices', 'Голоса'],
+            ['tracks', 'Треки собеседований'],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -101,6 +108,7 @@ export function AdminView() {
       {tab === 'templates' && <TemplatesTab />}
       {tab === 'openings' && <OpeningsTab />}
       {tab === 'voices' && <VoicesTab />}
+      {tab === 'tracks' && <TracksTab />}
     </main>
   );
 }
@@ -561,6 +569,567 @@ function VoicesTab() {
             </tbody>
           </table>
         </>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- Треки
+
+// Цвета — hex-эквиваленты палитры DesignPanel (designColors.ts); backend
+// хранит group.color как #rrggbb (models/track.go BlockGroup).
+const GROUP_COLORS = [
+  { value: '', label: 'По умолчанию' },
+  { value: '#6eb2f7', label: 'Синий' },
+  { value: '#fac938', label: 'Жёлтый' },
+  { value: '#3cdd8c', label: 'Зелёный' },
+  { value: '#ed5e5e', label: 'Красный' },
+  { value: '#b163e9', label: 'Фиолетовый' },
+  { value: '#e64c99', label: 'Розовый' },
+];
+
+interface TrackGroupRow {
+  title: string;
+  names: string; // через запятую
+  color: string;
+}
+interface TrackCaseRow {
+  grade: Grade;
+  title: string;
+  statement: string;
+  checklist: string; // построчно
+}
+interface TrackCriterionRow {
+  name: string;
+  weight: string;
+  hint: string;
+}
+interface TrackFormState {
+  isNew: boolean;
+  id: string;
+  title: string;
+  coding: boolean;
+  stacks: Stack[];
+  grades: Grade[];
+  boardTitle: string;
+  reviewPrompt: string;
+  groups: TrackGroupRow[];
+  cases: TrackCaseRow[];
+  criteria: TrackCriterionRow[];
+  gradeConfirm: string; // '' — глобальный порог
+}
+
+function trackFromApi(t: AdminTrack): TrackFormState {
+  return {
+    isNew: false,
+    id: t.id,
+    title: t.title,
+    coding: t.coding,
+    stacks: t.stacks ?? [],
+    grades: [...t.grades],
+    boardTitle: t.board.title,
+    reviewPrompt: t.board.review_prompt,
+    groups: t.board.groups.map((g) => ({ title: g.title, names: g.names.join(', '), color: g.color ?? '' })),
+    cases: (t.board.cases ?? []).map((c) => ({
+      grade: c.grade,
+      title: c.title,
+      statement: c.statement,
+      checklist: (c.checklist ?? []).join('\n'),
+    })),
+    // AdminTrack.criteria в api.ts описан как пересечение массивов — элемент
+    // без hint; локальное сужение до фактической формы ответа API.
+    criteria: (t.criteria as { name: string; weight: number; hint?: string }[]).map((c) => ({
+      name: c.name,
+      weight: String(Number(c.weight.toFixed(4))),
+      hint: c.hint ?? '',
+    })),
+    gradeConfirm: t.grade_confirm === undefined ? '' : String(t.grade_confirm),
+  };
+}
+
+const emptyTrack = (): TrackFormState => ({
+  isNew: true,
+  id: '',
+  title: '',
+  coding: true,
+  stacks: ['go'],
+  grades: ['junior', 'middle', 'senior', 'staff'],
+  boardTitle: '',
+  reviewPrompt: '',
+  groups: [{ title: '', names: '', color: '' }],
+  cases: [],
+  criteria: [{ name: '', weight: '', hint: '' }],
+  gradeConfirm: '',
+});
+
+// Сервер нормализует суммы в 0.95..1.05; за окном — 400 с точной причиной.
+function weightSum(criteria: TrackCriterionRow[]): number {
+  return criteria.reduce((acc, c) => acc + (Number(c.weight) || 0), 0);
+}
+
+function buildTrackPayload(f: TrackFormState): AdminTrack {
+  const criteria = f.criteria.map((c) => ({
+    name: c.name.trim(),
+    weight: Number(c.weight) || 0,
+    ...(c.hint.trim() === '' ? {} : { hint: c.hint.trim() }),
+  }));
+  return {
+    id: f.id.trim(),
+    title: f.title.trim(),
+    coding: f.coding,
+    stacks: f.coding ? f.stacks : [],
+    grades: f.grades,
+    board: {
+      title: f.boardTitle.trim(),
+      review_prompt: f.reviewPrompt,
+      groups: f.groups.map((g) => ({
+        title: g.title.trim(),
+        names: g.names.split(',').map((s) => s.trim()).filter((s) => s !== ''),
+        ...(g.color === '' ? {} : { color: g.color }),
+      })),
+      cases: f.cases
+        .filter((c) => c.title.trim() !== '' || c.statement.trim() !== '')
+        .map((c) => ({
+          grade: c.grade,
+          title: c.title.trim(),
+          statement: c.statement.trim(),
+          checklist: c.checklist.split('\n').map((s) => s.trim()).filter((s) => s !== ''),
+        })),
+    },
+    criteria,
+    ...(f.gradeConfirm === '' ? {} : { grade_confirm: Number(f.gradeConfirm) }),
+  };
+}
+
+function TracksTab() {
+  const [tracks, setTracks] = useState<AdminTrack[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState<TrackFormState | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setTracks(await adminListTracks());
+      setError(null);
+    } catch (e) {
+      setError(errText(e));
+    }
+  }, []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const startEdit = (t: AdminTrack) => setForm(trackFromApi(t));
+
+  const setF = (patch: Partial<TrackFormState>) => setForm((f) => (f ? { ...f, ...patch } : f));
+
+  const save = async () => {
+    if (!form) return;
+    // Минимальная клиентская валидация: точные причины — на сервере (400).
+    if (form.title.trim() === '') {
+      setError('Укажите название трека.');
+      return;
+    }
+    if (form.id.trim() === '') {
+      setError('Укажите id трека (строчные буквы, цифры, дефис).');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const payload = buildTrackPayload(form);
+      if (form.isNew) await adminCreateTrack(payload);
+      else await adminUpdateTrack(payload);
+      setForm(null);
+      await load();
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const del = async (id: string, label: string) => {
+    if (!window.confirm(`Удалить трек «${label}»?`)) return;
+    setError(null);
+    try {
+      await adminDeleteTrack(id);
+      setForm((f) => (f !== null && !f.isNew && f.id === id ? null : f));
+      await load();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        setError('Трек используется сессиями — удаление невозможно.');
+      } else {
+        setError(errText(e));
+      }
+    }
+  };
+
+  const sum = form !== null ? weightSum(form.criteria) : 0;
+  const sumWarn = form !== null && form.criteria.length > 0 && (sum < 0.95 || sum > 1.05);
+
+  return (
+    <section className="card" data-testid="admin-tracks">
+      <div className="history-head">
+        <h2>Треки собеседований</h2>
+        <button type="button" className="btn primary small" data-testid="admin-track-new" onClick={() => setForm(emptyTrack())}>
+          Новый трек
+        </button>
+      </div>
+      {error !== null && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
+      {tracks === null && error === null && <p className="muted">Загрузка…</p>}
+      {tracks !== null && (
+        <>
+          <div className="start-form">
+            <label className="field">
+              <span>Выбрать трек для редактирования</span>
+              <select
+                data-testid="admin-track-select"
+                value=""
+                onChange={(e) => {
+                  const t = tracks.find((x) => x.id === e.target.value);
+                  if (t !== undefined) startEdit(t);
+                }}
+              >
+                <option value="">— выберите трек —</option>
+                {tracks.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.title} ({t.id})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <table className="sessions-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Название</th>
+                <th>Тип</th>
+                <th>Грейды</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {tracks.map((t) => (
+                <tr key={t.id}>
+                  <td>{t.id}</td>
+                  <td>{t.title}</td>
+                  <td>
+                    <span className={t.coding ? 'badge ok' : 'badge'}>{t.coding ? 'кодовый' : 'некодовый'}</span>
+                  </td>
+                  <td className="muted small">{t.grades.map(gradeLabel).join(', ')}</td>
+                  <td>
+                    <button type="button" className="btn ghost small" onClick={() => startEdit(t)}>
+                      Изменить
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {form !== null && (
+        <div className="card" style={{ marginTop: 16, border: '1px solid #2a3140' }}>
+          <h3>{form.isNew ? 'Новый трек' : `Трек «${form.id}»`}</h3>
+          <div className="start-form">
+            <label className="field">
+              <span>Название</span>
+              <input data-testid="admin-track-title" value={form.title} onChange={(e) => setF({ title: e.target.value })} />
+            </label>
+            <label className="field">
+              <span>ID</span>
+              <input value={form.id} disabled={!form.isNew} onChange={(e) => setF({ id: e.target.value })} />
+            </label>
+            <label className="field" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={form.coding} onChange={(e) => setF({ coding: e.target.checked })} />
+              <span>Кодовая стадия</span>
+            </label>
+          </div>
+          {form.coding && (
+            <div className="start-form">
+              <label className="field">
+                <span>Стеки</span>
+                <span style={{ display: 'flex', gap: 12 }}>
+                  {(['go', 'python'] as const).map((s) => (
+                    <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <input
+                        type="checkbox"
+                        checked={form.stacks.includes(s)}
+                        onChange={(e) =>
+                          setF({
+                            stacks: e.target.checked ? [...form.stacks, s] : form.stacks.filter((x) => x !== s),
+                          })
+                        }
+                      />
+                      <span>{s === 'go' ? 'Go' : 'Python'}</span>
+                    </label>
+                  ))}
+                </span>
+              </label>
+            </div>
+          )}
+          <div className="start-form">
+            <label className="field">
+              <span>Грейды</span>
+              <span style={{ display: 'flex', gap: 12 }}>
+                {GRADES.map((g) => (
+                  <label key={g} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <input
+                      type="checkbox"
+                      checked={form.grades.includes(g)}
+                      onChange={(e) =>
+                        setF({ grades: e.target.checked ? [...form.grades, g] : form.grades.filter((x) => x !== g) })
+                      }
+                    />
+                    <span>{gradeLabel(g)}</span>
+                  </label>
+                ))}
+              </span>
+            </label>
+          </div>
+
+          <h4>Доска</h4>
+          <div className="start-form">
+            <label className="field">
+              <span>Заголовок доски</span>
+              <input value={form.boardTitle} onChange={(e) => setF({ boardTitle: e.target.value })} />
+            </label>
+            <label className="field" style={{ gridColumn: '1 / -1' }}>
+              <span>Промпт ревью (что оценивать в схеме)</span>
+              <textarea
+                rows={3}
+                value={form.reviewPrompt}
+                onChange={(e) => setF({ reviewPrompt: e.target.value })}
+              />
+            </label>
+          </div>
+
+          <p className="muted small">Группы палитры (имена блоков через запятую):</p>
+          <div data-testid="admin-track-groups">
+            {form.groups.map((g, i) => (
+              <div key={i} className="start-form">
+                <label className="field">
+                  <span>Группа</span>
+                  <input
+                    value={g.title}
+                    onChange={(e) =>
+                      setF({ groups: form.groups.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)) })
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Имена</span>
+                  <input
+                    value={g.names}
+                    onChange={(e) =>
+                      setF({ groups: form.groups.map((x, j) => (j === i ? { ...x, names: e.target.value } : x)) })
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Цвет</span>
+                  <select
+                    value={g.color}
+                    onChange={(e) =>
+                      setF({ groups: form.groups.map((x, j) => (j === i ? { ...x, color: e.target.value } : x)) })
+                    }
+                  >
+                    {GROUP_COLORS.map((c) => (
+                      <option key={c.value} value={c.value}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="btn ghost small"
+                  onClick={() => setF({ groups: form.groups.filter((_, j) => j !== i) })}
+                >
+                  Убрать
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="btn ghost small"
+              onClick={() => setF({ groups: [...form.groups, { title: '', names: '', color: '' }] })}
+            >
+              + Группа
+            </button>
+          </div>
+
+          <p className="muted small">Кейсы по грейду (чек-лист — по строке на элемент):</p>
+          {form.cases.map((c, i) => (
+            <div key={i} className="start-form">
+              <label className="field">
+                <span>Грейд</span>
+                <select
+                  value={c.grade}
+                  onChange={(e) =>
+                    setF({ cases: form.cases.map((x, j) => (j === i ? { ...x, grade: e.target.value as Grade } : x)) })
+                  }
+                >
+                  {GRADES.map((g) => (
+                    <option key={g} value={g}>
+                      {gradeLabel(g)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Название</span>
+                <input
+                  value={c.title}
+                  onChange={(e) => setF({ cases: form.cases.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)) })}
+                />
+              </label>
+              <label className="field" style={{ gridColumn: '1 / -1' }}>
+                <span>Задание</span>
+                <textarea
+                  rows={2}
+                  value={c.statement}
+                  onChange={(e) =>
+                    setF({ cases: form.cases.map((x, j) => (j === i ? { ...x, statement: e.target.value } : x)) })
+                  }
+                />
+              </label>
+              <label className="field" style={{ gridColumn: '1 / -1' }}>
+                <span>Чек-лист</span>
+                <textarea
+                  rows={3}
+                  value={c.checklist}
+                  onChange={(e) =>
+                    setF({ cases: form.cases.map((x, j) => (j === i ? { ...x, checklist: e.target.value } : x)) })
+                  }
+                />
+              </label>
+              <button
+                type="button"
+                className="btn ghost small"
+                onClick={() => setF({ cases: form.cases.filter((_, j) => j !== i) })}
+              >
+                Убрать кейс
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="btn ghost small"
+            onClick={() => setF({ cases: [...form.cases, { grade: 'middle', title: '', statement: '', checklist: '' }] })}
+          >
+            + Кейс
+          </button>
+
+          <h4>Критерии отчёта</h4>
+          <table className="sessions-table" data-testid="admin-track-criteria">
+            <thead>
+              <tr>
+                <th>Критерий</th>
+                <th>Вес (0..1)</th>
+                <th>Подсказка оценщику</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {form.criteria.map((c, i) => (
+                <tr key={i}>
+                  <td>
+                    <input
+                      value={c.name}
+                      onChange={(e) =>
+                        setF({ criteria: form.criteria.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min={0}
+                      max={1}
+                      value={c.weight}
+                      onChange={(e) =>
+                        setF({
+                          criteria: form.criteria.map((x, j) => (j === i ? { ...x, weight: e.target.value } : x)),
+                        })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={c.hint}
+                      onChange={(e) =>
+                        setF({ criteria: form.criteria.map((x, j) => (j === i ? { ...x, hint: e.target.value } : x)) })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn ghost small"
+                      onClick={() => setF({ criteria: form.criteria.filter((_, j) => j !== i) })}
+                    >
+                      Убрать
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className={sumWarn ? 'form-error' : 'muted small'}>
+            Сумма весов: {sum.toFixed(2)}
+            {sumWarn ? ' — вне 0.95..1.05 (сервер нормализует только в этом окне)' : ''}
+          </p>
+          <button
+            type="button"
+            className="btn ghost small"
+            onClick={() => setF({ criteria: [...form.criteria, { name: '', weight: '', hint: '' }] })}
+          >
+            + Критерий
+          </button>
+
+          <div className="start-form">
+            <label className="field">
+              <span>Порог подтверждения грейда (1..5, пусто — глобальный)</span>
+              <input
+                type="number"
+                step="0.1"
+                min={1}
+                max={5}
+                value={form.gradeConfirm}
+                onChange={(e) => setF({ gradeConfirm: e.target.value })}
+              />
+            </label>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button type="button" className="btn primary" data-testid="admin-track-save" disabled={saving} onClick={() => void save()}>
+              {saving ? 'Сохранение…' : 'Сохранить'}
+            </button>
+            {!form.isNew && (
+              <button
+                type="button"
+                className="btn danger"
+                data-testid="admin-track-delete"
+                disabled={saving}
+                onClick={() => void del(form.id, form.title)}
+              >
+                Удалить
+              </button>
+            )}
+            <button type="button" className="btn ghost" onClick={() => setForm(null)}>
+              Отмена
+            </button>
+          </div>
+        </div>
       )}
     </section>
   );
