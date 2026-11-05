@@ -883,7 +883,7 @@ function TracksTab() {
               <tr>
                 <th>ID</th>
                 <th>Название</th>
-                <th>Тип</th>
+                <th>Практика</th>
                 <th>Грейды</th>
                 <th></th>
               </tr>
