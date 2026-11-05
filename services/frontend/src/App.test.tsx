@@ -46,7 +46,7 @@ describe('App: маршрутизация (WP-7)', () => {
     expect(localStorage.getItem('grade.token')).toBeNull();
   });
 
-  it('с валидным токеном — кабинет с email и минутами', async () => {
+  it('с валидным токеном — кабинет с email и балансом', async () => {
     setToken('tok');
     vi.stubGlobal(
       'fetch',
@@ -54,10 +54,11 @@ describe('App: маршрутизация (WP-7)', () => {
     );
     render(<App />);
     expect(await screen.findByTestId('user-email')).toBeInTheDocument();
-    expect(screen.getByTestId('minutes')).toHaveTextContent('60');
+    // spec-20: баланс человекочитаемо (60 мин → «1 ч 0 мин»)
+    expect(screen.getByTestId('minutes')).toHaveTextContent('1 ч 0 мин');
     expect(screen.getByText('История')).toBeInTheDocument();
     // findBy: /sessions может резолвиться позже /auth/me (гонка запросов)
-    const link = await screen.findByRole('link', { name: 'Транскрипт' });
+    const link = await screen.findByRole('link', { name: 'Отчёт' });
     expect(link).toHaveAttribute('href', '#/sessions/1');
   });
 

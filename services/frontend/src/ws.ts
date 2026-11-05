@@ -16,6 +16,8 @@ export interface TrackStageMeta {
   coding: boolean;
   /** Практика: bash (spec-19, сисадмин) — livecode-стадия со стеком shell. */
   shell?: boolean;
+  /** Программа стадий по грейду (spec-20): ['voice','livecode','design','report']. */
+  stages?: string[];
 }
 
 export interface BoardStageInfo {

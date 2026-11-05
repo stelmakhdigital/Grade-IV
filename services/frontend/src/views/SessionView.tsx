@@ -138,13 +138,17 @@ export function SessionView({ id }: { id: number }) {
       <header className="header session-head">
         <div>
           <h1>
-            Интервью: {session.grade}
+            {/* spec-20: имя трека понятнее сырого грейда; стек — только у кодовых. */}
+            Интервью: {trackMeta?.title ?? session.grade}
             {session.stack ? ` / ${session.stack}` : ''}
           </h1>
           <p className="muted small">
             {user?.email} · <span className={`status ${paused ? 'paused' : session.status}`}>{statusLabel(paused ? 'paused' : session.status)}</span>
             {live && (
-              <span> · {stageLabel(stage)}</span>
+              <span>
+                {' · '}
+                {stage === 'livecode' && trackMeta?.shell === true ? 'Практика (bash)' : stageLabel(stage)}
+              </span>
             )}
           </p>
         </div>
@@ -250,23 +254,32 @@ export function SessionView({ id }: { id: number }) {
                   review={runReview}
                 />
               </Suspense>
-              {/* Кнопка перехода в System Design: только для грейдов, где design
-                  входит в программу (Middle/Senior/Staff; Junior — livecode→report).
-                  Раньше была в else-ветке тернарного выражения (видна только в
-                  voice-стадии) и в livecode не рендерилась — стадия design была
-                  недостижима из UI. */}
-              {session.grade !== 'junior' && (
-                <div className="stage-nav" data-testid="stage-nav">
-                  <button
-                    type="button"
-                    className="btn ghost"
-                    onClick={() => onStageAction('design')}
-                    data-testid="go-design"
-                  >
-                    К System Design
-                  </button>
-                </div>
-              )}
+              {/* Кнопка перехода в System Design: по программе стадий трека
+                  (trackMeta.stages, spec-20) — design стоит ПОСЛЕ livecode.
+                  BUG-20261104-026: раньше правило было по грейду (junior —
+                  livecode→report), и junior на shell-треке (design есть на всех
+                  грейдах) застревал на livecode без перехода. Легаси-сессии без
+                  track.stages — прежнее грейд-правило. */}
+              {(() => {
+                const st = trackMeta?.stages;
+                const nextDesign = st
+                  ? st.includes('design') && st.includes('livecode') && st.indexOf('design') > st.indexOf('livecode')
+                  : session.grade !== 'junior';
+                return (
+                  nextDesign && (
+                    <div className="stage-nav" data-testid="stage-nav">
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        onClick={() => onStageAction('design')}
+                        data-testid="go-design"
+                      >
+                        К System Design
+                      </button>
+                    </div>
+                  )
+                );
+              })()}
             </>
           ) : stage === 'design' ? (
             <>
@@ -276,7 +289,7 @@ export function SessionView({ id }: { id: number }) {
               {/* Возврат на предыдущую стадию разрешён (движок); холст при возврате
                   восстанавливается из сохранённого whiteboard. */}
               <div className="stage-nav" data-testid="stage-nav">
-                {(trackMeta == null || trackMeta.coding) && (
+                {(trackMeta == null || trackMeta.coding || trackMeta.shell === true) && (
                   <button
                     type="button"
                     className="btn ghost"
@@ -388,7 +401,7 @@ export function SessionView({ id }: { id: number }) {
                 <input
                   type="text"
                   className="text-answer"
-                  placeholder="Ответ текстом (необязательно)"
+                  placeholder="Ответ текстом"
                   value={typedAnswer}
                   onChange={(e) => setTypedAnswer(e.target.value)}
                   onKeyDown={(e) => {
@@ -453,7 +466,7 @@ export function SessionView({ id }: { id: number }) {
           </p>
         </section>
         <Suspense fallback={<PanelLoading />}>
-          <ReportView sessionId={id} />
+          <ReportView sessionId={id} shell={trackMeta?.shell === true} />
         </Suspense>
         </>
       )}

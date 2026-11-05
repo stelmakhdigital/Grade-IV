@@ -74,12 +74,13 @@ describe('CabinetView (WP-7)', () => {
     const fetchMock = mockApi({ sessions: [S_ACTIVE, S_FINISHED] });
     renderCabinet(fetchMock);
     expect(await screen.findByTestId('user-email')).toBeInTheDocument();
-    expect(screen.getByTestId('minutes')).toHaveTextContent('60');
+    // spec-20: баланс человекочитаемо (60 мин → «1 ч 0 мин»)
+    expect(screen.getByTestId('minutes')).toHaveTextContent('1 ч 0 мин');
     expect(screen.getByText('активна')).toBeInTheDocument();
     expect(screen.getByText('завершена')).toBeInTheDocument();
-    // завершённая → «Транскрипт», активная → «Продолжить»
+    // завершённая → «Отчёт» (spec-20), активная → «Продолжить»
     const links = screen.getAllByRole('link');
-    expect(links.some((l) => l.textContent === 'Транскрипт')).toBe(true);
+    expect(links.some((l) => l.textContent === 'Отчёт')).toBe(true);
     expect(links.some((l) => l.textContent === 'Продолжить')).toBe(true);
   });
 

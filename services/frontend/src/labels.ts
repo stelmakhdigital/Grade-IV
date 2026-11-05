@@ -16,6 +16,19 @@ export function stageLabel(stage: Stage | string): string {
   }
 }
 
+/** spec-20: минуты баланса человекочитаемо (59987 → «41 д 16 ч»). */
+export function humanMinutes(min: number): string {
+  if (min >= 1440) {
+    const d = Math.floor(min / 1440);
+    const h = Math.round((min % 1440) / 60);
+    return h > 0 ? `${d} д ${h} ч` : `${d} д`;
+  }
+  if (min >= 60) {
+    return `${Math.floor(min / 60)} ч ${min % 60} мин`;
+  }
+  return `${min} мин`;
+}
+
 export function statusLabel(status: SessionStatus | string): string {
   switch (status) {
     case 'active':

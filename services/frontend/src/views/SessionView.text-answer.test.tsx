@@ -89,9 +89,9 @@ afterEach(() => {
 });
 
 describe('текстовый ввод реплик (voice-стадия, spec-18 #5)', () => {
-  it('инпут с плейсхолдером «Ответ текстом (необязательно)» рядом с микрофоном', () => {
+  it('инпут с плейсхолдером «Ответ текстом» рядом с микрофоном', () => {
     renderView();
-    const input = screen.getByPlaceholderText('Ответ текстом (необязательно)');
+    const input = screen.getByPlaceholderText('Ответ текстом');
     expect(input).toBeTruthy();
     expect(screen.getByTestId('mic-toggle')).toBeTruthy();
   });
@@ -99,7 +99,7 @@ describe('текстовый ввод реплик (voice-стадия, spec-18 
   it('кнопка «Отправить» шлёт текст через sendTextUtterance и очищает поле', async () => {
     const user = userEvent.setup();
     renderView();
-    const input = screen.getByPlaceholderText('Ответ текстом (необязательно)');
+    const input = screen.getByPlaceholderText('Ответ текстом');
     await user.type(input, 'распределённый кеш через Redis');
     await user.click(screen.getByTestId('text-answer-send'));
     expect(t.sendTextUtterance).toHaveBeenCalledTimes(1);
@@ -110,7 +110,7 @@ describe('текстовый ввод реплик (voice-стадия, spec-18 
   it('Enter тоже отправляет', async () => {
     const user = userEvent.setup();
     renderView();
-    const input = screen.getByPlaceholderText('Ответ текстом (необязательно)');
+    const input = screen.getByPlaceholderText('Ответ текстом');
     await user.type(input, 'ответ{Enter}');
     expect(t.sendTextUtterance).toHaveBeenCalledTimes(1);
     expect(t.sendTextUtterance).toHaveBeenCalledWith('ответ');
@@ -133,7 +133,7 @@ describe('текстовый ввод реплик (voice-стадия, spec-18 
     t.sendTextUtterance.mockReturnValue(false);
     const user = userEvent.setup();
     renderView();
-    const input = screen.getByPlaceholderText('Ответ текстом (необязательно)');
+    const input = screen.getByPlaceholderText('Ответ текстом');
     await user.type(input, 'черкнуть');
     await user.click(screen.getByTestId('text-answer-send'));
     expect(t.sendTextUtterance).toHaveBeenCalledWith('черкнуть');

@@ -26,7 +26,7 @@ import {
 } from '../api';
 import { useAuth } from '../auth';
 import { apiErrorMessage } from './LoginView';
-import { statusLabel, stageLabel } from '../labels';
+import { humanMinutes, statusLabel, stageLabel } from '../labels';
 
 const GRADES: { value: Grade; label: string; minutes: number }[] = [
   { value: 'junior', label: 'Junior (45 мин)', minutes: 45 },
@@ -273,8 +273,8 @@ export function CabinetView() {
         <div>
           <h1>Грейд</h1>
           <p className="muted small">
-            <span data-testid="user-email">{user?.email}</span> · минут:{' '}
-            <strong data-testid="minutes">{minutesRemainingMin}</strong>
+            <span data-testid="user-email">{user?.email}</span> · баланс:{' '}
+            <strong data-testid="minutes" title={`${minutesRemainingMin} мин`}>{humanMinutes(minutesRemainingMin)}</strong>
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -459,12 +459,15 @@ export function CabinetView() {
               </tr>
             </thead>
             <tbody>
-              {sessions.map((s) => (
+              {sessions.map((s) => {
+                const sTrack = tracks.find((t) => t.id === s.track_id);
+                return (
                 <tr key={s.id} data-session-status={s.status}>
                   <td>{formatDate(s.started_at)}</td>
-                  <td>{s.grade}</td>
+                  {/* spec-20: роль видна в истории (раньше только грейд); shell-стадия — «Практика». */}
+                  <td>{sTrack ? sTrack.title : s.grade}</td>
                   <td>{s.stack}</td>
-                  <td>{stageLabel(s.stage)}</td>
+                  <td>{s.stage === 'livecode' && sTrack?.shell === true ? 'Практика (bash)' : stageLabel(s.stage)}</td>
                   <td>
                     <span className={`status ${s.status}`}>{statusLabel(s.status)}</span>
                     {/* spec-14/D13: итоговый балл рядом со статусом. */}
@@ -509,9 +512,10 @@ export function CabinetView() {
                   </td>
                   <td>{formatSeconds(s.active_seconds)}</td>
                   <td>
+                    {/* spec-20: ссылка ведёт на ОТЧЁТ сессии, а не транскрипт. */}
                     {s.status === 'finished' || s.status === 'aborted' ? (
                       <a className="btn ghost small" href={sessionPath(s.id)}>
-                        Транскрипт
+                        Отчёт
                       </a>
                     ) : (
                       <a className="btn ghost small" href={sessionPath(s.id)}>
@@ -520,7 +524,8 @@ export function CabinetView() {
                     )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}

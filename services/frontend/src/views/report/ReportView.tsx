@@ -9,6 +9,8 @@ import { apiErrorMessage } from '../LoginView';
 
 export interface ReportViewProps {
   sessionId: number;
+  /** spec-20: shell-трек — подпись стадии «Практика (bash)» вместо Live-Code. */
+  shell?: boolean;
   /** Интервал опроса 202, мс (тесты — быстрее). */
   pollMs?: number;
   /** Лимит опросов (тесты — меньше). */
@@ -18,7 +20,7 @@ export interface ReportViewProps {
 const POLL_MS = 2000;
 const MAX_POLLS = 30;
 
-export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS }: ReportViewProps) {
+export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS, shell = false }: ReportViewProps) {
   const [report, setReport] = useState<Report | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -120,6 +122,7 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS }
   return (
     <ReportBody
       report={report}
+      shell={shell}
       headerExtra={
         <div className="report-share" data-testid="report-share">
           {share === null ? (
@@ -152,7 +155,15 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS }
  * ShareReportView (публичная ссылка, spec-16/F1). headerExtra — блок справа
  * от заголовка (share-контролы / метаданные).
  */
-export function ReportBody({ report, headerExtra }: { report: Report; headerExtra?: React.ReactNode }) {
+export function ReportBody({
+  report,
+  headerExtra,
+  shell = false, // spec-20: shell-трек — «Практика (bash)» вместо «Live-Code»
+}: {
+  report: Report;
+  headerExtra?: React.ReactNode;
+  shell?: boolean;
+}) {
   const scoreColor = (s: number): string => (s >= 4 ? 'good' : s >= 2.5 ? 'mid' : 'bad');
 
   return (
@@ -215,7 +226,8 @@ export function ReportBody({ report, headerExtra }: { report: Report; headerExtr
 
       {report.livecode_tasks && report.livecode_tasks.length > 0 && (
         <>
-          <h3>Live-Code: задачи</h3>
+          {/* spec-20: shell-трек (сисадмин) — практика, а не Live-Code. */}
+          <h3>{shell ? 'Практика (bash): задачи' : 'Live-Code: задачи'}</h3>
           <ul className="livecode-tasks" data-testid="livecode-tasks">
             {report.livecode_tasks.map((t) => (
               <li key={t.id} className={`livecode-task lc-${t.status}`}>
