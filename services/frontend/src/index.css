@@ -348,6 +348,30 @@ p {
   margin-bottom: 0;
 }
 
+/* spec-20: фильтр истории (все/активные/завершённые) */
+.history-filter {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.history-filter .chip {
+  border: 1px solid #2a3140;
+  background: transparent;
+  color: #9aa4b2;
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.history-filter .chip-active {
+  background: #7aa2f7;
+  border-color: #7aa2f7;
+  color: #0b0e14;
+  font-weight: 600;
+}
+
 .start-form {
   display: flex;
   align-items: flex-end;

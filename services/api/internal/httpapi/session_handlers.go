@@ -24,10 +24,14 @@ const whiteboardMaxPngBytes = 10 << 20
 
 // DTO сессии для REST (ARCHITECTURE.md §4.1).
 type sessionDTO struct {
-	ID             int64      `json:"id"`
-	Grade          string     `json:"grade"`
-	Stack          string     `json:"stack"`
-	Stage          string     `json:"stage"`
+	ID    int64  `json:"id"`
+	Grade string `json:"grade"`
+	Stack string `json:"stack"`
+	// spec-20: трек роли в DTO списка/детальной — кабинет показывает роль
+	// вместо сырого грейда, отчёт завершённой сессии берёт мету трека
+	// (пусто = легаси-сессия на backend).
+	TrackID string `json:"track_id,omitempty"`
+	Stage   string `json:"stage"`
 	Status         string     `json:"status"`
 	DurationLimitS int        `json:"duration_limit_s"`
 	ActiveSeconds  float64    `json:"active_seconds"`
@@ -41,10 +45,11 @@ type sessionDTO struct {
 
 func toDTO(m models.Session, snap *session.Snapshot) sessionDTO {
 	d := sessionDTO{
-		ID:             m.ID,
-		Grade:          string(m.Grade),
-		Stack:          string(m.Stack),
-		Stage:          string(m.Stage),
+		ID:      m.ID,
+		Grade:   string(m.Grade),
+		Stack:   string(m.Stack),
+		TrackID: m.TrackID,
+		Stage:   string(m.Stage),
 		Status:         string(m.Status),
 		DurationLimitS: m.DurationLimitS,
 		ActiveSeconds:  m.ActiveSeconds,

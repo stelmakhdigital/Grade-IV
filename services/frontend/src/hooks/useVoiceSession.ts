@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getSession,
+  listTracks,
   listEvents,
   pauseSession,
   resumeSession,
@@ -115,6 +116,26 @@ export function useVoiceSession(id: number) {
           const ev = await listEvents(id);
           if (!alive) return;
           setLines(ev.map((e) => lineFromEvent(e)));
+          // spec-20/BUG-20261104-026: у завершённых сессий WS нет — track-мета
+          // из справочника, иначе шапка показывает сырой грейд, а отчёт —
+          // «Live-Code» вместо «Практика (bash)» на shell-треках.
+          if (s.track_id) {
+            try {
+              const trs = await listTracks();
+              if (!alive) return;
+              const t = trs.find((x) => x.id === s.track_id);
+              if (t) {
+                setTrackMeta({
+                  id: t.id,
+                  title: t.title,
+                  coding: t.coding,
+                  shell: t.shell === true,
+                });
+              }
+            } catch {
+              // справочник треков некритичен для рендера
+            }
+          }
         }
       } catch (e) {
         if (alive) setLoadError(apiErrorMessage(e));

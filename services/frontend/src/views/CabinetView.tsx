@@ -61,6 +61,8 @@ export function CabinetView() {
   const { user, minutesRemainingMin, logout, refresh } = useAuth();
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // spec-20: фильтр истории (все/активные/завершённые).
+  const [histFilter, setHistFilter] = useState<'all' | 'active' | 'finished'>('all');
   const [grade, setGrade] = useState<Grade>('middle');
   const [stack, setStack] = useState<Stack>('go');
   // spec-18: трек собеседования (backend — дефолт); список — из /tracks.
@@ -80,6 +82,14 @@ export function CabinetView() {
     };
   }, []);
   const track = tracks.find((t) => t.id === trackId) ?? null;
+
+  // spec-20: фильтр истории. «Активные» = active|paused, «Завершённые» =
+  // finished|aborted (прекращённые тоже past).
+  const visibleSessions = (sessions ?? []).filter((s) => {
+    if (histFilter === 'active') return s.status === 'active' || s.status === 'paused';
+    if (histFilter === 'finished') return s.status === 'finished' || s.status === 'aborted';
+    return true;
+  });
   // Грейды трека (fallback — все); при смене трека некорректный грейд сбрасывается.
   const gradeOptions = track ? GRADES.filter((g) => track.grades.includes(g.value)) : GRADES;
   useEffect(() => {
@@ -436,6 +446,20 @@ export function CabinetView() {
       <section className="card" aria-labelledby="history">
         <div className="history-head">
           <h2 id="history">История</h2>
+          {/* spec-20: фильтр истории — без него длинная лента нечитаема. */}
+          <div className="history-filter" role="group" aria-label="Фильтр истории">
+            {([['all', 'Все'], ['active', 'Активные'], ['finished', 'Завершённые']] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={`chip small${histFilter === key ? ' chip-active' : ''}`}
+                onClick={() => setHistFilter(key)}
+                data-testid={`hist-filter-${key}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <button type="button" className="btn ghost small" onClick={() => void load()}>
             Обновить
           </button>
@@ -445,7 +469,10 @@ export function CabinetView() {
         {sessions !== null && sessions.length === 0 && (
           <p className="muted">Сессий пока нет — начните первое интервью.</p>
         )}
-        {sessions !== null && sessions.length > 0 && (
+        {sessions !== null && sessions.length > 0 && visibleSessions.length === 0 && (
+          <p className="muted" data-testid="hist-empty-filtered">В этом фильтре сессий нет.</p>
+        )}
+        {sessions !== null && visibleSessions.length > 0 && (
           <table className="sessions-table">
             <thead>
               <tr>
@@ -459,7 +486,7 @@ export function CabinetView() {
               </tr>
             </thead>
             <tbody>
-              {sessions.map((s) => {
+              {visibleSessions.map((s) => {
                 const sTrack = tracks.find((t) => t.id === s.track_id);
                 return (
                 <tr key={s.id} data-session-status={s.status}>
