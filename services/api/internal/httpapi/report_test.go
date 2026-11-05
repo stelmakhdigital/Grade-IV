@@ -101,7 +101,7 @@ func TestReportLLMJSON(t *testing.T) {
 		"criteria": [
 			{"name": "CS-фундамент (ООП, структуры данных, сложность)", "weight": 0.9, "score": 4, "comment": "хорошо"},
 			{"name": "Live-Code (алгоритм, качество кода, тесты)", "weight": 0.9, "score": 5, "comment": "отлично"},
-			{"name": "Deep-dive по стеку (Go/Python)", "weight": 0.9, "score": 4, "comment": "глубоко"},
+			{"name": "Deep-dive по стеку (Go)", "weight": 0.9, "score": 4, "comment": "глубоко"},
 			{"name": "System Design (сервис с нуля, масштабируемость)", "weight": 0.9, "score": 3, "comment": "средне"},
 			{"name": "Коммуникация (ясность, структура, русский язык)", "weight": 0.9, "score": 5, "comment": "чётко"}
 		],

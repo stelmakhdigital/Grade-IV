@@ -79,21 +79,15 @@ func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, s
 		if !track.HasGrade(grade) {
 			return models.Session{}, fmt.Errorf("%w: грейд %q не входит в трек %q", ErrInvalidParams, grade, trackID)
 		}
-		if track.Coding {
-			if !track.HasStack(stack) {
-				return models.Session{}, fmt.Errorf("%w: стек %q не входит в трек %q", ErrInvalidParams, stack, trackID)
-			}
-		} else {
-			// Некодовый трек: стек не используется; присланный — ошибка клиента.
-			if stack != "" {
-				return models.Session{}, fmt.Errorf("%w: трек %q некодовый — стек не принимается", ErrInvalidParams, trackID)
-			}
-		}
+		// spec-22: стек практики — часть роли (practice.runtime). Клиентский
+		// stack не используется: сессия наследует рантайм роли ("" — без практики).
+		stack = track.Runtime()
 	}
 	if !grade.Valid() {
 		return models.Session{}, fmt.Errorf("%w: грейд %q", ErrInvalidParams, grade)
 	}
-	if track == nil || track.Coding {
+	if track == nil {
+		// Без резолвера треков (legacy-путь тестов/аварии) — старое правило.
 		if !stack.Valid() {
 			return models.Session{}, fmt.Errorf("%w: стек %q", ErrInvalidParams, stack)
 		}

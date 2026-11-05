@@ -95,13 +95,13 @@ describe('CabinetView (WP-7)', () => {
     await screen.findByTestId('user-email');
     const user = userEvent.setup();
     await user.selectOptions(screen.getByLabelText('Грейды'), 'junior');
-    await user.selectOptions(screen.getByLabelText('Стек'), 'python');
     await user.click(screen.getByTestId('start-session'));
     expect(window.location.hash).toBe('#/sessions/2');
-    // профиль дефолтный (balanced/standard, id=2) — уходит в body
+    // профиль дефолтный (balanced/standard, id=2) — уходит в body;
+    // spec-22: стек не выбирается (практика — часть роли), stack пустой.
     expect(JSON.parse((fetchMock.mock.calls.find((c) => c[1]?.method === 'POST')?.[1] as RequestInit).body as string)).toEqual({
       grade: 'junior',
-      stack: 'python',
+      stack: '',
       track_id: 'backend',
       profile_id: 2,
     });
@@ -118,7 +118,7 @@ describe('CabinetView (WP-7)', () => {
     await user.click(screen.getByTestId('start-session'));
     expect(JSON.parse((fetchMock.mock.calls.find((c) => c[1]?.method === 'POST')?.[1] as RequestInit).body as string)).toEqual({
       grade: 'middle',
-      stack: 'go',
+      stack: '',
       track_id: 'backend',
       profile_id: 1,
     });

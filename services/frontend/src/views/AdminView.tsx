@@ -15,6 +15,7 @@ import {
   adminPutTTSVoices,
   adminListTracks,
   adminCreateTrack,
+  adminGenerateTrack,
   adminUpdateTrack,
   adminDeleteTrack,
   ApiError,
@@ -28,6 +29,7 @@ import {
   type TTSVoice,
 } from '../api';
 import { useAuth } from '../auth';
+import { practiceLabel } from '../labels';
 
 const GRADES: Grade[] = ['junior', 'middle', 'senior', 'staff'];
 const GRADE_LABEL: Record<string, string> = {
@@ -89,7 +91,7 @@ export function AdminView() {
             ['templates', 'Шаблоны'],
             ['openings', 'Начала разговора'],
             ['voices', 'Голоса'],
-            ['tracks', 'Треки собеседований'],
+            ['tracks', 'Роли собеседований'],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -608,10 +610,11 @@ interface TrackFormState {
   isNew: boolean;
   id: string;
   title: string;
-  coding: boolean;
-  /** Практика: bash-задания (spec-19, сисадмин). Взаимоисключающа с coding. */
-  shell: boolean;
-  stacks: Stack[];
+  /** spec-22: 1-3 предложения о роли (админу и ИИ; кандидат не видит). */
+  description: string;
+  /** Практическая стадия (редактор задач): runtime — из банков sandbox. */
+  hasPractice: boolean;
+  runtime: 'go' | 'python' | 'shell';
   grades: Grade[];
   boardTitle: string;
   reviewPrompt: string;
@@ -626,9 +629,9 @@ function trackFromApi(t: AdminTrack): TrackFormState {
     isNew: false,
     id: t.id,
     title: t.title,
-    coding: t.coding,
-    shell: t.shell === true,
-    stacks: t.stacks ?? [],
+    description: t.description ?? '',
+    hasPractice: t.practice != null,
+    runtime: t.practice?.runtime ?? 'go',
     grades: [...t.grades],
     boardTitle: t.board.title,
     reviewPrompt: t.board.review_prompt,
@@ -654,9 +657,9 @@ const emptyTrack = (): TrackFormState => ({
   isNew: true,
   id: '',
   title: '',
-  coding: true,
-  shell: false,
-  stacks: ['go'],
+  description: '',
+  hasPractice: false,
+  runtime: 'go',
   grades: ['junior', 'middle', 'senior', 'staff'],
   boardTitle: '',
   reviewPrompt: '',
@@ -680,9 +683,8 @@ function buildTrackPayload(f: TrackFormState): AdminTrack {
   return {
     id: f.id.trim(),
     title: f.title.trim(),
-    coding: f.coding,
-    ...(f.shell && !f.coding ? { shell: true } : {}),
-    stacks: f.coding ? f.stacks : [],
+    ...(f.description.trim() === '' ? {} : { description: f.description.trim() }),
+    practice: f.hasPractice ? { runtime: f.runtime } : null,
     grades: f.grades,
     board: {
       title: f.boardTitle.trim(),
@@ -711,6 +713,11 @@ function TracksTab() {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<TrackFormState | null>(null);
   const [saving, setSaving] = useState(false);
+  // spec-22: ИИ-заполнение новой роли по описанию.
+  const [aiDesc, setAiDesc] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiHidden, setAiHidden] = useState(false);
 
   // spec-20: drag-n-drop палитры — порядок групп (ручка строки) и перенос
   // блоков между группами (чипы превью). Данные драга — в ref: в jsdom
@@ -760,6 +767,23 @@ function TracksTab() {
   }, [load]);
 
   const startEdit = (t: AdminTrack) => setForm(trackFromApi(t));
+
+  /** spec-22: черновик роли от ИИ → в форму (id админ правит перед сохранением). */
+  const generateRole = async (): Promise<void> => {
+    setAiBusy(true);
+    setAiError(null);
+    try {
+      const draft = await adminGenerateTrack(aiDesc.trim());
+      setForm({ ...trackFromApi(draft), isNew: true });
+      setAiHidden(true);
+      setAiDesc('');
+    } catch (e) {
+      // ИИ недоступен/не распарсился — форма остаётся пустой для ручного ввода.
+      setAiError(errText(e));
+    } finally {
+      setAiBusy(false);
+    }
+  };
 
   const setF = (patch: Partial<TrackFormState>) => setForm((f) => (f ? { ...f, ...patch } : f));
 
@@ -811,9 +835,19 @@ function TracksTab() {
   return (
     <section className="card" data-testid="admin-tracks">
       <div className="history-head">
-        <h2>Треки собеседований</h2>
-        <button type="button" className="btn primary small" data-testid="admin-track-new" onClick={() => setForm(emptyTrack())}>
-          Новый трек
+        <h2>Роли собеседований</h2>
+        <button
+          type="button"
+          className="btn primary small"
+          data-testid="admin-track-new"
+          onClick={() => {
+            setAiHidden(false);
+            setAiDesc('');
+            setAiError(null);
+            setForm(emptyTrack());
+          }}
+        >
+          Новая роль
         </button>
       </div>
       {error !== null && (
@@ -826,7 +860,7 @@ function TracksTab() {
         <>
           <div className="start-form">
             <label className="field">
-              <span>Выбрать трек для редактирования</span>
+              <span>Выбрать роль для редактирования</span>
               <select
                 data-testid="admin-track-select"
                 value=""
@@ -835,7 +869,7 @@ function TracksTab() {
                   if (t !== undefined) startEdit(t);
                 }}
               >
-                <option value="">— выберите трек —</option>
+                <option value="">— выберите роль —</option>
                 {tracks.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.title} ({t.id})
@@ -860,8 +894,13 @@ function TracksTab() {
                   <td>{t.id}</td>
                   <td>{t.title}</td>
                   <td>
-                    <span className={t.coding ? 'badge ok' : 'badge'}>{t.coding ? 'кодовый' : 'некодовый'}</span>
-                    {t.shell === true && <span className="badge">практика</span>}
+                    {t.practice != null ? (
+                      <span className="badge ok" data-testid={`admin-track-practice-${t.id}`}>
+                        практика: {practiceLabel(t.practice.runtime) ?? t.practice.runtime}
+                      </span>
+                    ) : (
+                      <span className="badge">голос и доска</span>
+                    )}
                   </td>
                   <td className="muted small">{t.grades.map(gradeLabel).join(', ')}</td>
                   <td>
@@ -878,7 +917,38 @@ function TracksTab() {
 
       {form !== null && (
         <div className="card" style={{ marginTop: 16, border: '1px solid #2a3140' }}>
-          <h3>{form.isNew ? 'Новый трек' : `Трек «${form.id}»`}</h3>
+          <h3>{form.isNew ? 'Новая роль' : `Роль «${form.title || form.id}»`}</h3>
+          {/* spec-22: ИИ заполняет конфиг по описанию — блок виден только у
+              новой роли, после заполнения/пропуска скрывается. */}
+          {form.isNew && !aiHidden && (
+            <div className="card" style={{ marginBottom: 14, border: '1px solid #2a3140' }}>
+              <label className="field" style={{ marginBottom: 8 }}>
+                <span>Опишите роль своими словами — что за специалист и что проверяем</span>
+                <textarea
+                  rows={2}
+                  data-testid="admin-track-ai-desc"
+                  value={aiDesc}
+                  placeholder="Например: аналитик данных, пишет на Python, строит дашборды и пайплайны"
+                  onChange={(e) => setAiDesc(e.target.value)}
+                />
+              </label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn primary small"
+                  data-testid="admin-track-ai-fill"
+                  disabled={aiBusy || aiDesc.trim().length < 10}
+                  onClick={() => void generateRole()}
+                >
+                  {aiBusy ? 'Заполняю…' : 'Заполнить ИИ'}
+                </button>
+                <button type="button" className="btn ghost small" data-testid="admin-track-ai-skip" onClick={() => setAiHidden(true)}>
+                  Заполнить вручную
+                </button>
+                {aiError !== null && <span className="form-error">{aiError}</span>}
+              </div>
+            </div>
+          )}
           <div className="start-form">
             <label className="field">
               <span>Название</span>
@@ -888,47 +958,34 @@ function TracksTab() {
               <span>ID</span>
               <input value={form.id} disabled={!form.isNew} onChange={(e) => setF({ id: e.target.value })} />
             </label>
-            <label className="field" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <input
-                type="checkbox"
-                checked={form.coding}
-                onChange={(e) => setF({ coding: e.target.checked, ...(e.target.checked ? { shell: false } : {}) })}
-              />
-              <span>Кодовая стадия (Go/Python)</span>
+            <label className="field" style={{ gridColumn: '1 / -1' }}>
+              <span>Описание (1–3 предложения)</span>
+              <textarea rows={2} data-testid="admin-track-desc" value={form.description} onChange={(e) => setF({ description: e.target.value })} />
             </label>
             <label className="field" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <input
                 type="checkbox"
-                data-testid="admin-track-shell"
-                checked={form.shell}
-                onChange={(e) => setF({ shell: e.target.checked, ...(e.target.checked ? { coding: false, stacks: [] } : {}) })}
+                data-testid="admin-track-practice"
+                checked={form.hasPractice}
+                onChange={(e) => setF({ hasPractice: e.target.checked })}
               />
-              <span>Практика: bash (shell)</span>
+              <span>Практика в редакторе</span>
             </label>
-          </div>
-          {form.coding && (
-            <div className="start-form">
+            {form.hasPractice && (
               <label className="field">
-                <span>Стеки</span>
-                <span style={{ display: 'flex', gap: 12 }}>
-                  {(['go', 'python'] as const).map((s) => (
-                    <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <input
-                        type="checkbox"
-                        checked={form.stacks.includes(s)}
-                        onChange={(e) =>
-                          setF({
-                            stacks: e.target.checked ? [...form.stacks, s] : form.stacks.filter((x) => x !== s),
-                          })
-                        }
-                      />
-                      <span>{s === 'go' ? 'Go' : 'Python'}</span>
-                    </label>
-                  ))}
-                </span>
+                <span>Чем решается</span>
+                <select
+                  data-testid="admin-track-runtime"
+                  value={form.runtime}
+                  onChange={(e) => setF({ runtime: e.target.value as TrackFormState['runtime'] })}
+                >
+                  <option value="go">Go</option>
+                  <option value="python">Python</option>
+                  <option value="shell">Bash</option>
+                </select>
               </label>
-            </div>
-          )}
+            )}
+          </div>
           <div className="start-form">
             <label className="field">
               <span>Грейды</span>

@@ -116,6 +116,7 @@ func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
 			"id": m.ID, "ws_url": "/ws/session/" + strconv.FormatInt(m.ID, 10),
 			"duration_limit_s": m.DurationLimitS, "template_id": m.TemplateID,
 			"track_id": m.TrackID,
+			"stack": m.Stack, // spec-22: рантайм практики роли (пусто — без практики)
 		})
 	case errors.Is(err, session.ErrNoMinutes):
 		writeError(w, http.StatusPaymentRequired, "out_of_minutes",

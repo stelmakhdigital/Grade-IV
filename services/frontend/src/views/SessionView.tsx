@@ -10,7 +10,7 @@ import { MicVisualizer, type MicEqMode } from './MicVisualizer';
 import { useVoiceSession } from '../hooks/useVoiceSession';
 import { micDebugEnabled } from '../audio/mic';
 import { formatRecDuration, mergeRecording, MIN_SPEECH_MS } from '../recording';
-import { statusLabel, stageLabel } from '../labels';
+import { practiceLabel, statusLabel, stageLabel } from '../labels';
 import { PanelLoading } from './PanelLoading';
 
 // Тяжёлые панели — лениво (B2): чанки Live-Code (Monaco-обёртка), System
@@ -147,7 +147,9 @@ export function SessionView({ id }: { id: number }) {
             {live && (
               <span>
                 {' · '}
-                {stage === 'livecode' && trackMeta?.shell === true ? 'Практика (bash)' : stageLabel(stage)}
+                {stage === 'livecode' && practiceLabel(trackMeta?.practice?.runtime) !== null
+                  ? `Практика (${practiceLabel(trackMeta?.practice?.runtime)})`
+                  : stageLabel(stage)}
               </span>
             )}
           </p>
@@ -297,7 +299,7 @@ export function SessionView({ id }: { id: number }) {
               {/* Возврат на предыдущую стадию разрешён (движок); холст при возврате
                   восстанавливается из сохранённого whiteboard. */}
               <div className="stage-nav" data-testid="stage-nav">
-                {(trackMeta == null || trackMeta.coding || trackMeta.shell === true) && (
+                {(trackMeta == null || trackMeta.practice != null) && (
                   <button
                     type="button"
                     className="btn ghost"
@@ -435,19 +437,21 @@ export function SessionView({ id }: { id: number }) {
                 </button>
               </span>
             )}
-            {stage === 'voice' && (trackMeta?.coding ?? true) && (
+            {/* Легаси-сессии без меты трека: прежняя кнопка. Новые роли —
+                «К практике (…)» выше. */}
+            {stage === 'voice' && trackMeta == null && (
               <button type="button" className="btn ghost" onClick={() => onStageAction('livecode')}>
                 К Live-Code
               </button>
             )}
-            {/* spec-19: shell-трек — из голосовой на практику (bash). */}
-            {stage === 'voice' && trackMeta != null && trackMeta.shell === true && (
+            {/* spec-22: роль с практикой — из голосовой на практику (runtime роли). */}
+            {stage === 'voice' && trackMeta != null && trackMeta.practice != null && (
               <button type="button" className="btn ghost" onClick={() => onStageAction('livecode')} data-testid="go-livecode-voice">
-                К практике (bash)
+                К практике ({practiceLabel(trackMeta.practice.runtime)})
               </button>
             )}
-            {/* spec-18: некодовый трек без практики — из голосовой сразу на доску. */}
-            {stage === 'voice' && trackMeta != null && !trackMeta.coding && trackMeta.shell !== true && (
+            {/* Роль без практики — из голосовой сразу на доску. */}
+            {stage === 'voice' && trackMeta != null && trackMeta.practice == null && (
               <button type="button" className="btn ghost" onClick={() => onStageAction('design')} data-testid="go-design-voice">
                 К доске
               </button>
@@ -474,7 +478,7 @@ export function SessionView({ id }: { id: number }) {
           </p>
         </section>
         <Suspense fallback={<PanelLoading />}>
-          <ReportView sessionId={id} shell={trackMeta?.shell === true} />
+          <ReportView sessionId={id} shell={trackMeta?.practice?.runtime === 'shell'} />
         </Suspense>
         </>
       )}

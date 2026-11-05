@@ -14,7 +14,6 @@ func validTrack() models.Track {
 	return models.Track{
 		ID:     "qa",
 		Title:  "QA-инженер",
-		Coding: false,
 		Grades: []models.Grade{models.GradeJunior, models.GradeMiddle},
 		Board: models.BoardConfig{
 			Title:        "Схема тест-плана",
@@ -60,38 +59,51 @@ func TestValidateWeightsNormalized(t *testing.T) {
 	}
 }
 
-func TestValidateCodingStacks(t *testing.T) {
+// TestValidatePracticeRuntime — spec-22: практика — один рантайм из банков
+// sandbox; роли без практики валидны.
+func TestValidatePracticeRuntime(t *testing.T) {
 	tk := validTrack()
-	tk.Coding = true // coding без стеков
+	tk.Practice = &models.Practice{Runtime: models.Stack("rust")}
 	if err := tk.Validate(); err == nil {
-		t.Fatal("coding без стеков должен быть отвергнут")
+		t.Fatal("недопустимый рантайм должен быть отвергнут")
 	}
-	tk.Stacks = []models.Stack{models.StackGo}
+	tk.Practice = &models.Practice{Runtime: models.StackGo}
 	if err := tk.Validate(); err != nil {
-		t.Fatalf("coding+go: %v", err)
+		t.Fatalf("практика go: %v", err)
 	}
-	backend := validTrack()
-	backend.Coding, backend.Stacks = false, []models.Stack{models.StackGo}
-	if err := backend.Validate(); err == nil {
-		t.Fatal("некодовый трек со стеками должен быть отвергнут")
+	noPractice := validTrack()
+	if err := noPractice.Validate(); err != nil {
+		t.Fatalf("роль без практики: %v", err)
 	}
 }
 
-// TestValidateShellExclusive — spec-19: coding и shell — взаимоисключающие
-// практические стадии; shell-некодовый трек валиден.
-func TestValidateShellExclusive(t *testing.T) {
-	tk := validTrack()
-	tk.Coding = true
-	tk.Stacks = []models.Stack{models.StackGo}
-	tk.Shell = true
-	if err := tk.Validate(); err == nil {
-		t.Fatal("coding+shell должен быть отвергнут (одна практическая стадия)")
+// TestUnmarshalLegacy — треки, сохранённые админом в старой форме
+// (coding/shell/stacks), читаются: практическая стадия не теряется.
+func TestUnmarshalLegacy(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		runtime models.Stack
+		none    bool
+	}{
+		{"coding go", `{"id":"x","coding":true,"stacks":["go","python"]}`, models.StackGo, false},
+		{"shell", `{"id":"x","coding":false,"shell":true}`, models.StackShell, false},
+		{"без практики", `{"id":"x","coding":false}`, "", true},
 	}
-	shell := validTrack()
-	shell.Coding = false
-	shell.Shell = true
-	if err := shell.Validate(); err != nil {
-		t.Fatalf("shell-некодовый трек: %v", err)
+	for _, c := range cases {
+		var tr models.Track
+		if err := json.Unmarshal([]byte(c.raw), &tr); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if c.none {
+			if tr.Practice != nil {
+				t.Fatalf("%s: практика должна отсутствовать", c.name)
+			}
+			continue
+		}
+		if tr.Practice == nil || tr.Practice.Runtime != c.runtime {
+			t.Fatalf("%s: рантайм %v, ожидался %s", c.name, tr.Practice, c.runtime)
+		}
 	}
 }
 
@@ -106,7 +118,7 @@ func TestStages(t *testing.T) {
 	if sysTrack == nil {
 		t.Fatal("нет трека sysadmin")
 	}
-	// spec-19: sysadmin — shell-трек: voice → livecode (bash) → design → report.
+	// spec-19/22: практика (shell): voice → livecode (bash) → design → report.
 	st := sysTrack.Stages(models.GradeJunior)
 	if len(st) != 4 || st[1] != models.StageLiveCode || st[2] != models.StageDesign {
 		t.Fatalf("shell-трек: voice→livecode→design→report, получено %v", st)
@@ -117,13 +129,26 @@ func TestStages(t *testing.T) {
 			backend = &sys[i]
 		}
 	}
+	// spec-22: единая программа для всех грейдов роли с практикой
+	// (грейд-правило «junior без design» упразднено — BUG-20261104-026).
 	jb := backend.Stages(models.GradeJunior)
-	if len(jb) != 3 || jb[1] != models.StageLiveCode {
-		t.Fatalf("backend junior: voice→livecode→report, получено %v", jb)
+	if len(jb) != 4 || jb[1] != models.StageLiveCode || jb[2] != models.StageDesign {
+		t.Fatalf("backend junior: voice→livecode→design→report, получено %v", jb)
 	}
 	mb := backend.Stages(models.GradeMiddle)
 	if len(mb) != 4 {
 		t.Fatalf("backend middle: 4 стадии, получено %v", mb)
+	}
+	// pm — без практики: voice → design → report.
+	var pm *models.Track
+	for i := range sys {
+		if sys[i].ID == "pm" {
+			pm = &sys[i]
+		}
+	}
+	pst := pm.Stages(models.GradeJunior)
+	if len(pst) != 3 || pst[1] != models.StageDesign {
+		t.Fatalf("pm: voice→design→report, получено %v", pst)
 	}
 }
 

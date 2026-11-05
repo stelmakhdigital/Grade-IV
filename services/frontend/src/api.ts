@@ -45,13 +45,13 @@ export type Stage = 'voice' | 'livecode' | 'design' | 'report';
 export type SessionStatus = 'active' | 'paused' | 'finished' | 'aborted';
 
 /** Трек собеседования (spec-18): профиль роли — состав стадий/доска/критерии. */
+/** spec-22: роль собеседования. Практика — часть роли (один runtime); null —
+ * роль без практической стадии. Стеков «на выбор кандидата» больше нет. */
 export interface Track {
   id: string;
   title: string;
-  coding: boolean;
-  /** Практика — bash-задания (spec-19, сисадмин): livecode-стадия со стеком shell. */
-  shell?: boolean;
-  stacks?: Stack[];
+  description?: string;
+  practice?: { runtime: Stack } | null;
   grades: Grade[];
   board: {
     title: string;
@@ -329,6 +329,18 @@ export function listTracks(): Promise<Track[]> {
 /** Полный список треков (админ-редактор, spec-18/Ф4). */
 export function adminListTracks(): Promise<AdminTrack[]> {
   return request<AdminTrack[]>('/admin/tracks', { auth: true });
+}
+
+/**
+ * spec-22: черновик роли по описанию (ИИ). НЕ сохраняется — админ правит
+ * в форме и сохраняет adminCreateTrack. 502 — ИИ недоступен (fallback —
+ * ручное заполнение).
+ */
+export function adminGenerateTrack(description: string): Promise<AdminTrack> {
+  return request<{ track: AdminTrack }>('/admin/tracks/generate', {
+    body: { description },
+    auth: true,
+  }).then((r) => r.track);
 }
 
 export function adminCreateTrack(t: AdminTrack): Promise<AdminTrack> {

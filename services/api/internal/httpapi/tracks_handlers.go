@@ -6,21 +6,29 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 )
 
 // trackView — сокращённая выдача для кабинета (без промптов ревью и чек-листов:
 // это серверные рубрики; UI нужны только палитра/заголовок и критерии).
 type trackView struct {
-	ID       string         `json:"id"`
-	Title    string         `json:"title"`
-	Coding   bool           `json:"coding"`
-	Shell    bool           `json:"shell,omitempty"` // spec-19: практика bash (сисадмин)
-	Stacks   []models.Stack `json:"stacks,omitempty"`
-	Grades   []models.Grade `json:"grades"`
-	Board    trackBoardView `json:"board"`
-	Criteria []trackViewCri `json:"criteria"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	// Description — 1–3 предложения о роли (кабинет: подпись под выбором).
+	Description string `json:"description,omitempty"`
+	// Practice — практическая стадия роли (spec-22): {runtime: go|python|shell};
+	// null — без практики. Стеков «на выбор кандидата» больше нет.
+	Practice *trackPracticeView `json:"practice,omitempty"`
+	Grades   []models.Grade     `json:"grades"`
+	Board    trackBoardView     `json:"board"`
+	Criteria []trackViewCri     `json:"criteria"`
+}
+
+type trackPracticeView struct {
+	Runtime models.Stack `json:"runtime"`
 }
 
 type trackBoardView struct {
@@ -41,15 +49,14 @@ type trackViewCri struct {
 
 func toTrackView(t models.Track) trackView {
 	v := trackView{
-		ID:     t.ID,
-		Title:  t.Title,
-		Coding: t.Coding,
-		Shell:  t.Shell,
-		Grades: t.Grades,
-		Board:  trackBoardView{Title: t.Board.Title},
+		ID:          t.ID,
+		Title:       t.Title,
+		Description: t.Description,
+		Grades:      t.Grades,
+		Board:       trackBoardView{Title: t.Board.Title},
 	}
-	if t.Coding {
-		v.Stacks = t.Stacks
+	if t.Practice != nil {
+		v.Practice = &trackPracticeView{Runtime: t.Practice.Runtime}
 	}
 	for _, g := range t.Board.Groups {
 		v.Board.Groups = append(v.Board.Groups, trackViewGrp{Title: g.Title, Names: g.Names, Color: g.Color})
@@ -178,3 +185,140 @@ var errEmptyTrackBody = errTrackBody{}
 type errTrackBody struct{}
 
 func (errTrackBody) Error() string { return "нет объекта трека в теле" }
+
+// trackGenSystemPrompt — правила черновика роли для ИИ (spec-22). Жёсткие
+// ограничения схемы: рантайм практики только из банков sandbox; JSON без
+// обёрток и комментариев.
+const trackGenSystemPrompt = `Ты конфигурируешь роль собеседования. По короткому описанию пользователя верни ТОЛЬКО JSON-объект роли без markdown и комментариев.
+
+Схема JSON:
+{
+  "title": "человекочитаемое название роли (2-4 слова)",
+  "description": "1-3 предложения: что за специалист и что проверяем на собеседовании",
+  "practice": null | {"runtime": "go" | "python" | "shell"},
+  "grades": ["junior"|"middle"|"senior"|"staff", ...],
+  "board": {
+    "title": "заголовок доски (например «Архитектура системы», «План проекта»)",
+    "review_prompt": "что оценивать в схеме: 2-4 предложения, конкретно",
+    "groups": [ {"title": "группа", "names": ["блок", "блок", ...]}, ... ],
+    "cases": [ {"grade": "middle", "title": "кейс", "statement": "задание кандидату 2-3 предложения", "checklist": ["элемент", ...]}, ... ]
+  },
+  "criteria": [ {"name": "критерий", "weight": 0.25, "hint": "что оценивать"}, ... ]
+}
+
+Правила:
+1) practice: если работа роли связана с написанием кода — {"runtime":"go"} или {"runtime":"python"} (по языку роли); для администрирования/скриптов — {"runtime":"shell"}; если код не пишут (менеджмент, аналитика без кода) — null.
+2) grades: 2-3 уместных грейда из junior/middle/senior/staff.
+3) board.groups: 2-4 группы по 3-6 блоков — сущности, которые кандидат рисует на доске.
+4) board.cases: 1-2 кейса на middle (grade:"middle") с чек-листом из 4-6 пунктов.
+5) criteria: 4-6 критериев; веса — доли, сумма ровно 1.0; последний или первый — «Коммуникация (ясность, структура)» с весом 0.10-0.15.
+6) Пиши по-русски (кроме id-подобных сущностей на доске).`
+
+// handleAdminTrackGenerate — POST /api/v1/admin/tracks/generate {description}:
+// черновик роли заполняет ИИ. Черновик НЕ сохраняется — админ правит в форме
+// и сохраняет обычным POST /admin/tracks. 502 — ИИ не ответил/не распарсился.
+func (s *Server) handleAdminTrackGenerate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "ожидается JSON {description}")
+		return
+	}
+	desc := strings.TrimSpace(body.Description)
+	if len([]rune(desc)) < 10 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "опишите роль подробнее (минимум 10 символов)")
+		return
+	}
+	if s.interviewer == nil {
+		writeError(w, http.StatusBadGateway, "llm_unavailable", "ИИ недоступен — заполните роль вручную")
+		return
+	}
+	resp, err := s.interviewer.Provider().Chat(r.Context(), llm.Request{
+		Messages: []llm.Message{
+			{Role: llm.RoleSystem, Content: trackGenSystemPrompt},
+			{Role: llm.RoleUser, Content: desc},
+		},
+		Temperature: 0.4,
+		MaxTokens:   1800,
+	})
+	if err != nil {
+		s.log.Warn("track generate: llm", "err", err)
+		writeError(w, http.StatusBadGateway, "llm_unavailable", "ИИ не ответил — заполните роль вручную")
+		return
+	}
+	var draft models.Track
+	if err := json.Unmarshal([]byte(extractJSONObject(resp.Content)), &draft); err != nil {
+		s.log.Warn("track generate: парсинг", "err", err)
+		writeError(w, http.StatusBadGateway, "llm_bad_json", "ИИ вернул некорректный конфиг — попробуйте ещё раз или заполните вручную")
+		return
+	}
+	// ИИ не задаёт id (его ставит админ при сохранении) — черновик валиден
+	// только по содержанию: подставляем временный slug по названию.
+	if draft.ID == "" {
+		draft.ID = slugifyTrack(draft.Title)
+	}
+	if err := draft.Validate(); err != nil {
+		s.log.Warn("track generate: валидация", "err", err)
+		writeError(w, http.StatusBadGateway, "llm_bad_json", "ИИ вернул некорректный конфиг — попробуйте ещё раз или заполните вручную")
+		return
+	}
+	draft.SortCriteria()
+	writeJSON(w, http.StatusOK, map[string]any{"track": draft})
+}
+
+// extractJSONObject — первый сбалансированный {...} блока текста (ответ ИИ
+// может содержать обвязку «Вот конфиг:»).
+func extractJSONObject(s string) string {
+	start := strings.Index(s, "{")
+	if start < 0 {
+		return s
+	}
+	depth := 0
+	inStr := false
+	esc := false
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case esc:
+			esc = false
+		case c == '\\' && inStr:
+			esc = true
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+		case c == '{':
+			depth++
+		case c == '}':
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return s[start:]
+}
+
+// slugifyTrack — id роли из названия: строчные латиница/цифры/дефисы
+// (кириллица транслитом не делаем — админ правит id руками, поле в форме).
+func slugifyTrack(title string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(title) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == ' ', r == '-', r == '_':
+			if b.Len() > 0 && !strings.HasSuffix(b.String(), "-") {
+				b.WriteByte('-')
+			}
+		}
+		if b.Len() >= 32 {
+			break
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		out = "role"
+	}
+	return out
+}

@@ -199,11 +199,12 @@ func (s *Store) persistLocked() error {
 // в interview_templates (track=sysadmin/pm), сидируются при Migrate.
 func DefaultTracks() []models.Track {
 	backend := models.Track{
-		ID:     "backend",
-		Title:  "Backend-разработчик",
-		Coding: true,
-		Stacks: []models.Stack{models.StackGo, models.StackPython},
-		Grades: []models.Grade{models.GradeJunior, models.GradeMiddle, models.GradeSenior, models.GradeStaff},
+		ID: "backend",
+		// spec-22: один runtime на роль — Go. Python-роль админ создаёт
+		// отдельно (ИИ-заполнение по описанию); выбор стека кандидатом убран.
+		Title:     "Backend-разработчик",
+		Practice:  &models.Practice{Runtime: models.StackGo},
+		Grades:    []models.Grade{models.GradeJunior, models.GradeMiddle, models.GradeSenior, models.GradeStaff},
 		Board: models.BoardConfig{
 			Title: "System Design: сервис с нуля",
 			ReviewPrompt: "Кандидат собирал схему системы (System Design). Оцени структуру: " +
@@ -218,7 +219,7 @@ func DefaultTracks() []models.Track {
 		},
 		Criteria: []models.TrackCriterion{
 			{Name: "CS-фундамент (ООП, структуры данных, сложность)", Weight: 0.20, Hint: "теория по ответам голосовой стадии"},
-			{Name: "Deep-dive по стеку (Go/Python)", Weight: 0.25, Hint: "глубина знаний стека"},
+			{Name: "Deep-dive по стеку (Go)", Weight: 0.25, Hint: "глубина знаний стека"},
 			{Name: "Live-Code (алгоритм, качество кода, тесты)", Weight: 0.25, Hint: "по запускам кода"},
 			{Name: "System Design (сервис с нуля, масштабируемость)", Weight: 0.15, Hint: "по схеме и объяснению"},
 			{Name: "Коммуникация (ясность, структура, русский язык)", Weight: 0.15, Hint: "ясность речи и структуры ответов"},
@@ -228,11 +229,10 @@ func DefaultTracks() []models.Track {
 	// senior различались); точная развеска по грейдам остаётся в fallback
 	// criteriaForGrade для сессий без трека.
 	sysadmin := models.Track{
-		ID:     "sysadmin",
-		Shell:  true,
-		Title:  "Системный администратор",
-		Coding: false,
-		Grades: []models.Grade{models.GradeJunior, models.GradeMiddle, models.GradeSenior},
+		ID:        "sysadmin",
+		Title:     "Системный администратор",
+		Practice:  &models.Practice{Runtime: models.StackShell},
+		Grades:    []models.Grade{models.GradeJunior, models.GradeMiddle, models.GradeSenior},
 		Board: models.BoardConfig{
 			Title: "Схема инфраструктуры",
 			ReviewPrompt: "Кандидат собирал схему инфраструктуры. Оцени: сегментация сети и " +
@@ -268,7 +268,6 @@ func DefaultTracks() []models.Track {
 	pm := models.Track{
 		ID:     "pm",
 		Title:  "Проджект-менеджер",
-		Coding: false,
 		Grades: []models.Grade{models.GradeJunior, models.GradeMiddle, models.GradeSenior},
 		Board: models.BoardConfig{
 			Title: "План проекта",

@@ -191,6 +191,13 @@ func newMockProvider(cfg *config.Config) llm.Provider {
 					return "Привет. Давайте начнём.", nil
 				}
 			}
+			// spec-22: генератор ролей — детерминированный черновик (валидный
+			// JSON по схеме), чтобы E2E с LLM_MOCK проверял весь путь.
+			for _, msg := range req.Messages {
+				if msg.Role == llm.RoleSystem && strings.Contains(msg.Content, "конфигурируешь роль") {
+					return trackMockDraft, nil
+				}
+			}
 			return resp, nil
 		})
 	}
@@ -246,6 +253,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/tracks", s.requireAuth(http.HandlerFunc(s.handleTracksList)))
 	mux.Handle("GET /api/v1/admin/tracks", s.requireAdmin(http.HandlerFunc(s.handleAdminTracksList)))
 	mux.Handle("POST /api/v1/admin/tracks", s.requireAdmin(http.HandlerFunc(s.handleAdminTrackCreate)))
+	// spec-22: черновик роли по описанию (ИИ) — не сохраняет, только draft.
+	mux.Handle("POST /api/v1/admin/tracks/generate", s.requireAdmin(http.HandlerFunc(s.handleAdminTrackGenerate)))
 	mux.Handle("PUT /api/v1/admin/tracks/{id}", s.requireAdmin(http.HandlerFunc(s.handleAdminTrackUpdate)))
 	mux.Handle("DELETE /api/v1/admin/tracks/{id}", s.requireAdmin(http.HandlerFunc(s.handleAdminTrackDelete)))
 
@@ -353,3 +362,31 @@ func (s *Server) withLogging(next http.Handler) http.Handler {
 		)
 	})
 }
+
+// trackMockDraft — ответ мока генератора ролей (spec-22): валидный черновик,
+// админ правит id/название перед сохранением.
+const trackMockDraft = `{
+  "title": "Data-инженер",
+  "description": "Строит пайплайны данных: сбор, трансформация, загрузка в хранилище. Проверяем моделирование данных и надёжность пайплайнов.",
+  "practice": {"runtime": "python"},
+  "grades": ["junior", "middle"],
+  "board": {
+    "title": "Схема пайплайна данных",
+    "review_prompt": "Оцени: источники и их контракт, трансформации, хранилище, мониторинг качества данных, идемпотентность и ретраи. Сверяй схему с объяснением.",
+    "groups": [
+      {"title": "Источники", "names": ["API", "Вебхуки", "Логи", "БД-источник"]},
+      {"title": "Обработка", "names": ["Ingest", "Трансформация", "Валидация", "Очередь"]},
+      {"title": "Хранилище", "names": ["Data Lake", "SQL-хранилище", "Кэш", "Дашборд"]}
+    ],
+    "cases": [
+      {"grade": "middle", "title": "Ежедневная загрузка заказов", "statement": "Спроектируй ежедневную загрузку заказов из API партнёра в хранилище: источники, трансформации, контроль качества. Объясни, что делать при сбое загрузки.", "checklist": ["контракт источника", "идемпотентная загрузка", "валидация и карантин", "ретраи и алертинг"]}
+    ]
+  },
+  "criteria": [
+    {"name": "Моделирование данных", "weight": 0.25, "hint": "структура хранилища и контракты"},
+    {"name": "Надёжность пайплайна", "weight": 0.25, "hint": "ретраи, идемпотентность, карантин"},
+    {"name": "Практика (качество кода)", "weight": 0.20, "hint": "по запускам кода"},
+    {"name": "Коммуникация (ясность, структура)", "weight": 0.15, "hint": "ясность речи и структуры ответов"},
+    {"name": "Эксплуатация (мониторинг, алерты)", "weight": 0.15, "hint": "как следит за качеством данных"}
+  ]
+}`

@@ -13,9 +13,8 @@ import { parseTtsFrame } from './audio/resample';
 export interface TrackStageMeta {
   id: string;
   title: string;
-  coding: boolean;
-  /** Практика: bash (spec-19, сисадмин) — livecode-стадия со стеком shell. */
-  shell?: boolean;
+  /** spec-22: практика роли {runtime: 'go'|'python'|'shell'}; null — без практики. */
+  practice?: { runtime: 'go' | 'python' | 'shell' } | null;
   /** Программа стадий по грейду (spec-20): ['voice','livecode','design','report']. */
   stages?: string[];
 }

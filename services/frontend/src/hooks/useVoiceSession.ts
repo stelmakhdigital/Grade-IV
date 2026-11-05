@@ -128,8 +128,7 @@ export function useVoiceSession(id: number) {
                 setTrackMeta({
                   id: t.id,
                   title: t.title,
-                  coding: t.coding,
-                  shell: t.shell === true,
+                  practice: t.practice ?? null,
                 });
               }
             } catch {

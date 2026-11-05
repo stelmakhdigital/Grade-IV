@@ -29,6 +29,23 @@ export function humanMinutes(min: number): string {
   return `${min} мин`;
 }
 
+/**
+ * spec-22: человекочитаемое имя рантайма практики («Go», «Python», «bash»);
+ * null — практики нет (подпись стадии — не «Практика»).
+ */
+export function practiceLabel(runtime: string | null | undefined): string | null {
+  switch (runtime) {
+    case 'go':
+      return 'Go';
+    case 'python':
+      return 'Python';
+    case 'shell':
+      return 'bash';
+    default:
+      return null;
+  }
+}
+
 export function statusLabel(status: SessionStatus | string): string {
   switch (status) {
     case 'active':

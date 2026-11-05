@@ -28,10 +28,12 @@ type Stack string
 const (
 	StackGo     Stack = "go"
 	StackPython Stack = "python"
+	// StackShell — bash-практика (spec-19/22): solution.sh + чек-скрипт банка.
+	StackShell Stack = "shell"
 )
 
-// Valid — верно, если стек в скоупе MVP.
-func (s Stack) Valid() bool { return s == StackGo || s == StackPython }
+// Valid — верно, если стек в скоупе (go/python — код; shell — bash-практика).
+func (s Stack) Valid() bool { return s == StackGo || s == StackPython || s == StackShell }
 
 // Stage — стадия сессии.
 type Stage string

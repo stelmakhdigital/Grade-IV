@@ -843,8 +843,8 @@ func (s *Server) liveCodeStack(sess models.Session) string {
 		return string(sess.Stack)
 	}
 	if s.tracks != nil && sess.TrackID != "" {
-		if t, err := s.tracks.Get(sess.TrackID); err == nil && t != nil && t.Shell {
-			return "shell"
+		if t, err := s.tracks.Get(sess.TrackID); err == nil && t != nil {
+			return string(t.Runtime())
 		}
 	}
 	return ""

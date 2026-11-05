@@ -1,36 +1,41 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 )
 
-// Track — профиль роли собеседования (spec-18): состав стадий, конфиг доски,
-// критерии отчёта. Дефолтные треки — config/roles.json (оверрайд через
-// ROLE_TRACKS_FILE), правка — админ-API /admin/tracks.
+// Track — роль собеседования (spec-22, редизайн spec-18): описание роли,
+// опциональная практическая стадия, конфиг доски, критерии отчёта. Роль
+// самодостаточна: в кабинете выбирают только роль и грейд — стек практики
+// зашит в роль (админ создаёт роль под язык; выбор стека кандидатом убран).
+//
+// Дефолтные роли — config/roles.json (оверрайд ROLE_TRACKS_FILE), правка —
+// админ-API /admin/tracks, черновик — POST /admin/tracks/generate (ИИ
+// заполняет конфиг по короткому описанию).
 //
 // Инварианты (Validate):
 //   - id: ^[a-z0-9-]{2,32}$, title непустой;
-//   - coding=true → stacks ⊆ {go, python}, непусто; coding=false → stacks пуст;
+//   - practice.runtime ∈ {go, python, shell} (банков задач и рантаймов
+//     sandbox — только эти три);
 //   - grades ⊆ {junior, middle, senior, staff}, непусто;
-//   - criteria: ≥1, веса в [0..1], сумма 0.95..1.05 (нормализуется при валидации);
+//   - criteria: ≥1, веса в [0..1], сумма 0.95..1.05 (нормализуется);
 //   - board всегда задан (доска — универсальная стадия «показать/объяснить»).
 type Track struct {
-	ID    string `json:"id"`
+	ID string `json:"id"`
+	// Title — человекочитаемое имя роли («Backend-разработчик»).
 	Title string `json:"title"`
-	// Coding — трек с кодовой стадией (Live-Code go/python + sandbox). Для
-	// некодовых ролей (PM) стадия livecode не входит в программу.
-	Coding bool `json:"coding"`
-	// Shell — практическая shell-стадия (spec-19): bash-задания из банка
-	// sandbox (solution.sh + чек-скрипт), стадия livecode в редакторе.
-	// Только для некодовых ролей (сисадмин): coding и shell — взаимоисключающие
-	// практические стадии (одна стадия livecode, выбор задач — по треку).
-	Shell bool `json:"shell,omitempty"`
-	// Stacks — допустимые стеки кодовой стадии (для coding-треков).
-	Stacks []Stack `json:"stacks,omitempty"`
-	// Grades — допустимые грейды трека (выбор в кабинете фильтруется).
+	// Description — 1–3 предложения: что за роль и что проверяем. Видят
+	// кандидату? Нет: для админа и ИИ-заполнения/оценщика.
+	Description string `json:"description,omitempty"`
+	// Practice — практическая стадия в редакторе (nil = без практики: голос +
+	// доска). Один runtime на роль: банк задач и рантайм sandbox выбираются
+	// по нему; «стеки на выбор кандидата» убраны (spec-22).
+	Practice *Practice `json:"practice,omitempty"`
+	// Grades — допустимые грейды роли (выбор в кабинете фильтруется).
 	Grades []Grade `json:"grades"`
 	// Board — конфиг стадии доски (spec-18/Ф3): палитра, заголовок, промпт
 	// ревью, кейс-задания по грейду.
@@ -40,6 +45,46 @@ type Track struct {
 	// GradeConfirm — порог подтверждения грейда (опциональный override
 	// глобального 4.2). 0 — глобальный.
 	GradeConfirm float64 `json:"grade_confirm,omitempty"`
+}
+
+// Practice — практическая стадия роли (spec-22).
+type Practice struct {
+	// Runtime — чем решается практика: go | python | shell (bash). Определяет
+	// банк задач sandbox и рантайм прогона; подпись стадии («Практика (Go)»)
+	// строится из него.
+	Runtime Stack `json:"runtime"`
+}
+
+// trackLegacy — поля трека до spec-22 (coding/shell/stacks): читаются для
+// совместимости, чтобы треки, сохранённые админом в старой форме, не теряли
+// практическую стадию.
+type trackLegacy struct {
+	Coding bool    `json:"coding"`
+	Shell  bool    `json:"shell"`
+	Stacks []Stack `json:"stacks"`
+}
+
+// UnmarshalJSON — совместимость: старая форма (coding/shell/stacks) конвертируется
+// в practice (первый стек кодовой стадии; shell-флаг → bash). Новая форма — как есть.
+func (t *Track) UnmarshalJSON(b []byte) error {
+	type rawTrack Track // без методов — рекурсии нет
+	var r rawTrack
+	if err := json.Unmarshal(b, &r); err != nil {
+		return err
+	}
+	*t = Track(r)
+	var lg trackLegacy
+	if err := json.Unmarshal(b, &lg); err == nil {
+		if t.Practice == nil {
+			switch {
+			case lg.Coding && len(lg.Stacks) > 0:
+				t.Practice = &Practice{Runtime: lg.Stacks[0]}
+			case lg.Shell:
+				t.Practice = &Practice{Runtime: StackShell}
+			}
+		}
+	}
+	return nil
 }
 
 // BoardConfig — конфигурация стадии доски (spec-18/Ф3).
@@ -77,7 +122,7 @@ type BoardCase struct {
 	Checklist []string `json:"checklist"`
 }
 
-// TrackCriterion — критерий отчёта трека (Ф2).
+// TrackCriterion — критерий отчёта роли (Ф2).
 type TrackCriterion struct {
 	Name   string  `json:"name"`
 	Weight float64 `json:"weight"`
@@ -85,7 +130,7 @@ type TrackCriterion struct {
 	Hint string `json:"hint,omitempty"`
 }
 
-// DefaultTrackID — трек по умолчанию (совместимость: старые сессии/клиенты).
+// DefaultTrackID — роль по умолчанию (совместимость: старые сессии/клиенты).
 const DefaultTrackID = "backend"
 
 var trackIDRe = regexp.MustCompile(`^[a-z0-9-]{2,32}$`)
@@ -106,20 +151,10 @@ func (t *Track) Validate() error {
 			return fmt.Errorf("track %s: грейд %q", t.ID, g)
 		}
 	}
-	if t.Coding {
-		if len(t.Stacks) == 0 {
-			return fmt.Errorf("track %s: coding без стеков", t.ID)
+	if t.Practice != nil {
+		if !t.Practice.Runtime.Valid() {
+			return fmt.Errorf("track %s: рантайм практики %q (go/python/shell)", t.ID, t.Practice.Runtime)
 		}
-		for _, s := range t.Stacks {
-			if !s.Valid() {
-				return fmt.Errorf("track %s: стек %q", t.ID, s)
-			}
-		}
-	} else if len(t.Stacks) != 0 {
-		return fmt.Errorf("track %s: некодовый трек со стеками", t.ID)
-	}
-	if t.Shell && t.Coding {
-		return fmt.Errorf("track %s: coding и shell взаимоисключающие (одна практическая стадия)", t.ID)
 	}
 	if len(t.Criteria) == 0 {
 		return fmt.Errorf("track %s: критерии пусты", t.ID)
@@ -165,7 +200,7 @@ func (t *Track) Validate() error {
 	return nil
 }
 
-// HasGrade — грейд допустим в треке.
+// HasGrade — грейд допустим в роли.
 func (t *Track) HasGrade(g Grade) bool {
 	for _, x := range t.Grades {
 		if x == g {
@@ -175,14 +210,12 @@ func (t *Track) HasGrade(g Grade) bool {
 	return false
 }
 
-// HasStack — стек допустим в треке (coding=true).
-func (t *Track) HasStack(s Stack) bool {
-	for _, x := range t.Stacks {
-		if x == s {
-			return true
-		}
+// Runtime — рантайм практической стадии ("" — практики нет).
+func (t *Track) Runtime() Stack {
+	if t.Practice == nil {
+		return ""
 	}
-	return false
+	return t.Practice.Runtime
 }
 
 // CaseForGrade — кейс доски для грейда (первый совпавший; пусто — без кейса).
@@ -205,40 +238,31 @@ func (t *Track) SortCriteria() {
 	})
 }
 
-// Stages — программа стадий трека для грейда (spec-18/Ф1).
-// Coding: junior без design (историческое правило грейда); остальные — полный
-// набор voice → livecode → design → report.
-// Non-coding: voice → design (доска «показать/объяснить») → report — Live-Code
-// не входит, доска обязательна для всех грейдов.
+// Stages — программа стадий роли для грейда (spec-22): с практикой —
+// голос → практика → доска → отчёт (у всех грейдов, включая junior —
+// грейд-правило «junior без design» упразднено, см. BUG-20261104-026);
+// без практики — голос → доска → отчёт.
 func (t *Track) Stages(g Grade) []Stage {
-	if t.Coding {
-		if g == GradeJunior {
-			return []Stage{StageVoice, StageLiveCode, StageReport}
-		}
-		return []Stage{StageVoice, StageLiveCode, StageDesign, StageReport}
-	}
-	if t.Shell {
-		// spec-19: практическая shell-стадия для некодовых ролей (сисадмин):
-		// голос → bash-задание в редакторе → доска (архитектура) → отчёт.
+	if t.Practice != nil {
 		return []Stage{StageVoice, StageLiveCode, StageDesign, StageReport}
 	}
 	return []Stage{StageVoice, StageDesign, StageReport}
 }
 
-// DefaultTrackIDIf — trackID трека или 'backend' (nil → дефолт совместимости).
-// ShellStage — имя практической shell-стадии для UI-навигации.
-const ShellStage = "shell"
-
-// StageMeta — метаданные трека для stage-сообщения (spec-18/19/20): UI строит
-// подписи («Практика (bash)») и навигацию стадий из данных. Единственный
-// builder: session (ResendStage/Transition) и httpapi (enterLiveCode).
+// StageMeta — метаданные роли для stage-сообщения: UI строит подписи
+// («Практика (Go)») и навигацию стадий из данных. practice=null — роль без
+// практики. Поле stages — программа грейда.
 func (t *Track) StageMeta(g Grade) map[string]any {
 	stages := make([]string, 0, 4)
 	for _, s := range t.Stages(g) {
 		stages = append(stages, string(s))
 	}
+	var pr any
+	if t.Practice != nil {
+		pr = map[string]any{"runtime": string(t.Practice.Runtime)}
+	}
 	return map[string]any{
-		"id": t.ID, "title": t.Title, "coding": t.Coding, "shell": t.Shell, "stages": stages,
+		"id": t.ID, "title": t.Title, "practice": pr, "stages": stages,
 	}
 }
 

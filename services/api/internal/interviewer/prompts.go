@@ -40,6 +40,19 @@ func personaFor(gender string) string {
 	return persona
 }
 
+// stackTitle — человекочитаемое имя рантайма практики (промпты, подписи).
+func stackTitle(s models.Stack) string {
+	switch s {
+	case models.StackGo:
+		return "Go"
+	case models.StackPython:
+		return "Python"
+	case models.StackShell:
+		return "bash"
+	}
+	return string(s)
+}
+
 // genderRule — явная инструкция держать род речи персоны во всех формах (F7). Влияет
 // только на речь, не на содержание вопросов и оценку.
 func genderRule(gender string) string {
@@ -142,27 +155,24 @@ func stagePrompt(grade models.Grade, stack string, stage models.Stage, voiceStyl
 		if voiceStyle != "" {
 			style = " " + voiceStyle
 		}
-		// spec-18: контекст роли вместо стека; для некодовых треков стека нет.
+		// spec-18/22: контекст роли вместо стека; практика — часть роли.
 		role := fmt.Sprintf("Собеседование, стек %s", stack)
+		next := ""
 		if track != nil {
 			role = fmt.Sprintf("Собеседование на позицию «%s»", track.Title)
-			if track.Coding {
-				role += fmt.Sprintf(", стек %s", stack)
+			if rt := track.Runtime(); rt != "" {
+				role += fmt.Sprintf(", практика: %s", stackTitle(rt))
 			}
-		}
-		// spec-19: некодовый трек с shell-практикой — кандидат заранее знает
-		// состав собеседования (голос → bash → доска).
-		next := ""
-		if track != nil && track.Shell {
-			next = " После этой стадии — практическое задание на bash в редакторе и схема на доске."
+			// Кандидат заранее знает состав собеседования.
+			next = " После этой стадии — практическое задание в редакторе и схема на доске."
 		}
 		return fmt.Sprintf("Стадия: голосовое интервью. %s. "+
 			"Веди диалог по программе: вопрос → на реплику кандидата реагуй, уточняй, переходи к следующему. "+
 			"Одна мысль за раз.%s%s \n\n%s", role, next, style, prog)
 	case models.StageLiveCode:
-		// spec-19: shell-практика некодовых треков — свой промпт (стек пуст,
-		// задачи — bash-скрипты с чеком из банка).
-		if track != nil && track.Shell {
+		// spec-19/22: bash-практика — свой промпт (задачи — bash-скрипты с
+		// чеком из банка).
+		if track != nil && track.Runtime() == models.StackShell {
 			return "Стадия: практика — bash. Кандидат пишет скрипт в редакторе и запускает проверку сам. " +
 				"Твои роли: (1) при входе — представить задачу и дать старт; (2) по результату проверки — короткое ревью " +
 				"(что учтено, где скрипт хрупкий: кавычки, пустой ввод, код возврата) и 1 follow-up вопрос; " +

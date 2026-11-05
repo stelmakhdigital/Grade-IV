@@ -23,16 +23,16 @@ func TestTracksListAndCreateSession(t *testing.T) {
 	}
 	auth := map[string]string{"Authorization": "Bearer " + token}
 
-	// Список: ≥3 трека, sysadmin — некодовый, backend — кодовый.
+	// Список: ≥3 роли; sysadmin — практика shell, backend — практика go (spec-22).
 	code, raw := doJSONRaw(t, "GET", ts.URL+"/api/v1/tracks", nil, auth)
 	if code != 200 {
 		t.Fatalf("GET /tracks: %d", code)
 	}
-	if !strings.Contains(raw, `"sysadmin"`) || !strings.Contains(raw, `"coding":false`) {
-		t.Fatalf("в списке нет некодового sysadmin: %s", raw)
+	if !strings.Contains(raw, `"sysadmin"`) || !strings.Contains(raw, `"practice":{"runtime":"shell"}`) {
+		t.Fatalf("в списке нет sysadmin с практикой shell: %s", raw)
 	}
 
-	// Сессия на sysadmin middle без стека → ок; track_id возвращается.
+	// Сессия на sysadmin middle → ок; track_id и наследованный стек практики.
 	code, m := doJSON(t, "POST", ts.URL+"/api/v1/sessions",
 		map[string]any{"grade": "middle", "track_id": "sysadmin"}, auth)
 	if code != 201 {
@@ -41,19 +41,15 @@ func TestTracksListAndCreateSession(t *testing.T) {
 	if got, _ := m["track_id"].(string); got != "sysadmin" {
 		t.Fatalf("track_id в ответе: %v", m["track_id"])
 	}
-
-	// Стек в некодовом треке → 400.
-	code, _ = doJSON(t, "POST", ts.URL+"/api/v1/sessions",
-		map[string]any{"grade": "middle", "stack": "go", "track_id": "sysadmin"}, auth)
-	if code != 400 {
-		t.Fatalf("стек в некодовом треке: %d, want 400", code)
+	if got, _ := m["stack"].(string); got != "shell" {
+		t.Fatalf("стек практики в сессии: %v, want shell", m["stack"])
 	}
 
-	// Стек не из трека backend → 400.
+	// spec-22: клиентский стек игнорируется — роль задаёт рантайм сам.
 	code, _ = doJSON(t, "POST", ts.URL+"/api/v1/sessions",
 		map[string]any{"grade": "middle", "stack": "rust", "track_id": "backend"}, auth)
-	if code != 400 {
-		t.Fatalf("чужой стек в backend: %d, want 400", code)
+	if code != 201 {
+		t.Fatalf("чужой стек игнорируется: %d, want 201", code)
 	}
 
 	// Неизвестный трек → 400.
@@ -98,7 +94,6 @@ func TestAdminTrackCRUD(t *testing.T) {
 	tk := models.Track{
 		ID:     "qa",
 		Title:  "QA-инженер",
-		Coding: false,
 		Grades: []models.Grade{models.GradeJunior, models.GradeMiddle},
 		Board: models.BoardConfig{
 			Title:        "Схема тест-плана",

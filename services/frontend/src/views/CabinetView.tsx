@@ -11,33 +11,25 @@ import {
   getVacancy,
   listProfiles,
   listSessions,
-  listTemplates,
   listTTSVoices,
   listTracks,
   saveVacancy,
   ApiError,
   type Grade,
   type InterviewProfile,
-  type InterviewTemplate,
   type Session,
-  type Stack,
   type Track,
   type TTSVoice,
 } from '../api';
 import { useAuth } from '../auth';
 import { apiErrorMessage } from './LoginView';
-import { humanMinutes, statusLabel, stageLabel } from '../labels';
+import { humanMinutes, practiceLabel, statusLabel, stageLabel } from '../labels';
 
 const GRADES: { value: Grade; label: string; minutes: number }[] = [
   { value: 'junior', label: 'Junior (45 мин)', minutes: 45 },
   { value: 'middle', label: 'Middle (50 мин)', minutes: 50 },
   { value: 'senior', label: 'Senior (60 мин)', minutes: 60 },
   { value: 'staff', label: 'Staff (75 мин)', minutes: 75 },
-];
-
-const STACKS: { value: Stack; label: string }[] = [
-  { value: 'go', label: 'Go' },
-  { value: 'python', label: 'Python' },
 ];
 
 /** Путь к странице сессии (hash-роутинг, App.tsx). */
@@ -64,7 +56,6 @@ export function CabinetView() {
   // spec-20: фильтр истории (все/активные/завершённые).
   const [histFilter, setHistFilter] = useState<'all' | 'active' | 'finished'>('all');
   const [grade, setGrade] = useState<Grade>('middle');
-  const [stack, setStack] = useState<Stack>('go');
   // spec-18: трек собеседования (backend — дефолт); список — из /tracks.
   const [tracks, setTracks] = useState<Track[]>([]);
   const [trackId, setTrackId] = useState<string>('backend');
@@ -97,8 +88,6 @@ export function CabinetView() {
       setGrade(track.grades[0]);
     }
   }, [track, grade]);
-  const [templates, setTemplates] = useState<InterviewTemplate[]>([]);
-  const [templateId, setTemplateId] = useState<number | undefined>(undefined);
   const [profiles, setProfiles] = useState<InterviewProfile[]>([]);
   const [profileId, setProfileId] = useState<number | undefined>(undefined);
   // F1 (Итерация 10): голос интервьюера (реестр из API, не хардкод).
@@ -158,21 +147,6 @@ export function CabinetView() {
     return () => window.clearInterval(t);
   }, []);
 
-  // Шаблоны интервью (итерация A): грузим для выбранного грейда/стека.
-  useEffect(() => {
-    let cancelled = false;
-    listTemplates(grade, stack)
-      .then((t) => {
-        if (cancelled) return;
-        setTemplates(t);
-        setTemplateId(t.find((x) => x.is_default)?.id ?? t[0]?.id);
-      })
-      .catch(() => {
-        if (!cancelled) setTemplates([]);
-      });
-    return () => { cancelled = true; };
-  }, [grade, stack]);
-
   // Профили интервьюера (итерация B): общий список, дефолт — balanced/standard.
   useEffect(() => {
     let cancelled = false;
@@ -221,14 +195,8 @@ export function CabinetView() {
     setStarting(true);
     setStartError(null);
     try {
-      const s = await createSession(
-        grade,
-        track?.coding === false ? '' : stack,
-        templateId,
-        profileId,
-        ttsSpeaker,
-        trackId,
-      );
+      // spec-22: стек практики — часть роли; шаблоны выбираются на сервере.
+      const s = await createSession(grade, '', undefined, profileId, ttsSpeaker, trackId);
       window.location.hash = sessionPath(s.id);
     } catch (err) {
       setStartError(apiErrorMessage(err));
@@ -315,6 +283,11 @@ export function CabinetView() {
                   </option>
                 ))}
               </select>
+              {track?.description && (
+                <span className="muted small" data-testid="track-desc">
+                  {track.description}
+                </span>
+              )}
             </label>
           )}
           <label className="field">
@@ -327,30 +300,6 @@ export function CabinetView() {
               ))}
             </select>
           </label>
-          {track?.coding === false ? null : (
-          <label className="field">
-            <span>Стек</span>
-            <select value={stack} onChange={(e) => setStack(e.target.value as Stack)}>
-              {STACKS.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          )}
-          {templates.length > 1 && (
-            <label className="field">
-              <span>Шаблон интервью</span>
-              <select value={templateId ?? ''} onChange={(e) => setTemplateId(Number(e.target.value))}>
-                {templates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}{t.is_default ? ' (по умолчанию)' : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
           {profiles.length > 0 && (
             <label className="field">
               <span>Профиль интервьюера</span>
@@ -384,9 +333,15 @@ export function CabinetView() {
           {/* spec-21 (Codility: intro до запуска таймера): короткий бриф —
               что будет на интервью, чтобы старт не был сюрпризом. */}
           <p className="start-brief muted small" data-testid="start-brief">
-            Голосовое интервью с ИИ: говорите в микрофон, практика — на
-            клавиатуре (код или bash), схему рисуете на доске. Таймер и запись
-            включатся после старта. {track ? `${track.title}, ` : ''}
+            Голосовое интервью с ИИ: говорите в микрофон.
+            {track?.practice != null && (
+              <>
+                {' '}Практика — {practiceLabel(track.practice.runtime) ?? track.practice.runtime} в
+                редакторе, на клавиатуре.
+              </>
+            )}
+            {' '}Схему рисуете на доске. Таймер и запись включатся после старта.{' '}
+            {track ? `${track.title}, ` : ''}
             {gradeOptions.find((g) => g.value === grade)?.label ?? grade}.
           </p>
           <button
@@ -502,7 +457,11 @@ export function CabinetView() {
                   {/* spec-20: роль видна в истории (раньше только грейд); shell-стадия — «Практика». */}
                   <td>{sTrack ? sTrack.title : s.grade}</td>
                   <td>{s.stack}</td>
-                  <td>{s.stage === 'livecode' && sTrack?.shell === true ? 'Практика (bash)' : stageLabel(s.stage)}</td>
+                  <td>
+                    {s.stage === 'livecode' && practiceLabel(sTrack?.practice?.runtime) !== null
+                      ? `Практика (${practiceLabel(sTrack?.practice?.runtime)})`
+                      : stageLabel(s.stage)}
+                  </td>
                   <td>
                     <span className={`status ${s.status}`}>{statusLabel(s.status)}</span>
                     {/* spec-14/D13: итоговый балл рядом со статусом. */}
