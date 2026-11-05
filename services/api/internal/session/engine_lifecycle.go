@@ -463,7 +463,7 @@ func (e *Engine) ResendStage(id int64) {
 	rt.connMu.Lock()
 	stage := rt.stage
 	msg := map[string]any{"type": "stage", "name": stage, "task": nil}
-	if tm := trackStageMeta(rt.track); tm != nil {
+	if tm := trackStageMeta(rt.track, rt.grade); tm != nil {
 		msg["track"] = tm
 	}
 	if stage == models.StageDesign {
@@ -510,6 +510,11 @@ func (e *Engine) Transition(id int64, to models.Stage) (*Snapshot, error) {
 		if b := boardStagePayload(rt.track, rt.grade); b != nil {
 			msg["board"] = b
 		}
+	}
+	// spec-20: метаданные трека в КАЖДОМ stage-сообщении (ResendStage шлёт их
+	// только при реконнекте — после перехода стадии UI мог остаться без них).
+	if tm := trackStageMeta(rt.track, rt.grade); tm != nil {
+		msg["track"] = tm
 	}
 	e.sendJSON(id, msg)
 	return e.snapshotLocked(rt)
