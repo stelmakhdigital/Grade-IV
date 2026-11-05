@@ -229,6 +229,19 @@ func (t *Track) Stages(g Grade) []Stage {
 // ShellStage — имя практической shell-стадии для UI-навигации.
 const ShellStage = "shell"
 
+// StageMeta — метаданные трека для stage-сообщения (spec-18/19/20): UI строит
+// подписи («Практика (bash)») и навигацию стадий из данных. Единственный
+// builder: session (ResendStage/Transition) и httpapi (enterLiveCode).
+func (t *Track) StageMeta(g Grade) map[string]any {
+	stages := make([]string, 0, 4)
+	for _, s := range t.Stages(g) {
+		stages = append(stages, string(s))
+	}
+	return map[string]any{
+		"id": t.ID, "title": t.Title, "coding": t.Coding, "shell": t.Shell, "stages": stages,
+	}
+}
+
 func DefaultTrackIDIf(t *Track) string {
 	if t == nil {
 		return DefaultTrackID

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -665,9 +666,48 @@ type liveCodeTask struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
 	Statement string `json:"statement"`
-	// Files — полный набор файлов задачи (включая тесты из банка, §4.4):
-	// кандидат видит их в редакторе и сдаёт обратно в /runs.
+	// Files — файлы, видимые кандидату (solution-шаблон и статические данные
+	// задачи). Доверенные файлы градатора (check.sh, *_test.go, test_*.py)
+	// не отдаются: spec-20/BUG-20261104-027 — кандидат мог открыть и править
+	// градатор (для shell check.sh и есть весь чек). Исполняются ТОЛЬКО
+	// файлы банка: sandbox подставляет их по task_id на /runs (доверенность
+	// тестов, §4.4).
 	Files map[string]string `json:"files,omitempty"`
+}
+
+// isGraderFile — файл градатора задачи (правила зеркалят доверенность тестов
+// в cmd/sandbox: go *_test.go; python test_*.py|*_test.py; shell check.sh).
+func isGraderFile(name, stack string) bool {
+	switch stack {
+	case "go":
+		return strings.HasSuffix(name, "_test.go")
+	case "python":
+		base := path.Base(name)
+		return strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py")
+	case "shell":
+		return name == "check.sh"
+	}
+	return false
+}
+
+// sanitizeTasks — убрать файлы градатора из задач перед отправкой кандидату.
+func sanitizeTasks(tasks []liveCodeTask, stack string) []liveCodeTask {
+	out := make([]liveCodeTask, 0, len(tasks))
+	for _, t := range tasks {
+		files := make(map[string]string, len(t.Files))
+		for name, content := range t.Files {
+			if isGraderFile(name, stack) {
+				continue
+			}
+			files[name] = content
+		}
+		if len(files) == 0 {
+			files = nil
+		}
+		t.Files = files
+		out = append(out, t)
+	}
+	return out
 }
 
 // liveCodeTaskCount — число задач на стадию Live-Code по грейду (spec-13B T1):
@@ -769,13 +809,25 @@ func (s *Server) enterLiveCode(ctx context.Context, id int64, ws *wsSession) {
 				ids = append(ids, t.ID)
 			}
 			s.log.Info("livecode: выбранные задачи", "session", id, "tasks", ids, "seeded", seeded)
+			// spec-20/BUG-20261104-027: файлы градатора кандидату не отдаются
+			// (в транскрипте событие тоже хранится уже без них).
+			tasks = sanitizeTasks(tasks, s.liveCodeStack(sess))
 			// Событие livecode_tasks — для per-task отчёта (spec-13B T3).
 			_, _ = s.eventData(ctx, id, "livecode_tasks", map[string]any{"tasks": tasks})
-			s.engine.SendTo(id, map[string]any{
+			// spec-20: track-мета в сообщении с задачами — иначе оно затирает
+			// trackMeta клиента (m.track ?? null) и nav по стадиям ломается
+			// (BUG-20261104-028: второй stage-livecode без track сбрасывал UI).
+			msg := map[string]any{
 				"type": "stage", "name": models.StageLiveCode,
 				"tasks": tasks,
 				"task":  tasks[0], // совместимость: task = tasks[0]
-			})
+			}
+			if s.tracks != nil && sess.TrackID != "" {
+				if tr, err := s.tracks.Get(sess.TrackID); err == nil && tr != nil {
+					msg["track"] = tr.StageMeta(sess.Grade)
+				}
+			}
+			s.engine.SendTo(id, msg)
 		}
 	}
 	text, err := s.interviewer.OnStageChanged(ctx, id, stageNote(tasks))

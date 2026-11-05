@@ -121,13 +121,14 @@ func WithTracks(r TrackResolver) Opt { return func(e *Engine) { e.tracks = r } }
 // trackStageMeta — метаданные трека в stage-сообщении (spec-18): UI строит
 // навигацию стадий (некодовый трек: голос → доска, без Live-Code). nil-трек —
 // без track (legacy-поведение, движок без хранилища).
-func trackStageMeta(t *models.Track) map[string]any {
+func trackStageMeta(t *models.Track, g models.Grade) map[string]any {
 	if t == nil {
 		return nil
 	}
-	// spec-19: shell — для UI-навигации («Практика» вместо «Live-Code»,
-	// пустой stack сессии → стек shell).
-	return map[string]any{"id": t.ID, "title": t.Title, "coding": t.Coding, "shell": t.Shell}
+	// spec-20: stages — программа грейда, UI показывает переход к следующей
+	// стадии из данных (BUG-20261104-026: junior на shell-треке застревал на
+	// livecode — переход к design скрывался грейд-правилом кодовых треков).
+	return t.StageMeta(g)
 }
 
 // boardStagePayload — payload доски для stage-сообщения (spec-18/Ф3/Ф5).
