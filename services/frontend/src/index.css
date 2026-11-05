@@ -348,6 +348,23 @@ p {
   margin-bottom: 0;
 }
 
+/* spec-21: подсказка о десктоп-стадиях — только на узких экранах */
+.touch-hint {
+  display: none;
+}
+
+/* пре-бриф перед стартом */
+.start-brief {
+  margin: 0 0 10px;
+  max-width: 560px;
+}
+
+@media (max-width: 720px) {
+  .touch-hint {
+    display: block;
+  }
+}
+
 /* spec-20: фильтр истории (все/активные/завершённые) */
 .history-filter {
   display: flex;

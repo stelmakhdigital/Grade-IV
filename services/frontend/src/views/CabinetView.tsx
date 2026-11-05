@@ -381,6 +381,14 @@ export function CabinetView() {
               {startError}
             </p>
           )}
+          {/* spec-21 (Codility: intro до запуска таймера): короткий бриф —
+              что будет на интервью, чтобы старт не был сюрпризом. */}
+          <p className="start-brief muted small" data-testid="start-brief">
+            Голосовое интервью с ИИ: говорите в микрофон, практика — на
+            клавиатуре (код или bash), схему рисуете на доске. Таймер и запись
+            включатся после старта. {track ? `${track.title}, ` : ''}
+            {gradeOptions.find((g) => g.value === grade)?.label ?? grade}.
+          </p>
           <button
             type="submit"
             className="btn primary"

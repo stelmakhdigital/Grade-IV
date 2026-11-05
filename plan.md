@@ -295,3 +295,39 @@ sandbox runner-пробы) ok. CI: go + frontend + voice + sandbox-docker.
 Итог: CI-прогон на 64370d8 зелёный (go, frontend, voice, sandbox-docker с
 реальным демоном: go-pass с network=none, py-pass/py-oom на образе с
 pytest, shell, fork-bomb за --pids-limit).
+
+## 14. Итерация 21 — UX-полировка по аудиту и исследованию конкурентов (spec-21)
+
+Аудит: Playwright-прогоны desktop/mobile/admin (/tmp/ux-audit20), полный
+сценарий junior+middle sysadmin без JS-ошибок и 4xx/5xx.
+Исследование: 9 конкурентов (interviewing.io, Pramp/Aced, CodeSignal,
+HackerRank, HireVue, Karat, BrightHire, Codility, CoderPad), 30+ паттернов —
+взяты пре-бриф до таймера (Codility) и честная подсказка о десктопе (CoderPad).
+
+### Баги (закрыты)
+- BUG-20261104-026 junior на shell-треке застревал на livecode: навигация
+  «К System Design» строилась по грейду, а не по программе стадий трека.
+  Фикс: `stages` в track-мете, кнопка видна когда design после livecode.
+- BUG-20261104-027 утечка градатора: tasks[].files несли check.sh/*_test.go/
+  test_*.py кандидату. Фикс: sanitizeTasks на границе (stage-сообщение +
+  событие livecode_tasks); исполнение тестов не зависит от клиента.
+- BUG-20261104-028 stage-сообщение enterLiveCode без track-меты затирало
+  trackMeta клиента — nav сбрасывалась. Фикс: мета в сообщении с задачами.
+- sessionDTO не отдавал track_id — кабинет и отчёты завершённых сессий
+  показывали сырой грейд. Фикс: TrackID в DTO, мета из /tracks для
+  завершённых (WS нет).
+
+### Улучшения
+- Кабинет: фильтр истории «Все/Активные/Завершённые»; роль (трек) в истории;
+  «Транскрипт» → «Отчёт»; баланс человекочитаемо (41 д 16 ч).
+- Подписи: «Практика (bash)» вместо «Live-Code» для shell-треков (шапка
+  сессии, история, отчёт); заголовок сессии — имя трека.
+- Пре-бриф перед стартом (голос/практика/доска, таймер после старта).
+- Мобильная подсказка на livecode/design (видна только < 720px).
+- Плейсхолдер текстового ответа укоротлен (обрезался на мобиле).
+
+### Проверки
+- vitest 131/131; go test api+sandbox — все пакеты ok; playwright E2E
+  полный проход + мобильный (без горизонтального скролла, JS-ошибок).
+- WS-проба: обе stage-livecode несут одинаковую track-мету; tasks[].files
+  содержат только solution.sh; check.sh прогоняется из банка.

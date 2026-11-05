@@ -240,6 +240,14 @@ export function SessionView({ id }: { id: number }) {
             )}
           </div>
 
+          {/* spec-21 (CoderPad: честное предупреждение о десктопе): на узких
+              экранах практика/доска тесны — подсказка видна только на мобиле. */}
+          {(stage === 'livecode' || stage === 'design') && (
+            <p className="touch-hint muted small" data-testid="touch-hint">
+              Эта стадия удобнее с клавиатуры — на телефоне может быть тесно.
+            </p>
+          )}
+
           {stage === 'livecode' && session !== null ? (
             <>
               <Suspense fallback={<PanelLoading />}>
