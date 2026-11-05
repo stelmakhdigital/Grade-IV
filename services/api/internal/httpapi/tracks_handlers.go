@@ -299,8 +299,18 @@ func extractJSONObject(s string) string {
 	return s[start:]
 }
 
-// slugifyTrack — id роли из названия: строчные латиница/цифры/дефисы
-// (кириллица транслитом не делаем — админ правит id руками, поле в форме).
+// translitRu — упрощённая кириллица → латиница (для черновиков id роли;
+// админ правит id руками, поле в форме редактируемо).
+var translitRu = map[rune]string{
+	'а': "a", 'б': "b", 'в': "v", 'г': "g", 'д': "d", 'е': "e", 'ж': "zh",
+	'з': "z", 'и': "i", 'й': "y", 'к': "k", 'л': "l", 'м': "m", 'н': "n",
+	'о': "o", 'п': "p", 'р': "r", 'с': "s", 'т': "t", 'у': "u", 'ф': "f",
+	'х': "kh", 'ц': "ts", 'ч': "ch", 'ш': "sh", 'щ': "shch", 'ъ': "", 'ы': "y",
+	'ь': "", 'э': "e", 'ю': "yu", 'я': "ya", 'ё': "e",
+}
+
+// slugifyTrack — id роли из названия: латиница/цифры/дефисы; кириллица —
+// транслитом, чтобы черновик от ИИ приходил с осмысленным id.
 func slugifyTrack(title string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(title) {
@@ -310,6 +320,10 @@ func slugifyTrack(title string) string {
 		case r == ' ', r == '-', r == '_':
 			if b.Len() > 0 && !strings.HasSuffix(b.String(), "-") {
 				b.WriteByte('-')
+			}
+		default:
+			if tr, ok := translitRu[r]; ok {
+				b.WriteString(tr)
 			}
 		}
 		if b.Len() >= 32 {

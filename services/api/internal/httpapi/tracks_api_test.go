@@ -269,3 +269,15 @@ func TestTrackGenerate(t *testing.T) {
 		t.Fatalf("черновик сохранился: %s", raw)
 	}
 }
+
+// TestSlugifyTrackCyrillic — id черновика из кириллического названия —
+// транслитом (spec-22: ИИ-черновик приходит с осмысленным id).
+func TestSlugifyTrackCyrillic(t *testing.T) {
+	got := slugifyTrack("Мобильный разработчик")
+	if got != "mobilnyy-razrabotchik" && got != "mobilny-razrabotchik" {
+		t.Fatalf("slug: %q", got)
+	}
+	if s := slugifyTrack("Data Engineer"); s != "data-engineer" {
+		t.Fatalf("latin slug: %q", s)
+	}
+}
