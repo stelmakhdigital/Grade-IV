@@ -202,9 +202,9 @@ func DefaultTracks() []models.Track {
 		ID: "backend",
 		// spec-22: один runtime на роль — Go. Python-роль админ создаёт
 		// отдельно (ИИ-заполнение по описанию); выбор стека кандидатом убран.
-		Title:     "Backend-разработчик",
-		Practice:  &models.Practice{Runtime: models.StackGo},
-		Grades:    []models.Grade{models.GradeJunior, models.GradeMiddle, models.GradeSenior, models.GradeStaff},
+		Title:    "Backend-разработчик",
+		Practice: &models.Practice{Runtime: models.StackGo},
+		Grades:   []models.Grade{models.GradeJunior, models.GradeMiddle, models.GradeSenior, models.GradeStaff},
 		Board: models.BoardConfig{
 			Title: "System Design: сервис с нуля",
 			ReviewPrompt: "Кандидат собирал схему системы (System Design). Оцени структуру: " +
@@ -229,10 +229,10 @@ func DefaultTracks() []models.Track {
 	// senior различались); точная развеска по грейдам остаётся в fallback
 	// criteriaForGrade для сессий без трека.
 	sysadmin := models.Track{
-		ID:        "sysadmin",
-		Title:     "Системный администратор",
-		Practice:  &models.Practice{Runtime: models.StackShell},
-		Grades:    []models.Grade{models.GradeJunior, models.GradeMiddle, models.GradeSenior},
+		ID:       "sysadmin",
+		Title:    "Системный администратор",
+		Practice: &models.Practice{Runtime: models.StackShell},
+		Grades:   []models.Grade{models.GradeJunior, models.GradeMiddle, models.GradeSenior},
 		Board: models.BoardConfig{
 			Title: "Схема инфраструктуры",
 			ReviewPrompt: "Кандидат собирал схему инфраструктуры. Оцени: сегментация сети и " +
