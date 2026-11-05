@@ -46,6 +46,8 @@ interface MockOpts {
   tracks?: unknown;
   createStatus?: number;
   createBody?: unknown;
+  generateStatus?: number;
+  generateBody?: unknown;
   deleteStatus?: number;
   deleteBody?: unknown;
 }
@@ -58,6 +60,19 @@ function mockApi(opts: MockOpts = {}): Mock {
         return json(opts.createStatus ?? 201, opts.createBody ?? (init.body ? JSON.parse(init.body as string) : {}));
       }
       return json(200, opts.tracks ?? TRACKS);
+    }
+    if (url.endsWith('/admin/tracks/generate')) {
+      return json(opts.generateStatus ?? 200, opts.generateBody ?? {
+        track: {
+          id: 'data-engineer',
+          title: 'Data-инженер',
+          description: 'Строит пайплайны данных.',
+          practice: { runtime: 'python' },
+          grades: ['junior', 'middle'],
+          board: { title: 'Схема пайплайна', review_prompt: 'Оцени полноту', groups: [{ title: 'Источники', names: ['API'] }] },
+          criteria: [{ name: 'Моделирование', weight: 0.5 }, { name: 'Коммуникация', weight: 0.5 }],
+        },
+      });
     }
     if (url.includes('/admin/tracks/')) {
       if (init?.method === 'DELETE') {
@@ -123,6 +138,30 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
     expect(body.track.id).toBe('data-analyst');
     expect(body.track.title).toBe('Аналитик данных');
     expect(body.track.practice).toEqual({ runtime: 'go' });
+  });
+
+  it('spec-22: ИИ-заполнение новой роли — форма предзаполнена черновиком', async () => {
+    const fetchMock = mockApi();
+    renderAdmin(fetchMock);
+    const user = userEvent.setup();
+    await screen.findByText('admin@example.com');
+    await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
+    await screen.findByTestId('admin-tracks');
+    await user.click(screen.getByTestId('admin-track-new'));
+    // ИИ-блок виден у новой роли
+    expect(screen.getByTestId('admin-track-ai-desc')).toBeInTheDocument();
+    await user.type(screen.getByTestId('admin-track-ai-desc'), 'Инженер по данным на Python: пайплайны и дашборды');
+    await user.click(screen.getByTestId('admin-track-ai-fill'));
+    // POST /admin/tracks/generate ушёл с описанием
+    const gen = fetchMock.mock.calls.find((c) => String(c[0]).endsWith('/admin/tracks/generate'));
+    expect(gen).toBeDefined();
+    expect(JSON.parse((gen as unknown as [string, RequestInit])[1].body as string).description).toContain('Python');
+    // Форма предзаполнена черновиком, ИИ-блок скрыт
+    expect(await screen.findByDisplayValue('Data-инженер')).toBeInTheDocument();
+    expect((screen.getByTestId('admin-track-practice') as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByTestId('admin-track-runtime')).toHaveValue('python');
+    expect(screen.queryByTestId('admin-track-ai-desc')).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue('data-engineer')).toBeEnabled(); // id правится перед сохранением
   });
 
   it('палитра-превью: чипы групп как на доске кандидата', async () => {

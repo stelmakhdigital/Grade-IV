@@ -2,12 +2,18 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 )
 
@@ -176,4 +182,90 @@ func doJSONRaw(t *testing.T, method, url string, body any, headers map[string]st
 		t.Fatalf("read: %v", err)
 	}
 	return resp.StatusCode, string(raw)
+}
+
+// TestTrackGenerate — spec-22: черновик роли по описанию (ИИ). Мок возвращает
+// валидный JSON-черновик; черновик НЕ сохраняется; не-админ → 403.
+func TestTrackGenerate(t *testing.T) {
+	cfg := &config.Config{
+		Addr: ":0", DatabaseURL: "sqlite://:memory:", JWTSecret: "test-secret",
+		JWTExpiryHours: 1, MinutesFreeS: 3600,
+	}
+	database, dialect, err := db.Open(cfg.DatabaseURL)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(context.Background(), database, dialect); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	mock := llm.NewMockProvider()
+	mock.SetResponder(func(req llm.Request) (string, error) {
+		for _, msg := range req.Messages {
+			if msg.Role == llm.RoleSystem && strings.Contains(msg.Content, "конфигурируешь роль") {
+				return trackMockDraft, nil
+			}
+		}
+		return "не туда", nil
+	})
+	logger := slog.New(slog.DiscardHandler)
+	srv := NewWithLLM(cfg, database, dialect, logger, mock)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	// Первый пользователь = админ.
+	_, reg := doJSON(t, "POST", ts.URL+"/api/v1/auth/register",
+		map[string]any{"email": "roles-admin@example.com", "password": "Test12345"}, nil)
+	adminTok, _ := reg["token"].(string)
+	admin := map[string]string{"Authorization": "Bearer " + adminTok}
+
+	// Не-админ → 403.
+	_, reg2 := doJSON(t, "POST", ts.URL+"/api/v1/auth/register",
+		map[string]any{"email": "plain@example.com", "password": "Test12345"}, nil)
+	plainTok, _ := reg2["token"].(string)
+	plain := map[string]string{"Authorization": "Bearer " + plainTok}
+	code, _ := doJSON(t, "POST", ts.URL+"/api/v1/admin/tracks/generate",
+		map[string]any{"description": "Инженер по данным на Python: пайплайны и дашборды"}, plain)
+	if code != http.StatusForbidden {
+		t.Fatalf("не-админ: %d, want 403", code)
+	}
+
+	// Слишком короткое описание → 400.
+	code, _ = doJSON(t, "POST", ts.URL+"/api/v1/admin/tracks/generate",
+		map[string]any{"description": "коротко"}, admin)
+	if code != http.StatusBadRequest {
+		t.Fatalf("короткое описание: %d, want 400", code)
+	}
+
+	// Успех: черновик валиден, практика из ответа ИИ, критерии нормализованы.
+	code, m := doJSON(t, "POST", ts.URL+"/api/v1/admin/tracks/generate",
+		map[string]any{"description": "Инженер по данным на Python: пайплайны, хранилища и дашборды"}, admin)
+	if code != http.StatusOK {
+		t.Fatalf("generate: %d %v", code, m)
+	}
+	tr, _ := m["track"].(map[string]any)
+	if tr == nil {
+		t.Fatalf("нет track в ответе: %v", m)
+	}
+	pr, _ := tr["practice"].(map[string]any)
+	if pr == nil || pr["runtime"] != "python" {
+		t.Fatalf("практика черновика: %v", tr["practice"])
+	}
+	crit, _ := tr["criteria"].([]any)
+	sum := 0.0
+	for _, c := range crit {
+		sum += c.(map[string]any)["weight"].(float64)
+	}
+	if sum < 0.999 || sum > 1.001 {
+		t.Fatalf("сумма весов %.3f", sum)
+	}
+
+	// Черновик не сохранён: в списке треков его нет.
+	code, raw := doJSONRaw(t, "GET", ts.URL+"/api/v1/admin/tracks", nil, admin)
+	if code != http.StatusOK {
+		t.Fatalf("admin list: %d", code)
+	}
+	if strings.Contains(raw, "Data-инженер") {
+		t.Fatalf("черновик сохранился: %s", raw)
+	}
 }
