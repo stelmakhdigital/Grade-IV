@@ -677,26 +677,22 @@ type liveCodeTask struct {
 
 // isGraderFile — файл градатора задачи (правила зеркалят доверенность тестов
 // в cmd/sandbox: go *_test.go; python test_*.py|*_test.py; shell check.sh).
-func isGraderFile(name, stack string) bool {
-	switch stack {
-	case "go":
-		return strings.HasSuffix(name, "_test.go")
-	case "python":
-		base := path.Base(name)
-		return strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py")
-	case "shell":
-		return name == "check.sh"
-	}
-	return false
+// Маски применяются все сразу, без фильтра по стеку (issue #3): стек стадии
+// может не совпасть со стеком задачи (старые сессии с пустым stack), и фильтр
+// по одному стеку пропускал чужие тесты кандидату (в банке других масок нет).
+func isGraderFile(name string) bool {
+	base := path.Base(name)
+	return strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, "_test.py") ||
+		strings.HasPrefix(base, "test_") || base == "check.sh"
 }
 
 // sanitizeTasks — убрать файлы градатора из задач перед отправкой кандидату.
-func sanitizeTasks(tasks []liveCodeTask, stack string) []liveCodeTask {
+func sanitizeTasks(tasks []liveCodeTask) []liveCodeTask {
 	out := make([]liveCodeTask, 0, len(tasks))
 	for _, t := range tasks {
 		files := make(map[string]string, len(t.Files))
 		for name, content := range t.Files {
-			if isGraderFile(name, stack) {
+			if isGraderFile(name) {
 				continue
 			}
 			files[name] = content
@@ -787,13 +783,20 @@ func (s *Server) enterLiveCode(ctx context.Context, id int64, ws *wsSession) {
 	if err != nil {
 		return
 	}
+	// Один источник стека для обоих пулов (issue #3): stack сессии может быть пуст
+	// (старые строки БД, роль, которой нет в файле ролей). Запрос в банк без
+	// фильтра по стеку вернул бы задачи всех стеков — при неизвестном стеке
+	// стадии задачи не берём вовсе (кандидат получит «задачи ещё не назначены»).
+	stageStack := s.liveCodeStack(sess)
 	var tasks []liveCodeTask
-	if pool, err := s.fetchLiveCodeTasks(ctx, s.liveCodeStack(sess), string(sess.Grade)); err != nil {
+	if stageStack == "" {
+		s.log.Warn("livecode: стек стадии неизвестен — задачи не выбраны", "session", id)
+	} else if pool, err := s.fetchLiveCodeTasks(ctx, stageStack, string(sess.Grade)); err != nil {
 		s.log.Warn("livecode: банк задач недоступен", "session", id, "err", err)
 	} else {
 		var stretchPool []liveCodeTask
 		if nextGrade, ok := liveCodeStretchGrade(sess.Grade); ok {
-			if sp, err := s.fetchLiveCodeTasks(ctx, string(sess.Stack), string(nextGrade)); err == nil && len(sp) > 0 {
+			if sp, err := s.fetchLiveCodeTasks(ctx, stageStack, string(nextGrade)); err == nil && len(sp) > 0 {
 				stretchPool = sp
 			}
 		}
@@ -811,7 +814,7 @@ func (s *Server) enterLiveCode(ctx context.Context, id int64, ws *wsSession) {
 			s.log.Info("livecode: выбранные задачи", "session", id, "tasks", ids, "seeded", seeded)
 			// spec-20/BUG-20261104-027: файлы градатора кандидату не отдаются
 			// (в транскрипте событие тоже хранится уже без них).
-			tasks = sanitizeTasks(tasks, s.liveCodeStack(sess))
+			tasks = sanitizeTasks(tasks)
 			// Событие livecode_tasks — для per-task отчёта (spec-13B T3).
 			_, _ = s.eventData(ctx, id, "livecode_tasks", map[string]any{"tasks": tasks})
 			// spec-20: track-мета в сообщении с задачами — иначе оно затирает
