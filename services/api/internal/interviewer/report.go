@@ -213,6 +213,24 @@ func (i *Interviewer) reportMaterialFromEvents(ctx context.Context, sessionID in
 	return mat, nil
 }
 
+// assignedCodeRuns — прогоны с task_id из задач, назначенных сессии
+// (событие livecode_tasks). issue #8: прогон с пустым/чужим task_id sandbox
+// выполнял без тестов банка, и stub кандидата в нём «проходил»; такие прогоны
+// не должны ни поднимать детерминированный балл, ни уходить в промпт ИИ-оценщика.
+func assignedCodeRuns(mat reportMaterial) []map[string]any {
+	assigned := make(map[string]bool, len(mat.LiveCodeTasks))
+	for _, t := range mat.LiveCodeTasks {
+		assigned[t.ID] = true
+	}
+	out := make([]map[string]any, 0, len(mat.CodeRuns))
+	for _, r := range mat.CodeRuns {
+		if id, _ := r["task_id"].(string); assigned[id] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // heuristicReport — детерминированный отчёт (fallback, когда LLM не вернул JSON:
 // mock-режим, ошибки парсинга). Шкала 1–5 по данным сессии.
 func heuristicReport(sess models.Session, mat reportMaterial, track *models.Track) ReportData {
@@ -224,9 +242,11 @@ func heuristicReport(sess models.Session, mat reportMaterial, track *models.Trac
 	scoreOf := func(substr string, fallback float64) float64 { return fallback }
 	_ = scoreOf
 	// Live-Code: были проходы — 4, запуски без проходов — 3, нет запусков — 2.
+	// Учитываются только прогоны назначенных задач (см. assignedCodeRuns).
 	codeScore := 2.0
+	runs := assignedCodeRuns(mat)
 	passed, failed := 0, 0
-	for _, r := range mat.CodeRuns {
+	for _, r := range runs {
 		if p, ok := r["passed"].(bool); ok && p {
 			passed++
 		} else {
@@ -236,7 +256,7 @@ func heuristicReport(sess models.Session, mat reportMaterial, track *models.Trac
 	switch {
 	case passed > 0:
 		codeScore = 4
-	case len(mat.CodeRuns) > 0 && failed > 0:
+	case len(runs) > 0 && failed > 0:
 		codeScore = 3
 	}
 	// System Design: схема с блоками — 3, без — 2.
@@ -449,7 +469,7 @@ func (i *Interviewer) GenerateReport(ctx context.Context, sessionID int64) (Repo
 	if len(tr) > 6000 {
 		tr = tr[len(tr)-6000:]
 	}
-	codeJSON, _ := json.Marshal(mat.CodeRuns)
+	codeJSON, _ := json.Marshal(assignedCodeRuns(mat))
 	designJSON, _ := json.Marshal(mat.Design)
 	critJSON, _ := json.Marshal(criteriaFor(sess, track))
 	prevJSON, _ := json.Marshal(prev)

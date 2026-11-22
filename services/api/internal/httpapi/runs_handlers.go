@@ -95,6 +95,18 @@ func (s *Server) handleSessionRuns(w http.ResponseWriter, r *http.Request) {
 	if body.Action == "" {
 		body.Action = "test"
 	}
+	// issue #8: task_id обязателен и должен быть среди задач, назначенных этой
+	// сессии: без него sandbox не подставляет тесты банка, и stub кандидата
+	// «проходит» (go test по пакету без тестов = exit 0), а отчёт считает такой
+	// прогон успешной сдачей.
+	if body.TaskID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "task_id обязателен")
+		return
+	}
+	if !s.sessionHasTask(r.Context(), id, body.TaskID) {
+		writeError(w, http.StatusForbidden, "task_not_assigned", "задача не назначена этой сессии")
+		return
+	}
 
 	// Прокси в sandbox.
 	proxyCtx, cancel := context.WithTimeout(r.Context(), runsProxyTimeout)
@@ -207,4 +219,33 @@ func mustMarshal(v any) []byte {
 		return []byte("{}")
 	}
 	return b
+}
+
+// sessionHasTask — назначена ли задача этой сессии (событие livecode_tasks,
+// пишется enterLiveCode при входе на стадию; несколько событий — при повторных
+// входах, берём union).
+func (s *Server) sessionHasTask(ctx context.Context, sessionID int64, taskID string) bool {
+	events, err := s.sessions.ListEvents(ctx, sessionID)
+	if err != nil {
+		return false
+	}
+	for _, ev := range events {
+		if ev.Kind != "livecode_tasks" {
+			continue
+		}
+		var data struct {
+			Tasks []struct {
+				ID string `json:"id"`
+			} `json:"tasks"`
+		}
+		if err := json.Unmarshal(ev.Data, &data); err != nil {
+			continue
+		}
+		for _, t := range data.Tasks {
+			if t.ID == taskID {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
@@ -72,6 +73,20 @@ func (e *runsEnv) toLiveCode(t *testing.T) {
 	}
 }
 
+// assignTasks — фиксирует событие livecode_tasks: задачи, «назначенные» сессии
+// (то же, что делает enterLiveCode при входе на стадию).
+func (e *runsEnv) assignTasks(t *testing.T, ids ...string) {
+	t.Helper()
+	tasks := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		tasks = append(tasks, map[string]any{"id": id, "title": "Задача " + id})
+	}
+	if _, err := e.server.eventData(context.Background(), e.session, "livecode_tasks",
+		map[string]any{"tasks": tasks}); err != nil {
+		t.Fatalf("livecode_tasks: %v", err)
+	}
+}
+
 func TestRunsProxy(t *testing.T) {
 	mockResult := map[string]any{
 		"exit_code": 0, "stdout": "ok", "stderr": "", "duration_ms": 42,
@@ -92,6 +107,7 @@ func TestRunsProxy(t *testing.T) {
 		writeMock(w, http.StatusOK, mockResult)
 	})
 	e.toLiveCode(t)
+	e.assignTasks(t, "go-two-sum")
 
 	code, m := doJSON(t, "POST", e.ts.URL+fmt.Sprintf("/api/v1/sessions/%d/runs", e.session),
 		map[string]any{"files": map[string]string{"main.go": "package main"}, "task_id": "go-two-sum"},
@@ -152,11 +168,71 @@ func TestRunsSandboxDown(t *testing.T) {
 		})
 	})
 	e.toLiveCode(t)
+	e.assignTasks(t, "go-two-sum")
 	code, m := doJSON(t, "POST", e.ts.URL+fmt.Sprintf("/api/v1/sessions/%d/runs", e.session),
-		map[string]any{"files": map[string]string{"main.go": "x"}},
+		map[string]any{"files": map[string]string{"main.go": "x"}, "task_id": "go-two-sum"},
 		map[string]string{"Authorization": "Bearer " + e.token})
 	if code != http.StatusServiceUnavailable {
 		t.Fatalf("sandbox 503: %d (%v), want 503", code, m)
+	}
+}
+
+// TestRunsTaskIDGate — issue #8: task_id обязателен и должен быть среди задач,
+// назначенных сессии. Без task_id sandbox не подставляет тесты банка, и stub
+// кандидата «проходит» (go test по пакету без тестов = exit 0); такой прогон
+// не должен дойти ни до sandbox, ни до submissions, ни до события code_run.
+func TestRunsTaskIDGate(t *testing.T) {
+	var sandboxHits int32
+	e := newRunsEnv(t, func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&sandboxHits, 1)
+		writeMock(w, http.StatusOK, map[string]any{"passed": true, "exit_code": 0, "tests": []any{}})
+	})
+	e.toLiveCode(t)
+	e.assignTasks(t, "go-a")
+	runsURL := e.ts.URL + fmt.Sprintf("/api/v1/sessions/%d/runs", e.session)
+	auth := map[string]string{"Authorization": "Bearer " + e.token}
+
+	// Пустой task_id → 400 (то же тело, что в issue: stub без тестов банка).
+	code, _ := doJSON(t, "POST", runsURL,
+		map[string]any{"files": map[string]string{"solution.go": "package main\n"},
+			"action": "test", "task_id": ""}, auth)
+	if code != http.StatusBadRequest {
+		t.Fatalf("пустой task_id: %d, want 400", code)
+	}
+	// task_id задачи, не назначенной этой сессии → 403.
+	code, _ = doJSON(t, "POST", runsURL,
+		map[string]any{"files": map[string]string{"solution.go": "package main\n"},
+			"action": "test", "task_id": "go-other-grade"}, auth)
+	if code != http.StatusForbidden {
+		t.Fatalf("чужой task_id: %d, want 403", code)
+	}
+
+	if n := atomic.LoadInt32(&sandboxHits); n != 0 {
+		t.Fatalf("отклонённые прогоны дошли до sandbox: %d", n)
+	}
+	subs, err := e.server.submissions.ListBySession(context.Background(), e.session)
+	if err != nil {
+		t.Fatalf("submissions: %v", err)
+	}
+	if len(subs) != 0 {
+		t.Fatalf("отклонённые прогоны сохранены в submissions: %+v", subs)
+	}
+	events, _ := e.server.sessions.ListEvents(context.Background(), e.session)
+	for _, ev := range events {
+		if ev.Kind == "code_run" {
+			t.Fatalf("событие code_run ушло в отчёт по отклонённому прогону: %s", ev.Data)
+		}
+	}
+
+	// Назначенный task_id — прогон проходит.
+	code, m := doJSON(t, "POST", runsURL,
+		map[string]any{"files": map[string]string{"solution.go": "package main\n"},
+			"action": "test", "task_id": "go-a"}, auth)
+	if code != http.StatusOK {
+		t.Fatalf("назначенный task_id: %d (%v), want 200", code, m)
+	}
+	if n := atomic.LoadInt32(&sandboxHits); n != 1 {
+		t.Fatalf("запросов в sandbox: %d, want 1", n)
 	}
 }
 

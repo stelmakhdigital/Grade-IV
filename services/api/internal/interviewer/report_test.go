@@ -104,6 +104,39 @@ func TestHeuristicReportNewFields(t *testing.T) {
 	}
 }
 
+// TestHeuristicReportTaskIDGate — issue #8: прогон с пустым или чужим task_id
+// (sandbox не подставляет тесты банка, и stub кандидата «проходит») не должен
+// поднимать балл Live-Code; 4 — только за passed по задаче, назначенной сессии.
+func TestHeuristicReportTaskIDGate(t *testing.T) {
+	sess := models.Session{Grade: models.GradeMiddle, Stack: models.StackGo}
+	liveCodeScore := func(mat reportMaterial) float64 {
+		for _, c := range heuristicReport(sess, mat, nil).Criteria {
+			if strings.Contains(c.Name, "Live-Code") {
+				return c.Score
+			}
+		}
+		t.Fatal("нет критерия Live-Code")
+		return 0
+	}
+	assigned := []LiveCodeTaskRef{{ID: "go-a", Title: "А"}}
+
+	cases := []struct {
+		name string
+		run  map[string]any
+		want float64
+	}{
+		{"passed с пустым task_id", map[string]any{"task_id": "", "passed": true}, 2},
+		{"passed с чужим task_id", map[string]any{"task_id": "go-z", "passed": true}, 2},
+		{"passed по назначенной задаче", map[string]any{"task_id": "go-a", "passed": true}, 4},
+	}
+	for _, tc := range cases {
+		got := liveCodeScore(reportMaterial{LiveCodeTasks: assigned, CodeRuns: []map[string]any{tc.run}})
+		if got != tc.want {
+			t.Errorf("%s: score = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestBuildProgress — delta = current − previous, same_stack.
 func TestBuildProgress(t *testing.T) {
 	sess := models.Session{Stack: models.StackGo}

@@ -37,7 +37,10 @@ func TestReportLifecycle(t *testing.T) {
 		t.Fatalf("utterance: %v", err)
 	}
 	_, _ = e.srv.eventData(ctx, e.session, "user_utterance", map[string]any{"text": "Расскажу про структуры данных"})
-	_, _ = e.srv.eventData(ctx, e.session, "code_run", map[string]any{"passed": true, "exit_code": 0})
+	// issue #8: балл даёт только прогон задачи, назначенной сессии.
+	_, _ = e.srv.eventData(ctx, e.session, "livecode_tasks", map[string]any{
+		"tasks": []map[string]any{{"id": "go-a", "title": "А"}}})
+	_, _ = e.srv.eventData(ctx, e.session, "code_run", map[string]any{"task_id": "go-a", "passed": true, "exit_code": 0})
 	code, _ := doJSON(t, "PUT",
 		fmt.Sprintf("%s/api/v1/sessions/%d/whiteboard", e.ts.URL, e.session),
 		map[string]any{"state": json.RawMessage(`{"elements":[]}`),
