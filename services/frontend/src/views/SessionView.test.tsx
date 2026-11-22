@@ -412,6 +412,50 @@ describe('SessionView (WP-8)', () => {
     expect(screen.getByTestId('mic-toggle')).toBeDisabled();
   }, 10000);
 
+  it('issue #10: stage без track не сбрасывает мету — шапка и «Практика (bash)» держат роль', async () => {
+    // Роль с shell-практикой: мета приходит в stage-сообщении (sysadmin).
+    const SYSADMIN = {
+      id: 'sysadmin',
+      title: 'Системный администратор',
+      practice: { runtime: 'shell' },
+      stages: ['voice', 'livecode', 'design', 'report'],
+    };
+    const REPORT_WITH_TASKS = {
+      ...REPORT_MIN,
+      livecode_tasks: [{ id: 'sh-net', title: 'Диагностика сети', status: 'passed' }],
+    };
+    // После finish REST отдаёт завершённую сессию (так делает сервер: WS закрыт,
+    // refreshStatus видит finished → UI рисует отчёт).
+    let finished = false;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/auth/me')) return json(200, ME);
+      if (url.includes('/report')) return json(200, REPORT_WITH_TASKS);
+      if (url.endsWith('/sessions/9')) return json(200, finished ? S_FINISHED : S_ACTIVE);
+      if (url.includes('/events')) return json(200, []);
+      if (url.includes('/sessions')) return json(200, []);
+      return json(404, {});
+    });
+    renderSession(fetchMock);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const fake = FakeWebSocket.instances[0];
+    await flush();
+
+    fake.deliver(JSON.stringify({ type: 'stage', name: 'livecode', task: null, track: SYSADMIN }));
+    expect(await screen.findByRole('heading', { name: /Системный администратор/ })).toBeInTheDocument();
+
+    // «Завершить»: стадия report приходит БЕЗ track (как сообщение от finish),
+    // затем WS закрыт → статус обновлён → отчёт. Мета затираться не должна.
+    finished = true;
+    fake.deliver(JSON.stringify({ type: 'stage', name: 'report', task: null }));
+    fake.deliver(JSON.stringify({ type: 'report_ready' }));
+
+    expect(await screen.findByRole('heading', { name: /Системный администратор/ })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Интервью: middle/ })).toBeNull();
+    const report = await screen.findByTestId('report');
+    expect(report).toHaveTextContent('Практика (bash): задачи');
+    expect(report).not.toHaveTextContent('Live-Code: задачи');
+  }, 15000);
+
   it('stage_action: «К Live-Code» шлёт ui-событие', async () => {
     renderSession(mockApi({ session: S_ACTIVE }));
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));

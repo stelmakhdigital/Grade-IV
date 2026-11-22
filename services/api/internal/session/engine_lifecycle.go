@@ -423,7 +423,16 @@ func (e *Engine) finish(id int64, byUser bool, reason string) (*Snapshot, error)
 	}
 	_, _ = e.addEvent(ctx, id, "finished", evt)
 	e.sendJSON(id, map[string]any{"type": "timer", "remaining_s": 0})
-	e.sendJSON(id, map[string]any{"type": "stage", "name": models.StageReport, "task": nil})
+	stageMsg := map[string]any{"type": "stage", "name": models.StageReport, "task": nil}
+	// issue #10: track-мета нужна и здесь — UI ставит её безусловно
+	// (m.track ?? null), и без неё на финале терялись имя роли в шапке и
+	// подпись «Практика (bash)» в отчёте (BUG-20261104-026/-028).
+	// rt.track/rt.grade после создания рантайма не меняются — чтение вне
+	// connMu безопасно, как в Transition/ResendStage.
+	if tm := trackStageMeta(rt.track, rt.grade); tm != nil {
+		stageMsg["track"] = tm
+	}
+	e.sendJSON(id, stageMsg)
 	return e.snapshotLocked(rt)
 }
 

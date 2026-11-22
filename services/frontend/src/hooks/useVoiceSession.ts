@@ -88,6 +88,10 @@ export function useVoiceSession(id: number) {
   const micLevelRef = useRef(0); // RMS с worklet (эквалайзер)
   const playerRef = useRef<PcmPlayer | null>(null);
   const stageRef = useRef<string>('voice');
+  // Мета трека в ref: stage-сообщение может прийти без `track` (так делал
+  // finish до issue #10) — накопленную мету оно затирать не должно.
+  const trackMetaRef = useRef<TrackStageMeta | null>(null);
+  trackMetaRef.current = trackMeta;
   // TTS-статус → мик: детектор «молчащего» микрофона не кормим, пока ИИ говорит
   // (TTS-эхо) и TTS_TAIL_GRACE_MS после (кандидат думает/слушает) — иначе ложная
   // алерт «Микрофон молчит» на обычной паузе диалога (инцидент 2026-10-09).
@@ -203,7 +207,9 @@ export function useVoiceSession(id: number) {
             setStage(m.name);
             stageRef.current = m.name;
             setBoard(m.board ?? null);
-            setTrackMeta(m.track ?? null);
+            // Источник правды — сервер (он кладёт `track` в каждое stage-сообщение);
+            // здесь только защита от сообщения без поля: оно не сбрасывает мету.
+            setTrackMeta(m.track ?? trackMetaRef.current);
             setStageDebug(m.debug === true);
             {
               const list = m.tasks ?? (m.task ? [m.task] : []);
