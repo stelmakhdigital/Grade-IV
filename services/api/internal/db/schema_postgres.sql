@@ -74,16 +74,6 @@ CREATE TABLE IF NOT EXISTS reports (
   created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS minutes_ledger (
-  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  user_id BIGINT NOT NULL REFERENCES users(id),
-  session_id BIGINT,
-  delta_seconds INTEGER NOT NULL,
-  reason TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_ledger_user ON minutes_ledger(user_id);
-
 -- Шаблоны интервью (настраиваемые планы под грейды, 2026-10-09).
 CREATE TABLE IF NOT EXISTS interview_templates (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

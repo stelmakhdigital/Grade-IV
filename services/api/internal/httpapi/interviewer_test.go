@@ -42,7 +42,6 @@ func newInterviewEnv(t *testing.T) *interviewEnv {
 		DatabaseURL:    "sqlite://:memory:",
 		JWTSecret:      "test-secret",
 		JWTExpiryHours: 1,
-		MinutesFreeS:   3600,
 		SilenceNudgeS:  1,
 		SandboxURL:     "http://127.0.0.1:1", // нет sandbox: задачи не выдаются
 	}

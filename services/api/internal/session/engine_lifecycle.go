@@ -19,6 +19,7 @@ type createParams struct {
 	templateID int64
 	profileID  int64
 	ttsspeaker string
+	baseGrade  models.Grade
 }
 
 // WithProfile — профиль интервьюера (tone × difficulty, итерация B);
@@ -43,7 +44,13 @@ func WithTTSSpeaker(speaker string) CreateOption {
 	return func(p *createParams) { p.ttsspeaker = speaker }
 }
 
-// Create создаёт сессию: проверка минут (402-условие), вставка, старт в статусе active.
+// WithBaseGrade — грейд по резюме (ИИ определил его по резюме/описанию).
+// Grade сессии при этом — цель: на шаг выше базы.
+func WithBaseGrade(g models.Grade) CreateOption {
+	return func(p *createParams) { p.baseGrade = g }
+}
+
+// Create создаёт сессию: вставка, старт в статусе active.
 func (e *Engine) Create(ctx context.Context, userID int64, grade models.Grade, stack models.Stack, opts ...CreateOption) (models.Session, error) {
 	var cp createParams
 	for _, o := range opts {
@@ -92,13 +99,7 @@ func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, s
 			return models.Session{}, fmt.Errorf("%w: стек %q", ErrInvalidParams, stack)
 		}
 	}
-	minutes, err := e.users.MinutesRemaining(ctx, userID)
-	if err != nil {
-		return models.Session{}, err
-	}
-	if minutes <= 0 {
-		return models.Session{}, ErrNoMinutes
-	}
+	var err error
 	now := e.now()
 	limit := models.SessionDurationS(grade)
 	switch {
@@ -151,6 +152,7 @@ func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, s
 		ProfileID:      cp.profileID,
 		TTSSpeaker:     cp.ttsspeaker,
 		TrackID:        trackID,
+		BaseGrade:      cp.baseGrade,
 	})
 	if err != nil {
 		return models.Session{}, err
@@ -415,7 +417,6 @@ func (e *Engine) finish(id int64, byUser bool, reason string) (*Snapshot, error)
 	rt.lastPersist = now
 	rt.connMu.Unlock()
 
-	e.bill(ctx, rt, id, active, "session_finished")
 	evt := map[string]any{"reason": reason, "active_seconds": math.Round(active*100) / 100}
 	if byUser {
 		evt["by_user"] = true
@@ -458,7 +459,6 @@ func (e *Engine) abort(id int64, reason string) (*Snapshot, error) {
 	rt.lastPersist = now
 	rt.connMu.Unlock()
 
-	e.bill(ctx, rt, id, active, "session_aborted")
 	_, _ = e.addEvent(ctx, id, "aborted", map[string]any{
 		"reason": reason, "active_seconds": math.Round(active*100) / 100,
 	})

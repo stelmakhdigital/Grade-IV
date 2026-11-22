@@ -24,7 +24,7 @@ func newTestEnv(t *testing.T) *httptest.Server {
 		DatabaseURL:    "sqlite://:memory:",
 		JWTSecret:      "test-secret",
 		JWTExpiryHours: 1,
-		MinutesFreeS:   3600,
+		ResumeDir:      t.TempDir(), // файлы резюме не должны попадать в рабочее дерево
 	}
 	database, dialect, err := db.Open(cfg.DatabaseURL)
 	if err != nil {
@@ -101,8 +101,9 @@ func TestRegisterLoginMe(t *testing.T) {
 	if token == "" {
 		t.Fatal("register: пустой token")
 	}
-	if m["minutes_remaining_s"] != float64(3600) {
-		t.Fatalf("register: minutes = %v, want 3600", m["minutes_remaining_s"])
+	// Баланса минут больше нет: длительность интервью — метрика, не валюта.
+	if v, ok := m["minutes_remaining_s"]; ok {
+		t.Fatalf("register: минуты больше не выдаются, got %v", v)
 	}
 
 	// Дублирование email → 409.
@@ -146,7 +147,7 @@ func TestRegisterLoginMe(t *testing.T) {
 		t.Fatalf("me broken token: status = %d, want 401", code)
 	}
 
-	// /me с валидным токеном → 200 + email + баланс.
+	// /me с валидным токеном → 200 + email.
 	code, m = doJSON(t, "GET", ts.URL+"/api/v1/auth/me", nil,
 		map[string]string{"Authorization": "Bearer " + token})
 	if code != http.StatusOK {
@@ -156,8 +157,8 @@ func TestRegisterLoginMe(t *testing.T) {
 	if user["email"] != "candidate@example.ru" {
 		t.Fatalf("me: email = %v, want candidate@example.ru", user["email"])
 	}
-	if m["minutes_remaining_s"] != float64(3600) {
-		t.Fatalf("me: minutes = %v, want 3600", m["minutes_remaining_s"])
+	if _, ok := m["minutes_remaining_s"]; ok {
+		t.Fatalf("me: баланс минут убран из ответа, got %v", m["minutes_remaining_s"])
 	}
 }
 
@@ -181,7 +182,6 @@ func TestDebugMicReportFlag(t *testing.T) {
 		DatabaseURL:    "sqlite://:memory:",
 		JWTSecret:      "test-secret",
 		JWTExpiryHours: 1,
-		MinutesFreeS:   3600,
 		DebugEndpoints: true,
 	}
 	database, dialect, err := db.Open(cfg.DatabaseURL)

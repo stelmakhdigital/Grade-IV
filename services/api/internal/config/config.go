@@ -19,8 +19,9 @@ type Config struct {
 	JWTSecret      string // секрет подписи JWT (JWT_SECRET)
 	Env            string // среда: dev (default) | prod (APP_ENV); в prod dev-секрет JWT запрещён
 	JWTExpiryHours int    // время жизни токена, ч (JWT_EXPIRY_HOURS)
-	MinutesFreeS   int    // стартовый грант минут, с (MINUTES_FREE_S)
 	PauseTimeoutS  int    // пауза дольше порога → aborted, с (SESSION_PAUSE_TIMEOUT_S, SRS §7)
+	// ResumeDir — каталог файлов резюме кандидатов (RESUME_DIR, def ./data/resumes).
+	ResumeDir string
 	// SessionLimitS — лимит длительности сессии (SESSION_LIMIT_S):
 	// 0 — по грейду (45/50/60/75 мин), >0 — фиксированный, с;
 	// переменная "0"/"off" → -1 (без ограничения по времени).
@@ -91,7 +92,6 @@ func Load() (*Config, error) {
 		JWTSecret:         getEnv("JWT_SECRET", DevInsecureSecret),
 		Env:               strings.ToLower(strings.TrimSpace(getEnv("APP_ENV", "dev"))),
 		JWTExpiryHours:    getEnvInt("JWT_EXPIRY_HOURS", 168),
-		MinutesFreeS:      getEnvInt("MINUTES_FREE_S", 3600),
 		PauseTimeoutS:     getEnvInt("SESSION_PAUSE_TIMEOUT_S", 1800),
 		SessionLimitS:     sessionLimitFromEnv(),
 		VoiceURL:          getEnv("VOICE_URL", "http://localhost:8100"),
@@ -109,6 +109,7 @@ func Load() (*Config, error) {
 		VADPreSilenceMS:   getEnvInt("VAD_PRESTT_SILENCE_MS", 400),
 		LLMMockResponse:   getEnv("LLM_MOCK_RESPONSE", ""),
 		LLMMockTokensPerS: getEnvFloat("LLM_MOCK_TOKENS_PER_S", 0),
+		ResumeDir:         getEnv("RESUME_DIR", "./data/resumes"),
 	}
 	if c.JWTExpiryHours <= 0 {
 		return nil, fmt.Errorf("JWT_EXPIRY_HOURS должен быть > 0 (получено %d)", c.JWTExpiryHours)
@@ -117,9 +118,6 @@ func Load() (*Config, error) {
 	if isProdEnv(c.Env) && c.JWTSecret == DevInsecureSecret {
 		return nil, fmt.Errorf("APP_ENV=%s: JWT_SECRET не может быть dev-секретом (%q) — задайте реальный JWT_SECRET",
 			c.Env, DevInsecureSecret)
-	}
-	if c.MinutesFreeS <= 0 {
-		return nil, fmt.Errorf("MINUTES_FREE_S должен быть > 0 (получено %d)", c.MinutesFreeS)
 	}
 	return c, nil
 }

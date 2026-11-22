@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"math"
 	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
@@ -57,17 +56,6 @@ func (e *Engine) tick(now time.Time) {
 			continue
 		}
 		rt.connMu.Unlock()
-	}
-}
-
-// bill — проводка расхода минут: delta = −округлённые активные секунды.
-func (e *Engine) bill(ctx context.Context, rt *runtime, sessionID int64, active float64, reason string) {
-	delta := -int(math.Round(active))
-	if delta == 0 {
-		return
-	}
-	if err := e.users.GrantMinutes(ctx, rt.userID, &sessionID, delta, reason); err != nil {
-		e.log.Error("ledger: проводка расхода минут", "session", sessionID, "err", err)
 	}
 }
 

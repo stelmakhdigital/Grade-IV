@@ -139,6 +139,13 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 				return t
 			}
 			return ""
+		}),
+		// Резюме кандидата: блок профиля + уровень интервью («на шаг выше базы»).
+		interviewer.WithResumeResolver(func(ctx context.Context, userID int64) string {
+			if r, err := users.GetResume(ctx, userID); err == nil {
+				return r.Prompt()
+			}
+			return ""
 		}))
 	voice := voicesvc.NewClient(cfg.VoiceURL)
 	s := &Server{
@@ -224,6 +231,10 @@ func (s *Server) Handler() http.Handler {
 	// F6 (итерация 12): вакансия/кампания кандидата (профиль → system-промпт).
 	mux.Handle("GET /api/v1/me/vacancy", s.requireAuth(http.HandlerFunc(s.handleGetVacancy)))
 	mux.Handle("PUT /api/v1/me/vacancy", s.requireAuth(http.HandlerFunc(s.handlePutVacancy)))
+	// Резюме кандидата (описание + файл): профиль для ИИ и подбор роли/грейда.
+	mux.Handle("GET /api/v1/me/resume", s.requireAuth(http.HandlerFunc(s.handleGetResume)))
+	mux.Handle("PUT /api/v1/me/resume", s.requireAuth(http.HandlerFunc(s.handlePutResume)))
+	mux.Handle("DELETE /api/v1/me/resume", s.requireAuth(http.HandlerFunc(s.handleDeleteResume)))
 
 	// Шаблоны интервью (итерация A).
 	mux.Handle("GET /api/v1/templates", s.requireAuth(http.HandlerFunc(s.handleTemplatesList)))

@@ -127,6 +127,16 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 			"ALTER TABLE sessions ADD COLUMN share_token TEXT NOT NULL DEFAULT ''",
 			// spec-18: трек собеседования (дефолт backend — совместимость).
 			"ALTER TABLE sessions ADD COLUMN track_id TEXT NOT NULL DEFAULT 'backend'",
+			// Резюме кандидата: описание + текст из файла + имя файла (вместо
+			// ручного выбора роли и грейда в кабинете).
+			"ALTER TABLE users ADD COLUMN resume_about TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE users ADD COLUMN resume_text TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE users ADD COLUMN resume_file TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE users ADD COLUMN resume_path TEXT NOT NULL DEFAULT ''",
+			// Грейд по резюме (ИИ определил по резюме): отчёту и метрике «собесовали на шаг выше».
+			"ALTER TABLE sessions ADD COLUMN base_grade TEXT NOT NULL DEFAULT ''",
+			// След уровней вопросов (адаптивная сложность) в отчёте.
+			"ALTER TABLE reports ADD COLUMN question_trail TEXT NOT NULL DEFAULT ''",
 		}
 	case DialectPostgres:
 		raw = schemaPostgres + "\n" + schemaPostgresProfiles
@@ -144,6 +154,13 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS share_token TEXT NOT NULL DEFAULT ''",
 			// spec-18: трек собеседования (дефолт backend — совместимость).
 			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS track_id TEXT NOT NULL DEFAULT 'backend'",
+			// Резюме кандидата: описание + текст из файла + имя файла.
+			"ALTER TABLE users ADD COLUMN IF NOT EXISTS resume_about TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE users ADD COLUMN IF NOT EXISTS resume_text TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE users ADD COLUMN IF NOT EXISTS resume_file TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE users ADD COLUMN IF NOT EXISTS resume_path TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS base_grade TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS question_trail TEXT NOT NULL DEFAULT ''",
 		}
 	default:
 		return fmt.Errorf("неподдерживаемый диалект: %q", d)

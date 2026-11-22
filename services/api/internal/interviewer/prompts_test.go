@@ -59,3 +59,28 @@ func TestSystemPromptBackwardCompat(t *testing.T) {
 		t.Fatalf("SystemPrompt без balanced-блока")
 	}
 }
+
+// Резюме в промпте: факты кандидата + уровень «на шаг выше базы» с шагом вниз.
+func TestSystemPromptResumeBlock(t *testing.T) {
+	with := SystemPromptWithProfileProgram(models.GradeSenior, "go", models.StageVoice,
+		"balanced", "standard", "", "", "", "Иван, Go 5 лет", models.GradeMiddle, nil)
+	for _, want := range []string{"Иван, Go 5 лет", "Резюме подтверждает уровень middle",
+		"уровень senior", "переходи на уровень middle"} {
+		if !strings.Contains(with, want) {
+			t.Fatalf("в промпте нет %q:\n%s", want, with)
+		}
+	}
+	// Без резюме или без базы по резюме — блока нет (промпт как раньше).
+	noResume := SystemPromptWithProfileProgram(models.GradeSenior, "go", models.StageVoice,
+		"balanced", "standard", "", "", "", "", models.GradeMiddle, nil)
+	noBase := SystemPromptWithProfileProgram(models.GradeSenior, "go", models.StageVoice,
+		"balanced", "standard", "", "", "", "Иван, Go 5 лет", "", nil)
+	base := SystemPromptWithProfileProgram(models.GradeSenior, "go", models.StageVoice,
+		"balanced", "standard", "", "", "", "", "", nil)
+	if strings.Contains(noResume, "Резюме подтверждает") || strings.Contains(noBase, "Резюме подтверждает") {
+		t.Fatal("блок резюме появился без резюме/базы")
+	}
+	if noResume != base || noBase != base {
+		t.Fatal("промпт без блока резюме должен совпадать с обычным")
+	}
+}

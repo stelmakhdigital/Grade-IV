@@ -2,6 +2,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   ApiError,
   createSession,
+  deleteResume,
+  getResume,
   listEvents,
   listSessions,
   login,
@@ -10,6 +12,7 @@ import {
   register,
   resumeSession,
   runTests,
+  saveResume,
   setToken,
   getToken,
 } from './api';
@@ -32,13 +35,12 @@ describe('api-клиент (WP-7)', () => {
         token: 'tok',
         expires_in_s: 86400,
         user: { id: 1, email: 'a@b.c', created_at: '2026-09-14T00:00:00Z' },
-        minutes_remaining_s: 3600,
       }),
     );
     vi.stubGlobal('fetch', fetchMock);
     const r = await register('a@b.c', 'password1');
     expect(r.user.email).toBe('a@b.c');
-    expect(r.minutes_remaining_s).toBe(3600);
+    expect(r.token).toBe('tok');
     const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('/api/v1/auth/register');
     expect((opts.headers as Record<string, string>)['Authorization']).toBeUndefined();
@@ -48,7 +50,7 @@ describe('api-клиент (WP-7)', () => {
   it('me() добавляет Authorization: Bearer из localStorage', async () => {
     setToken('tok123');
     const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(200, { user: { id: 1, email: 'a@b.c', created_at: '' }, minutes_remaining_s: 600 }),
+      jsonResponse(200, { user: { id: 1, email: 'a@b.c', created_at: '' } }),
     );
     vi.stubGlobal('fetch', fetchMock);
     await me();
@@ -76,20 +78,52 @@ describe('api-клиент (WP-7)', () => {
   });
 
   it('createSession/listSessions/listEvents — пути и методы', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(201, { id: 7, status: 'active' }));
+    const fetchMock = vi.fn(async (..._args: [string, RequestInit]) =>
+      jsonResponse(201, { id: 7, status: 'active' }));
     vi.stubGlobal('fetch', fetchMock);
-    await createSession('middle', 'go');
+    await createSession({ grade: 'middle', stack: 'go' });
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/sessions');
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST');
+    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({
+      grade: 'middle',
+      stack: 'go',
+    });
+
+    // Пустой вызов — роль и грейд подбирает ИИ по резюме (так делает кабинет).
+    await createSession();
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({});
 
     fetchMock.mockResolvedValue(jsonResponse(200, [{ id: 7 }]));
     await listSessions();
-    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/sessions');
-    expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBe('GET');
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/sessions');
+    expect((fetchMock.mock.calls[2][1] as RequestInit).method).toBe('GET');
 
     fetchMock.mockResolvedValue(jsonResponse(200, [{ seq: 1, kind: 'finished' }]));
     await listEvents(7);
-    expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/sessions/7/events');
+    expect(fetchMock.mock.calls[3][0]).toBe('/api/v1/sessions/7/events');
+  });
+
+  it('резюме: GET/DELETE + PUT multipart с Bearer', async () => {
+    setToken('tok123');
+    const fetchMock = vi.fn(async (..._args: [string, RequestInit]) =>
+      jsonResponse(200, { about: '', file_name: '', text_chars: 0 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getResume();
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/me/resume');
+
+    await saveResume('Go 5 лет', new File(['x'], 'r.pdf', { type: 'application/pdf' }));
+    const [, put] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(put.method).toBe('PUT');
+    expect(put.body).toBeInstanceOf(FormData);
+    expect((put.body as FormData).get('about')).toBe('Go 5 лет');
+    expect(((put.body as FormData).get('resume') as File).name).toBe('r.pdf');
+    expect((put.headers as Record<string, string>)['Authorization']).toBe('Bearer tok123');
+    // Content-Type не ставим вручную: boundary добавляет fetch.
+    expect((put.headers as Record<string, string>)['Content-Type']).toBeUndefined();
+
+    await deleteResume();
+    expect((fetchMock.mock.calls[2][1] as RequestInit).method).toBe('DELETE');
   });
 
   it('pauseSession/resumeSession: POST /sessions/{id}/pause|resume, DTO и Bearer', async () => {

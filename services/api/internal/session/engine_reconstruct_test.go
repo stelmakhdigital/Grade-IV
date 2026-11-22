@@ -23,7 +23,7 @@ func TestTrackSurvivesReconstruct(t *testing.T) {
 	if err := db.Migrate(ctx, conn, dialect); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	e := newTestEnvWithDB(t, conn, dialect, 3600)
+	e := newTestEnvWithDB(t, conn, dialect)
 
 	dev := models.Track{
 		ID: "dev", Title: "Разработчик",
@@ -112,7 +112,7 @@ func TestTrackSurvivesReconstructFromStore(t *testing.T) {
 	if err := db.Migrate(ctx, conn, dialect); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	e := newTestEnvWithDB(t, conn, dialect, 3600)
+	e := newTestEnvWithDB(t, conn, dialect)
 	sysadmin := models.Track{
 		ID: "sysadmin", Title: "Системный администратор",
 		Practice: &models.Practice{Runtime: models.StackShell},

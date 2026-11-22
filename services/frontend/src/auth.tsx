@@ -1,5 +1,5 @@
 /**
- * AuthContext (WP-7): токен в localStorage, профиль и баланс минут.
+ * AuthContext (WP-7): токен в localStorage и профиль.
  * При старте: если есть токен — /auth/me (валидность); 401 → разлогин.
  */
 import {
@@ -27,9 +27,6 @@ export type AuthStatus = 'loading' | 'guest' | 'authed';
 export interface AuthContextValue {
   status: AuthStatus;
   user: User | null;
-  minutesRemainingS: number;
-  /** Минут (без дробной) для отображения. */
-  minutesRemainingMin: number;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   logout: () => void;
@@ -41,11 +38,9 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [user, setUser] = useState<User | null>(null);
-  const [minutes, setMinutes] = useState(0);
 
   const applyMe = useCallback((r: MeResult) => {
     setUser(r.user);
-    setMinutes(r.minutes_remaining_s);
     setStatus('authed');
   }, []);
 
@@ -79,7 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string) => {
       const r = await apiLogin(email, password);
       setToken(r.token);
-      applyMe({ user: r.user, minutes_remaining_s: r.minutes_remaining_s });
+      applyMe({ user: r.user });
     },
     [applyMe],
   );
@@ -88,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string) => {
       const r = await apiRegister(email, password);
       setToken(r.token);
-      applyMe({ user: r.user, minutes_remaining_s: r.minutes_remaining_s });
+      applyMe({ user: r.user });
     },
     [applyMe],
   );
@@ -96,22 +91,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
-    setMinutes(0);
     setStatus('guest');
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({
-      status,
-      user,
-      minutesRemainingS: minutes,
-      minutesRemainingMin: Math.floor(minutes / 60),
-      login,
-      register,
-      logout,
-      refresh,
-    }),
-    [status, user, minutes, login, register, logout, refresh],
+    () => ({ status, user, login, register, logout, refresh }),
+    [status, user, login, register, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -157,8 +157,6 @@ export function apiErrorMessage(
         return 'Некорректный формат email.';
       case 'network':
         return 'Нет соединения с сервером — проверьте, запущен ли api.';
-      case 'no_minutes':
-        return 'Недостаточно минут — пополните баланс.';
       default:
         return err.message || 'Ошибка запроса.';
     }

@@ -50,8 +50,7 @@ func TestLoadWS50Sessions(t *testing.T) {
 	// Свой env (не newTestEnv): нужен доступ к Engine().Run — в проде тик-цикл
 	// запускает cmd/api, а timer-сообщения приходят только от него.
 	cfg := &config.Config{
-		Addr: ":0", DatabaseURL: "sqlite://:memory:", JWTSecret: "test-secret",
-		JWTExpiryHours: 1, MinutesFreeS: 3600,
+		Addr: ":0", DatabaseURL: "sqlite://:memory:", JWTSecret: "test-secret", JWTExpiryHours: 1,
 	}
 	database, dialect, err := db.Open(cfg.DatabaseURL)
 	if err != nil {

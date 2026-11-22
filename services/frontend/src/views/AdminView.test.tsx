@@ -11,7 +11,6 @@ function json(status: number, body: unknown): Response {
 
 const ME_ADMIN = {
   user: { id: 1, email: 'admin@example.com', created_at: '2026-09-14T00:00:00Z', is_admin: true },
-  minutes_remaining_s: 3600,
 };
 
 const TRACKS = [

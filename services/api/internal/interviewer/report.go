@@ -39,6 +39,9 @@ type ReportData struct {
 	StudyPlan2Weeks []string `json:"study_plan_2weeks"`
 	// GradeGap — «До X не хватает Y», Итерация B.
 	GradeGap string `json:"grade_gap"`
+	// QuestionTrail — путь по уровням вопросов: где кандидат держал цель, где
+	// интервьюер снижал сложность. Пусто — адаптивного уровня не было.
+	QuestionTrail string `json:"question_trail,omitempty"`
 	// ProgressVsPrevious — все прошлые интервью (последние 5), Итерация B.
 	ProgressVsPrevious []ProgressEntry `json:"progress_vs_previous"`
 	// LiveCodeTasks — per-task результаты Live-Code (spec-13B T3), детерминированно.
@@ -454,6 +457,10 @@ func (i *Interviewer) GenerateReport(ctx context.Context, sessionID int64) (Repo
 		prevJSON = []byte("[]")
 	}
 	role := fmt.Sprintf("грейд %s", sess.Grade)
+	if sess.BaseGrade != "" && sess.BaseGrade != sess.Grade {
+		// Интервью было на шаг выше резюме — оценщик должен это учитывать.
+		role += fmt.Sprintf(" (цель; резюме подтверждает %s)", sess.BaseGrade)
+	}
 	if sess.Stack != "" {
 		role += fmt.Sprintf(", стек %s", sess.Stack)
 	}
@@ -468,7 +475,10 @@ func (i *Interviewer) GenerateReport(ctx context.Context, sessionID int64) (Repo
 			"\"evidence\":[2-3 примера из сессии],\"gap_to_grade\":3-score,\"study_plan\":[2-3 пункта]}],"+
 			"\"verdict\":1-2 предложения,\"strengths\":[...],\"weaknesses\":[...],\"recommendations\":[...],"+
 			"\"study_plan_2weeks\":[10-15 пунктов, приоритет по gap × weight],"+
-			"\"grade_gap\":\"До X не хватает Y\"} — тексты на русском.",
+			"\"grade_gap\":\"До X не хватает Y\",\"question_trail\":\"…\"} — тексты на русском.\n"+
+			"question_trail: 1-2 предложения, на каком уровне кандидат держал ответы и где "+
+			"сложность пришлось снизить (уровни: junior, middle, senior, staff). "+
+			"Если уровень не снизился — так и напиши.",
 		role, string(critJSON), tr, string(codeJSON), string(designJSON), string(prevJSON))
 	sys := "Ты — технический интервьюер-оценщик. Оцениваешь кандидата по критериям с весами, " +
 		"шкала 1–5 (1 — не соответствует уровню грейда, 3 — соответствует, 5 — существенно выше). " +
@@ -518,6 +528,7 @@ func parseReportJSON(content string, crits []CriterionScore, confirm float64) (R
 		Recommendations []string `json:"recommendations"`
 		StudyPlan2Weeks []string `json:"study_plan_2weeks"`
 		GradeGap        string   `json:"grade_gap"`
+		QuestionTrail   string   `json:"question_trail"`
 	}
 	if err := json.Unmarshal([]byte(content[start:end+1]), &raw); err != nil || len(raw.Criteria) == 0 {
 		return ReportData{}, false
@@ -573,6 +584,7 @@ func parseReportJSON(content string, crits []CriterionScore, confirm float64) (R
 		Recommendations:     raw.Recommendations,
 		StudyPlan2Weeks:     raw.StudyPlan2Weeks,
 		GradeGap:            gradeGap,
+		QuestionTrail:       strings.TrimSpace(raw.QuestionTrail),
 	}, true
 }
 

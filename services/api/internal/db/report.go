@@ -26,6 +26,7 @@ func NewReportStore(dbx *sql.DB, d Dialect) *ReportStore {
 type ReportExtra struct {
 	Verdict            string
 	GradeGap           string
+	QuestionTrail      string // путь по уровням вопросов (адаптивная сложность)
 	StudyPlan2Weeks    string // JSON: []string
 	ProgressVsPrevious string // JSON: []ProgressEntry (см. interviewer)
 	LiveCodeTasks      string // JSON: []LiveCodeTaskResult (spec-13B T3)
@@ -37,9 +38,9 @@ func (s *ReportStore) Save(ctx context.Context, sessionID int64, overall float64
 	extra ReportExtra) error {
 	_, err := s.db.ExecContext(ctx, s.d.q(`
 		INSERT INTO reports (session_id, overall, grade_recommendation, criteria,
-			strengths, weaknesses, recommendations, verdict, grade_gap,
+			strengths, weaknesses, recommendations, verdict, grade_gap, question_trail,
 			study_plan_2weeks, progress_vs_previous, livecode_tasks, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (session_id) DO UPDATE SET
 			overall = excluded.overall,
 			grade_recommendation = excluded.grade_recommendation,
@@ -49,14 +50,15 @@ func (s *ReportStore) Save(ctx context.Context, sessionID int64, overall float64
 			recommendations = excluded.recommendations,
 			verdict = excluded.verdict,
 			grade_gap = excluded.grade_gap,
+			question_trail = excluded.question_trail,
 			study_plan_2weeks = excluded.study_plan_2weeks,
 			progress_vs_previous = excluded.progress_vs_previous,
 			livecode_tasks = excluded.livecode_tasks,
 			created_at = excluded.created_at`),
 		sessionID, overall, gradeRecommendation, string(criteria),
 		string(strengths), string(weaknesses), string(recommendations),
-		extra.Verdict, extra.GradeGap, extra.StudyPlan2Weeks, extra.ProgressVsPrevious,
-		extra.LiveCodeTasks,
+		extra.Verdict, extra.GradeGap, extra.QuestionTrail, extra.StudyPlan2Weeks,
+		extra.ProgressVsPrevious, extra.LiveCodeTasks,
 		nowRFC3339())
 	if err != nil {
 		return fmt.Errorf("save report: %w", err)
@@ -81,13 +83,13 @@ func (s *ReportStore) Get(ctx context.Context, sessionID int64) (overall float64
 	extra ReportExtra, err error) {
 	err = s.db.QueryRowContext(ctx, s.d.q(`
 		SELECT overall, grade_recommendation, criteria, strengths, weaknesses, recommendations,
-			COALESCE(verdict, ''), COALESCE(grade_gap, ''),
+			COALESCE(verdict, ''), COALESCE(grade_gap, ''), COALESCE(question_trail, ''),
 			COALESCE(study_plan_2weeks, '[]'), COALESCE(progress_vs_previous, '[]'),
 			COALESCE(livecode_tasks, '[]')
 		FROM reports WHERE session_id = ?`), sessionID).
 		Scan(&overall, &gradeRecommendation, &criteria, &strengths, &weaknesses, &recommendations,
-			&extra.Verdict, &extra.GradeGap, &extra.StudyPlan2Weeks, &extra.ProgressVsPrevious,
-			&extra.LiveCodeTasks)
+			&extra.Verdict, &extra.GradeGap, &extra.QuestionTrail, &extra.StudyPlan2Weeks,
+			&extra.ProgressVsPrevious, &extra.LiveCodeTasks)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, "", nil, nil, nil, nil, ReportExtra{}, ErrReportNotFound

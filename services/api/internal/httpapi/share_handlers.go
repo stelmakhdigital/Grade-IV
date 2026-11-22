@@ -134,6 +134,7 @@ func (s *Server) handlePublicReport(w http.ResponseWriter, r *http.Request) {
 		"recommendations":      json.RawMessage(recommendations),
 		"verdict":              extra.Verdict,
 		"grade_gap":            extra.GradeGap,
+		"question_trail":       extra.QuestionTrail,
 		"study_plan_2weeks":    json.RawMessage(orJSONArray(extra.StudyPlan2Weeks)),
 		"progress_vs_previous": json.RawMessage(orJSONArray(extra.ProgressVsPrevious)),
 		"livecode_tasks":       json.RawMessage(orJSONArray(extra.LiveCodeTasks)),

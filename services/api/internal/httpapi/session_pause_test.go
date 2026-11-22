@@ -86,7 +86,6 @@ func newTestEnvShortPauseTimeout(t *testing.T) *httptest.Server {
 		DatabaseURL:    "sqlite://:memory:",
 		JWTSecret:      "test-secret",
 		JWTExpiryHours: 1,
-		MinutesFreeS:   3600,
 		PauseTimeoutS:  1,
 	}
 	database, dialect, err := db.Open(cfg.DatabaseURL)

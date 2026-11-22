@@ -21,7 +21,7 @@ func (e *ErrEmailExists) Error() string {
 	return fmt.Sprintf("email %s уже зарегистрирован", e.Email)
 }
 
-// UserStore — операции с пользователями и проводки учёта минут.
+// UserStore — операции с пользователями и профилем резюме.
 type UserStore struct {
 	db *sql.DB
 	d  Dialect
@@ -114,27 +114,63 @@ func (s *UserStore) scanUser(ctx context.Context, query string, arg any) (models
 	return u, nil
 }
 
-// GrantMinutes добавляет проводку в ledger: seconds > 0 — грант, < 0 — расход.
-func (s *UserStore) GrantMinutes(ctx context.Context, userID int64, sessionID *int64, seconds int, reason string) error {
-	_, err := s.db.ExecContext(ctx,
-		s.d.q(`INSERT INTO minutes_ledger (user_id, session_id, delta_seconds, reason, created_at) VALUES (?, ?, ?, ?, ?)`),
-		userID, sessionID, seconds, reason, nowRFC3339())
-	if err != nil {
-		return fmt.Errorf("grant minutes: %w", err)
-	}
-	return nil
+// Resume — профиль кандидата для ИИ-интервьюера: своё описание + текст, вытащенный
+// из файла резюме.
+type Resume struct {
+	About string
+	Text  string
+	// FileName — исходное имя файла (показать кандидату).
+	FileName string
+	// Path — куда файл лёг на диске ('' — файла нет). Путь генерирует сервер,
+	// имя пользователя в него не попадает.
+	Path string
 }
 
-// MinutesRemaining — остаток минут пользователя (SUM по ledger).
-func (s *UserStore) MinutesRemaining(ctx context.Context, userID int64) (int64, error) {
-	var sum int64
-	err := s.db.QueryRowContext(ctx,
-		s.d.q(`SELECT COALESCE(SUM(delta_seconds), 0) FROM minutes_ledger WHERE user_id = ?`),
-		userID).Scan(&sum)
-	if err != nil {
-		return 0, fmt.Errorf("minutes remaining: %w", err)
+// Empty — истинно, если резюме нет вовсе (ни описания, ни файла).
+func (r Resume) Empty() bool {
+	return strings.TrimSpace(r.About) == "" && strings.TrimSpace(r.Text) == "" && r.Path == ""
+}
+
+// Prompt — текст для промпта интервьюера: описание кандидата + содержимое файла.
+// Пустой профиль → "" (блок резюме в промпт не попадает).
+func (r Resume) Prompt() string {
+	var b strings.Builder
+	if a := strings.TrimSpace(r.About); a != "" {
+		b.WriteString(a)
 	}
-	return sum, nil
+	if t := strings.TrimSpace(r.Text); t != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(t)
+	}
+	return b.String()
+}
+
+// GetResume — профиль резюме кандидата. Нет пользователя — пустой Resume.
+func (s *UserStore) GetResume(ctx context.Context, userID int64) (Resume, error) {
+	var r Resume
+	err := s.db.QueryRowContext(ctx,
+		s.d.q(`SELECT resume_about, resume_text, resume_file, resume_path FROM users WHERE id = ?`), userID).
+		Scan(&r.About, &r.Text, &r.FileName, &r.Path)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Resume{}, nil
+	}
+	if err != nil {
+		return Resume{}, fmt.Errorf("get resume: %w", err)
+	}
+	return r, nil
+}
+
+// SetResume — сохранить/сбросить профиль резюме (пустые поля = сброс).
+func (s *UserStore) SetResume(ctx context.Context, userID int64, r Resume) error {
+	_, err := s.db.ExecContext(ctx,
+		s.d.q(`UPDATE users SET resume_about = ?, resume_text = ?, resume_file = ?, resume_path = ? WHERE id = ?`),
+		r.About, r.Text, r.FileName, r.Path, userID)
+	if err != nil {
+		return fmt.Errorf("set resume: %w", err)
+	}
+	return nil
 }
 
 func isUniqueViolation(err error) bool {

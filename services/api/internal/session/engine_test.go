@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"log/slog"
 	"testing"
@@ -13,7 +12,7 @@ import (
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 )
 
-// testEnv — изолированная среда: sqlite :memory:, пользователь с грантом минут, движок с фейковым временем.
+// testEnv — изолированная среда: sqlite :memory:, пользователь, движок с фейковым временем.
 type testEnv struct {
 	t      *testing.T
 	engine *Engine
@@ -23,7 +22,7 @@ type testEnv struct {
 	now    *time.Time
 }
 
-func newTestEnv(t *testing.T, grantS int) *testEnv {
+func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	conn, dialect, err := db.Open("sqlite://:memory:")
 	if err != nil {
@@ -34,11 +33,11 @@ func newTestEnv(t *testing.T, grantS int) *testEnv {
 	if err := db.Migrate(ctx, conn, dialect); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return newTestEnvWithDB(t, conn, dialect, grantS)
+	return newTestEnvWithDB(t, conn, dialect)
 }
 
 // newTestEnvWithDB — среда поверх общей (уже смигрированной) БД; пользователь создаётся с уникальным email.
-func newTestEnvWithDB(t *testing.T, conn *sql.DB, dialect db.Dialect, grantS int) *testEnv {
+func newTestEnvWithDB(t *testing.T, conn *sql.DB, dialect db.Dialect) *testEnv {
 	t.Helper()
 	ctx := context.Background()
 	users := db.NewUserStore(conn, dialect)
@@ -47,11 +46,6 @@ func newTestEnvWithDB(t *testing.T, conn *sql.DB, dialect db.Dialect, grantS int
 	u, err := users.CreateUser(ctx, fmt.Sprintf("tester-%d@example.com", time.Now().UnixNano()), "test-hash")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
-	}
-	if grantS > 0 {
-		if err := users.GrantMinutes(ctx, u.ID, nil, grantS, "test_grant"); err != nil {
-			t.Fatalf("grant: %v", err)
-		}
 	}
 	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
 	eng := New(store, users, slog.New(slog.DiscardHandler),
@@ -65,17 +59,19 @@ func (e *testEnv) advance(d time.Duration) {
 	*e.now = e.now.Add(d)
 }
 
-func minutesRemaining(t *testing.T, e *testEnv) int64 {
+// storedActive — активные секунды сессии в БД: длительность интервью как метрика
+// (баланса-валюты больше нет — проверяем, что длительность доживает до БД).
+func storedActive(t *testing.T, e *testEnv, id int64) float64 {
 	t.Helper()
-	m, err := e.users.MinutesRemaining(context.Background(), e.userID)
+	s, err := e.store.Get(context.Background(), id)
 	if err != nil {
-		t.Fatalf("minutes: %v", err)
+		t.Fatalf("get session: %v", err)
 	}
-	return m
+	return s.ActiveSeconds
 }
 
 func TestCreateSession(t *testing.T) {
-	e := newTestEnv(t, 3600)
+	e := newTestEnv(t)
 	ctx := context.Background()
 
 	m, err := e.engine.Create(ctx, e.userID, models.GradeJunior, models.StackGo)
@@ -88,8 +84,8 @@ func TestCreateSession(t *testing.T) {
 	if m.DurationLimitS != 45*60 {
 		t.Fatalf("duration limit: %d", m.DurationLimitS)
 	}
-	if got := minutesRemaining(t, e); got != 3600 {
-		t.Fatalf("минуты не должны списываться до финализации: %d", got)
+	if got := storedActive(t, e, m.ID); got != 0 {
+		t.Fatalf("до финализации длительность в БД не записана: %v", got)
 	}
 	snap, err := e.engine.Snapshot(m.ID)
 	if err != nil {
@@ -105,7 +101,7 @@ func TestCreateSession(t *testing.T) {
 }
 
 func TestCreateSessionInvalidParams(t *testing.T) {
-	e := newTestEnv(t, 3600)
+	e := newTestEnv(t)
 	if _, err := e.engine.Create(context.Background(), e.userID, models.Grade("intern"), models.StackGo); err == nil {
 		t.Error("ожидалась ошибка: неизвестный грейд")
 	}
@@ -114,16 +110,8 @@ func TestCreateSessionInvalidParams(t *testing.T) {
 	}
 }
 
-func TestCreateSessionNoMinutes(t *testing.T) {
-	e := newTestEnv(t, 0)
-	_, err := e.engine.Create(context.Background(), e.userID, models.GradeJunior, models.StackGo)
-	if !errors.Is(err, ErrNoMinutes) {
-		t.Fatalf("ожидался ErrNoMinutes, получено: %v", err)
-	}
-}
-
-func TestPauseResumeBilling(t *testing.T) {
-	e := newTestEnv(t, 3600)
+func TestPauseResumeActiveSeconds(t *testing.T) {
+	e := newTestEnv(t)
 	ctx := context.Background()
 	m, err := e.engine.Create(ctx, e.userID, models.GradeMiddle, models.StackPython)
 	if err != nil {
@@ -166,13 +154,14 @@ func TestPauseResumeBilling(t *testing.T) {
 	if got := snap.ActiveSeconds; got < 199.9 || got > 200.1 {
 		t.Fatalf("active финальное: %v", got)
 	}
-	if got := minutesRemaining(t, e); got != 3600-200 {
-		t.Fatalf("ledger: %d (ожидалось 3400)", got)
+	// Пауза не учитывается в длительности, учтённое время — в БД.
+	if got := storedActive(t, e, m.ID); got < 199.9 || got > 200.1 {
+		t.Fatalf("длительность в БД: %v", got)
 	}
 }
 
 func TestPauseTimeoutAborts(t *testing.T) {
-	e := newTestEnv(t, 3600)
+	e := newTestEnv(t)
 	ctx := context.Background()
 	m, err := e.engine.Create(ctx, e.userID, models.GradeJunior, models.StackGo)
 	if err != nil {
@@ -190,13 +179,13 @@ func TestPauseTimeoutAborts(t *testing.T) {
 	if snap.Status != models.StatusAborted {
 		t.Fatalf("ожидался aborted, получено: %s", snap.Status)
 	}
-	if got := minutesRemaining(t, e); got != 3600-30 {
-		t.Fatalf("тарифицируется фактическое активное время: %d", got)
+	if got := storedActive(t, e, m.ID); got < 29.9 || got > 30.1 {
+		t.Fatalf("в длительность вошло фактическое активное время: %v", got)
 	}
 }
 
 func TestTimeLimitAutoFinish(t *testing.T) {
-	e := newTestEnv(t, 3600)
+	e := newTestEnv(t)
 	ctx := context.Background()
 	m, err := e.engine.Create(ctx, e.userID, models.GradeJunior, models.StackGo) // лимит 2700 с
 	if err != nil {
@@ -213,8 +202,8 @@ func TestTimeLimitAutoFinish(t *testing.T) {
 	if snap.Status != models.StatusFinished || snap.TimeLeftS != 0 {
 		t.Fatalf("автонавершение по лимиту: %s left=%d", snap.Status, snap.TimeLeftS)
 	}
-	if got := minutesRemaining(t, e); got != 3600-2700 {
-		t.Fatalf("ledger: %d", got)
+	if got := storedActive(t, e, m.ID); got < 2699.9 || got > 2700.1 {
+		t.Fatalf("длительность в БД: %v", got)
 	}
 	// После финализации управление недоступно.
 	if _, err := e.engine.Resume(m.ID); err == nil {
@@ -224,9 +213,9 @@ func TestTimeLimitAutoFinish(t *testing.T) {
 
 // withLimitEnv — среда, где движок собран с явным SESSION_LIMIT_S (s):
 // <0 — без ограничения, >0 — фиксированный лимит, с.
-func withLimitEnv(t *testing.T, grantS, limitS int) *testEnv {
+func withLimitEnv(t *testing.T, limitS int) *testEnv {
 	t.Helper()
-	base := newTestEnv(t, grantS)
+	base := newTestEnv(t)
 	eng := New(base.store, base.users, slog.New(slog.DiscardHandler),
 		WithNow(func() time.Time { return *base.now }),
 		WithPauseTimeout(DefaultPauseTimeout),
@@ -237,7 +226,7 @@ func withLimitEnv(t *testing.T, grantS, limitS int) *testEnv {
 
 func TestSessionLimitUnlimited(t *testing.T) {
 	// SESSION_LIMIT_S < 0: сессия переживает нормальный лимит грейда.
-	e := withLimitEnv(t, 100000, -1)
+	e := withLimitEnv(t, -1)
 	ctx := context.Background()
 	m, err := e.engine.Create(ctx, e.userID, models.GradeJunior, models.StackGo) // грейду было бы 2700 с
 	if err != nil {
@@ -259,7 +248,7 @@ func TestSessionLimitUnlimited(t *testing.T) {
 
 func TestSessionLimitFixed(t *testing.T) {
 	// SESSION_LIMIT_S > 0: фиксированный лимит переопределяет грейд.
-	e := withLimitEnv(t, 100000, 600)
+	e := withLimitEnv(t, 600)
 	ctx := context.Background()
 	m, err := e.engine.Create(ctx, e.userID, models.GradeJunior, models.StackGo)
 	if err != nil {
@@ -280,7 +269,7 @@ func TestSessionLimitFixed(t *testing.T) {
 }
 
 func TestTransitions(t *testing.T) {
-	e := newTestEnv(t, 3600)
+	e := newTestEnv(t)
 	ctx := context.Background()
 	m, err := e.engine.Create(ctx, e.userID, models.GradeMiddle, models.StackGo)
 	if err != nil {
@@ -312,7 +301,7 @@ func TestTransitions(t *testing.T) {
 }
 
 func TestJuniorHasNoDesign(t *testing.T) {
-	e := newTestEnv(t, 3600)
+	e := newTestEnv(t)
 	ctx := context.Background()
 	m, err := e.engine.Create(ctx, e.userID, models.GradeJunior, models.StackPython)
 	if err != nil {
@@ -330,7 +319,7 @@ func TestJuniorHasNoDesign(t *testing.T) {
 }
 
 func TestDetachPausesActiveSession(t *testing.T) {
-	e := newTestEnv(t, 3600)
+	e := newTestEnv(t)
 	ctx := context.Background()
 	m, err := e.engine.Create(ctx, e.userID, models.GradeMiddle, models.StackGo)
 	if err != nil {
@@ -358,7 +347,7 @@ func TestRecoveryPutsActiveSessionsOnPause(t *testing.T) {
 	if err := db.Migrate(context.Background(), conn, dialect); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	env1 := newTestEnvWithDB(t, conn, dialect, 3600)
+	env1 := newTestEnvWithDB(t, conn, dialect)
 	ctx := context.Background()
 	m, err := env1.engine.Create(ctx, env1.userID, models.GradeMiddle, models.StackGo)
 	if err != nil {
@@ -366,7 +355,7 @@ func TestRecoveryPutsActiveSessionsOnPause(t *testing.T) {
 	}
 
 	// «Перезапуск»: новый движок на той же БД; Run должен поставить active-сессии в паузу.
-	env2 := newTestEnvWithDB(t, conn, dialect, 0)
+	env2 := newTestEnvWithDB(t, conn, dialect)
 	runCtx, cancel := context.WithCancel(context.Background())
 	go env2.engine.Run(runCtx)
 	defer cancel()

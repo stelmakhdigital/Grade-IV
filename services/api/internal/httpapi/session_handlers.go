@@ -30,7 +30,10 @@ type sessionDTO struct {
 	// spec-20: трек роли в DTO списка/детальной — кабинет показывает роль
 	// вместо сырого грейда, отчёт завершённой сессии берёт мету трека
 	// (пусто = легаси-сессия на backend).
-	TrackID        string     `json:"track_id,omitempty"`
+	TrackID string `json:"track_id,omitempty"`
+	// BaseGrade — грейд по резюме (ИИ), если интервью подбиралось по нему:
+	// Grade при этом — цель на шаг выше. Пусто — старт с явным грейдом.
+	BaseGrade      string     `json:"base_grade,omitempty"`
 	Stage          string     `json:"stage"`
 	Status         string     `json:"status"`
 	DurationLimitS int        `json:"duration_limit_s"`
@@ -49,6 +52,7 @@ func toDTO(m models.Session, snap *session.Snapshot) sessionDTO {
 		Grade:          string(m.Grade),
 		Stack:          string(m.Stack),
 		TrackID:        m.TrackID,
+		BaseGrade:      string(m.BaseGrade),
 		Stage:          string(m.Stage),
 		Status:         string(m.Status),
 		DurationLimitS: m.DurationLimitS,
@@ -69,9 +73,9 @@ func toDTO(m models.Session, snap *session.Snapshot) sessionDTO {
 	return d
 }
 
-// handleSessionsCreate — POST /api/v1/sessions {grade, stack, profile_id?}.
-// 201: {id, ws_url, duration_limit_s}; 402 — нет доступных минут (ARCHITECTURE §4.1);
-// 404 — profile_id не найден (Итерация B).
+// handleSessionsCreate — POST /api/v1/sessions {grade?, stack?, profile_id?, track_id?}.
+// 201: {id, ws_url, duration_limit_s}; 404 — profile_id не найден (Итерация B).
+// Пустой grade — роль и грейд берёт ИИ из резюме кандидата (кабинет их не спрашивает).
 func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Grade      models.Grade `json:"grade"`
@@ -85,9 +89,25 @@ func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "ожидается JSON {grade, stack}")
 		return
 	}
+	uid := userIDFromContext(r.Context())
+	grade := body.Grade
 	var opts []session.CreateOption
 	if body.TrackID != "" {
 		opts = append(opts, session.WithTrack(strings.TrimSpace(body.TrackID)))
+	}
+	if grade == "" {
+		trackID, base := s.inferRole(r.Context(), uid)
+		t, err := s.tracks.GetOrDefault(trackID)
+		if err != nil || t == nil {
+			t, _ = s.tracks.GetOrDefault(models.DefaultTrackID)
+		}
+		if t == nil {
+			writeError(w, http.StatusInternalServerError, "internal", "роли собеседования не загружены")
+			return
+		}
+		opts = append(opts, session.WithTrack(t.ID), session.WithBaseGrade(base))
+		grade = targetGrade(base, t.Grades)
+		body.Stack = t.Runtime()
 	}
 	if body.TemplateID > 0 {
 		opts = append(opts, session.WithTemplate(body.TemplateID))
@@ -109,7 +129,7 @@ func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
 	if body.TTSSpeaker != "" {
 		opts = append(opts, session.WithTTSSpeaker(strings.TrimSpace(body.TTSSpeaker)))
 	}
-	m, err := s.engine.Create(r.Context(), userIDFromContext(r.Context()), body.Grade, body.Stack, opts...)
+	m, err := s.engine.Create(r.Context(), uid, grade, body.Stack, opts...)
 	switch {
 	case err == nil:
 		writeJSON(w, http.StatusCreated, map[string]any{
@@ -117,10 +137,9 @@ func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
 			"duration_limit_s": m.DurationLimitS, "template_id": m.TemplateID,
 			"track_id": m.TrackID,
 			"stack":    m.Stack, // spec-22: рантайм практики роли (пусто — без практики)
+			// Грейд по резюме (пусто — резюме не определялось): цель была на шаг выше.
+			"base_grade": m.BaseGrade,
 		})
-	case errors.Is(err, session.ErrNoMinutes):
-		writeError(w, http.StatusPaymentRequired, "out_of_minutes",
-			"нет доступных минут — пополните лимит или дождитесь обновления тарифа")
 	case errors.Is(err, session.ErrInvalidParams):
 		writeError(w, http.StatusBadRequest, "invalid_request", "некорректный грейд или стек: "+err.Error())
 	default:
@@ -302,8 +321,6 @@ func (s *Server) writeSessionEngineError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, db.ErrSessionNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "сессия не найдена")
-	case errors.Is(err, session.ErrNoMinutes):
-		writeError(w, http.StatusPaymentRequired, "out_of_minutes", "нет доступных минут")
 	case errors.Is(err, session.ErrSessionEnded),
 		errors.Is(err, session.ErrIllegalStage),
 		errors.Is(err, session.ErrIllegalStatus),
@@ -471,8 +488,10 @@ func (s *Server) handleReportGet(w http.ResponseWriter, r *http.Request) {
 		"weaknesses":           json.RawMessage(weaknesses),
 		"recommendations":      json.RawMessage(recommendations),
 		// Подробный отчёт (Итерация B).
-		"verdict":              extra.Verdict,
-		"grade_gap":            extra.GradeGap,
+		"verdict":   extra.Verdict,
+		"grade_gap": extra.GradeGap,
+		// Путь по уровням вопросов (собеседовали на шаг выше резюме).
+		"question_trail":       extra.QuestionTrail,
 		"study_plan_2weeks":    json.RawMessage(extra.StudyPlan2Weeks),
 		"progress_vs_previous": json.RawMessage(extra.ProgressVsPrevious),
 		// Per-task Live-Code (spec-13B T3); старые строки — пусто → [].
@@ -510,6 +529,7 @@ func (s *Server) startReportGeneration(id int64) {
 			critJSON, strJSON, weakJSON, recJSON, db.ReportExtra{
 				Verdict:            data.Verdict,
 				GradeGap:           data.GradeGap,
+				QuestionTrail:      data.QuestionTrail,
 				StudyPlan2Weeks:    string(sp2wJSON),
 				ProgressVsPrevious: string(progJSON),
 				LiveCodeTasks:      string(lctJSON),

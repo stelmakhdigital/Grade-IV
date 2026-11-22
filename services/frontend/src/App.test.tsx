@@ -22,7 +22,6 @@ function mockApi(opts: { me?: unknown; sessions?: unknown } = {}) {
 
 const ME = {
   user: { id: 1, email: 'cand@example.com', created_at: '2026-09-14T00:00:00Z' },
-  minutes_remaining_s: 3600,
 };
 
 beforeEach(() => {
@@ -46,7 +45,7 @@ describe('App: маршрутизация (WP-7)', () => {
     expect(localStorage.getItem('grade.token')).toBeNull();
   });
 
-  it('с валидным токеном — кабинет с email и балансом', async () => {
+  it('с валидным токеном — кабинет с email и длительностью интервью', async () => {
     setToken('tok');
     vi.stubGlobal(
       'fetch',
@@ -54,8 +53,9 @@ describe('App: маршрутизация (WP-7)', () => {
     );
     render(<App />);
     expect(await screen.findByTestId('user-email')).toBeInTheDocument();
-    // spec-20: баланс человекочитаемо (60 мин → «1 ч 0 мин»)
-    expect(screen.getByTestId('minutes')).toHaveTextContent('1 ч 0 мин');
+    // Баланса-валюты нет; время интервью — метрика (2400 с → «40 мин»).
+    expect(await screen.findByTestId('total-time')).toHaveTextContent('40 мин');
+    expect(screen.getByTestId('total-time')).toHaveTextContent('40 мин');
     expect(screen.getByText('История')).toBeInTheDocument();
     // findBy: /sessions может резолвиться позже /auth/me (гонка запросов)
     const link = await screen.findByRole('link', { name: 'Отчёт' });

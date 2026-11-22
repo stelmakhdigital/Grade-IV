@@ -123,7 +123,6 @@ function json(status: number, body: unknown): Response {
 
 const ME = {
   user: { id: 1, email: 'cand@example.com', created_at: '2026-09-14T00:00:00Z' },
-  minutes_remaining_s: 3600,
 };
 
 const S_ACTIVE = {

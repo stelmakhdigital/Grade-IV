@@ -16,8 +16,10 @@ export function stageLabel(stage: Stage | string): string {
   }
 }
 
-/** spec-20: минуты баланса человекочитаемо (59987 → «41 д 16 ч»). */
-export function humanMinutes(min: number): string {
+/** Длительность интервью человекочитаемо (3600 с → «1 ч», 252000 с → «4 д 4 ч»):
+ * время — метрика пройденных интервью, а не баланс-валюта. */
+export function humanSeconds(sec: number): string {
+  const min = Math.round(sec / 60);
   if (min >= 1440) {
     const d = Math.floor(min / 1440);
     const h = Math.round((min % 1440) / 60);

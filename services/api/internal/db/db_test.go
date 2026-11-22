@@ -11,7 +11,7 @@ import (
 
 var wantedTables = []string{
 	"users", "sessions", "session_events", "submissions",
-	"whiteboards", "reports", "minutes_ledger", "interviewer_profiles",
+	"whiteboards", "reports", "interviewer_profiles",
 }
 
 func TestMigrateSqlite(t *testing.T) {
@@ -78,15 +78,22 @@ func TestUserStore(t *testing.T) {
 	if _, err := store.GetUserByEmail(ctx, "nobody@nowhere.ru"); err != ErrUserNotFound {
 		t.Fatalf("err = %v, want ErrUserNotFound", err)
 	}
-	if err := store.GrantMinutes(ctx, u.ID, nil, 3600, "grant_free"); err != nil {
-		t.Fatalf("grant: %v", err)
+	// Резюме: описание + текст из файла + имя (валюта-минуты из схемы убрана).
+	if err := store.SetResume(ctx, u.ID, Resume{About: "Go 5 лет", Text: "pdf-текст", FileName: "r.pdf", Path: "/tmp/1-x.pdf"}); err != nil {
+		t.Fatalf("set resume: %v", err)
 	}
-	remaining, err := store.MinutesRemaining(ctx, u.ID)
+	r, err := store.GetResume(ctx, u.ID)
 	if err != nil {
-		t.Fatalf("remaining: %v", err)
+		t.Fatalf("get resume: %v", err)
 	}
-	if remaining != 3600 {
-		t.Fatalf("remaining = %d, want 3600", remaining)
+	if r.About != "Go 5 лет" || r.Text != "pdf-текст" || r.FileName != "r.pdf" || r.Path != "/tmp/1-x.pdf" {
+		t.Fatalf("resume: %+v", r)
+	}
+	if err := store.SetResume(ctx, u.ID, Resume{}); err != nil {
+		t.Fatalf("reset resume: %v", err)
+	}
+	if r, err := store.GetResume(ctx, u.ID); err != nil || !r.Empty() {
+		t.Fatalf("resume должен сбрасываться: %+v err %v", r, err)
 	}
 }
 

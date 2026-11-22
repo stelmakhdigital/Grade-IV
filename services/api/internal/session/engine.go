@@ -25,7 +25,6 @@ const (
 
 // Ошибки движка.
 var (
-	ErrNoMinutes     = errors.New("нет доступных минут")
 	ErrSessionEnded  = errors.New("сессия завершена")
 	ErrNotAttached   = errors.New("сессия не найдена в движке")
 	ErrInvalidParams = errors.New("некорректные параметры")

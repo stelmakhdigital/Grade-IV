@@ -11,13 +11,14 @@ function json(status: number, body: unknown): Response {
 
 const ME = {
   user: { id: 1, email: 'cand@example.com', created_at: '2026-09-14T00:00:00Z' },
-  minutes_remaining_s: 3600,
 };
 
 const S_FINISHED = {
   id: 1,
-  grade: 'middle',
+  grade: 'senior',
+  base_grade: 'middle',
   stack: 'go',
+  track_id: 'backend',
   stage: 'report',
   status: 'finished',
   duration_limit_s: 3000,
@@ -28,8 +29,9 @@ const S_FINISHED = {
 };
 const S_ACTIVE = {
   id: 2,
-  grade: 'junior',
-  stack: 'python',
+  grade: 'middle',
+  stack: 'go',
+  track_id: 'backend',
   stage: 'voice',
   status: 'active',
   duration_limit_s: 2700,
@@ -43,9 +45,28 @@ const PROFILES = [
   { id: 1, name: 'Строгий Senior', tone: 'strict', difficulty: 'plus', is_preset: true },
 ];
 
-function mockApi(opts: { sessions?: unknown; create?: unknown; me?: unknown; profiles?: unknown } = {}): Mock {
+const RESUME = { about: 'Go 5 лет', file_name: 'resume.pdf', text_chars: 1234 };
+
+function mockApi(
+  opts: {
+    sessions?: unknown;
+    create?: unknown;
+    me?: unknown;
+    profiles?: unknown;
+    /** Ответ PUT (сохранение). */
+    resume?: unknown;
+    /** Ответ GET (текущее состояние). По умолчанию — резюме нет. */
+    resumeGet?: unknown;
+  } = {},
+): Mock {
   return vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/auth/me')) return json(200, opts.me ?? ME);
+    if (url.includes('/me/resume') && init?.method === 'PUT') {
+      return json(200, opts.resume ?? RESUME);
+    }
+    if (url.includes('/me/resume')) {
+      return json(200, opts.resumeGet ?? { about: '', file_name: '', text_chars: 0 });
+    }
     if (init?.method === 'POST' && url.endsWith('/sessions')) {
       return json(201, opts.create ?? S_ACTIVE);
     }
@@ -64,20 +85,32 @@ function renderCabinet(fetchMock: Mock) {
   );
 }
 
+/** Тело запроса старт-сессии (POST /sessions). */
+function startBody(fetchMock: Mock): Record<string, unknown> {
+  const call = fetchMock.mock.calls.find((c) => c[1]?.method === 'POST' && String(c[0]).endsWith('/sessions'));
+  return JSON.parse(((call?.[1] as RequestInit).body as string) ?? '{}');
+}
+
 beforeEach(() => {
   localStorage.clear();
   setToken('tok');
 });
 
 describe('CabinetView (WP-7)', () => {
-  it('показывает email и баланс; история со статусами и действиями', async () => {
+  it('email и длительность интервью вместо баланса; история со статусами и действиями', async () => {
     const fetchMock = mockApi({ sessions: [S_ACTIVE, S_FINISHED] });
     renderCabinet(fetchMock);
     expect(await screen.findByTestId('user-email')).toBeInTheDocument();
-    // spec-20: баланс человекочитаемо (60 мин → «1 ч 0 мин»)
-    expect(screen.getByTestId('minutes')).toHaveTextContent('1 ч 0 мин');
+    // Баланса минут больше нет; время — метрика: суммарная длительность сессий.
+    expect(screen.queryByTestId('minutes')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('total-time')).toHaveTextContent('51 мин');
+    // Роль и грейд не выбираются — ИИ берёт их из резюме.
+    expect(screen.queryByLabelText('Грейды')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Роль')).not.toBeInTheDocument();
     expect(screen.getByText('активна')).toBeInTheDocument();
     expect(screen.getByText('завершена')).toBeInTheDocument();
+    // уровень: цель senior, база по резюме middle
+    expect(screen.getByText(/по резюме middle/)).toBeInTheDocument();
     // завершённая → «Отчёт» (spec-20), активная → «Продолжить»
     const links = screen.getAllByRole('link');
     expect(links.some((l) => l.textContent === 'Отчёт')).toBe(true);
@@ -89,22 +122,15 @@ describe('CabinetView (WP-7)', () => {
     expect(await screen.findByText(/Сессий пока нет/)).toBeInTheDocument();
   });
 
-  it('старт: создание сессии и переход в #/sessions/{id}', async () => {
+  it('старт: роль и грейд не отправляем — их подбирает ИИ по резюме', async () => {
     const fetchMock = mockApi({ sessions: [], create: S_ACTIVE });
     renderCabinet(fetchMock);
     await screen.findByTestId('user-email');
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText('Грейды'), 'junior');
     await user.click(screen.getByTestId('start-session'));
     expect(window.location.hash).toBe('#/sessions/2');
-    // профиль дефолтный (balanced/standard, id=2) — уходит в body;
-    // spec-22: стек не выбирается (практика — часть роли), stack пустой.
-    expect(JSON.parse((fetchMock.mock.calls.find((c) => c[1]?.method === 'POST')?.[1] as RequestInit).body as string)).toEqual({
-      grade: 'junior',
-      stack: '',
-      track_id: 'backend',
-      profile_id: 2,
-    });
+    // профиль дефолтный (balanced/standard, id=2); ни grade, ни track_id, ни stack.
+    expect(startBody(fetchMock)).toEqual({ profile_id: 2 });
   });
 
   it('выбор профиля интервьюера — profile_id в body (итерация B)', async () => {
@@ -112,16 +138,39 @@ describe('CabinetView (WP-7)', () => {
     renderCabinet(fetchMock);
     await screen.findByTestId('user-email');
     const user = userEvent.setup();
-    // dropdown профилей рендерится из /profiles
-    const profileSelect = screen.getByLabelText('Профиль интервьюера');
-    await user.selectOptions(profileSelect, '1');
+    await user.selectOptions(screen.getByLabelText('Профиль интервьюера'), '1');
     await user.click(screen.getByTestId('start-session'));
-    expect(JSON.parse((fetchMock.mock.calls.find((c) => c[1]?.method === 'POST')?.[1] as RequestInit).body as string)).toEqual({
-      grade: 'middle',
-      stack: '',
-      track_id: 'backend',
-      profile_id: 1,
-    });
+    expect(startBody(fetchMock)).toEqual({ profile_id: 1 });
   });
 
+  it('резюме: индикатор из GET, сохранение — multipart PUT', async () => {
+    const fetchMock = mockApi({ resume: RESUME, resumeGet: RESUME });
+    renderCabinet(fetchMock);
+    await screen.findByTestId('resume-indicator');
+    expect(screen.getByTestId('resume-indicator')).toHaveTextContent('resume.pdf');
+    expect(screen.getByTestId('resume-indicator')).toHaveTextContent('1234');
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('resume-open'));
+    const about = await screen.findByTestId('resume-about');
+    expect(about).toHaveValue('Go 5 лет');
+    const file = screen.getByTestId('resume-file') as HTMLInputElement;
+    await user.upload(file, new File(['%PDF-1.4'], 'resume.pdf', { type: 'application/pdf' }));
+    expect(screen.getByTestId('resume-current')).toHaveTextContent('будет загружен: resume.pdf');
+    await user.click(screen.getByTestId('resume-save'));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find((c) => c[1]?.method === 'PUT');
+      expect(call).toBeTruthy();
+      expect(String(call![0])).toBe('/api/v1/me/resume');
+      expect(call![1]!.body).toBeInstanceOf(FormData);
+    });
+    expect(screen.queryByTestId('resume-save')).not.toBeInTheDocument();
+  });
+
+  it('резюме нет — индикатор подсказывает заполнить', async () => {
+    renderCabinet(mockApi());
+    await screen.findByTestId('resume-indicator');
+    expect(screen.getByTestId('resume-indicator')).toHaveTextContent('не заполнено');
+  });
 });

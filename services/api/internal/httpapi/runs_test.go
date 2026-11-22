@@ -35,7 +35,6 @@ func newRunsEnv(t *testing.T, sandboxHandler http.HandlerFunc) *runsEnv {
 		DatabaseURL:    "sqlite://:memory:",
 		JWTSecret:      "test-secret",
 		JWTExpiryHours: 1,
-		MinutesFreeS:   3600,
 		SandboxURL:     sandbox.URL,
 	}
 	database, dialect, err := db.Open(cfg.DatabaseURL)

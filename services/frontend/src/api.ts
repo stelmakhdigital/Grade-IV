@@ -31,12 +31,10 @@ export interface AuthResult {
   token: string;
   expires_in_s: number;
   user: User;
-  minutes_remaining_s: number;
 }
 
 export interface MeResult {
   user: User;
-  minutes_remaining_s: number;
 }
 
 export type Grade = 'junior' | 'middle' | 'senior' | 'staff';
@@ -73,6 +71,8 @@ export interface AdminTrack extends Track {
 export interface Session {
   id: number;
   grade: Grade;
+  /** Грейд по резюме (ИИ): цель grade — на шаг выше. Пусто — старт с явным грейдем. */
+  base_grade?: Grade;
   stack: Stack;
   track_id?: string;
   stage: Stage;
@@ -198,6 +198,55 @@ export function saveVacancy(text: string): Promise<{ vacancy_text: string }> {
   });
 }
 
+// ------------------------------------------------------------------ Resume
+
+/** Профиль резюме кандидата: своё описание + факт загрузки файла. */
+export interface ResumeInfo {
+  about: string;
+  file_name: string;
+  /** Символов текста, извлечённого из файла (pdf/docx). */
+  text_chars: number;
+}
+
+/** GET /me/resume — состояние резюме кандидата. */
+export function getResume(): Promise<ResumeInfo> {
+  return request<ResumeInfo>('/me/resume', { auth: true });
+}
+
+/**
+ * PUT /me/resume (multipart): сохранить описание и/или файл (pdf/docx/doc, ≤ 8 МБ).
+ * file не передан — уже приложенный файл остаётся.
+ */
+export async function saveResume(about: string, file?: File | null): Promise<ResumeInfo> {
+  const form = new FormData();
+  form.append('about', about);
+  if (file) form.append('resume', file);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/me/resume`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: form,
+    });
+  } catch {
+    throw new ApiError(0, 'network', 'нет соединения с сервером');
+  }
+  if (!res.ok) throw await readApiError(res);
+  return (await res.json()) as ResumeInfo;
+}
+
+/** DELETE /me/resume — сброс описания и файла. */
+export async function deleteResume(): Promise<ResumeInfo> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/me/resume`, { method: 'DELETE', headers: authHeaders() });
+  } catch {
+    throw new ApiError(0, 'network', 'нет соединения с сервером');
+  }
+  if (!res.ok) throw await readApiError(res);
+  return (await res.json()) as ResumeInfo;
+}
+
 // ---------------------------------------------------------------- sessions
 
 export interface InterviewTemplate {
@@ -305,19 +354,21 @@ export function adminPutTTSVoices(reg: TTSVoiceRegistry): Promise<TTSVoiceRegist
   return request<TTSVoiceRegistry>('/admin/tts-voices', { method: 'PUT', body: reg, auth: true });
 }
 
-export function createSession(
-  grade: Grade,
-  stack: Stack | '',
-  templateId?: number,
-  profileId?: number,
-  ttsSpeaker?: string,
-  trackId?: string,
-): Promise<Session> {
-  const body: Record<string, unknown> = { grade, stack };
-  if (trackId) body.track_id = trackId;
-  if (templateId) body.template_id = templateId;
-  if (profileId) body.profile_id = profileId;
-  if (ttsSpeaker) body.tts_speaker = ttsSpeaker;
+/**
+ * Создать сессию. Без grade роль и грейд подбирает ИИ по резюме (так делает
+ * кабинет); grade указывают явно API-клиенты/смоук.
+ */
+export function createSession(opts: {
+  grade?: Grade;
+  stack?: Stack;
+  profileId?: number;
+  ttsSpeaker?: string;
+} = {}): Promise<Session> {
+  const body: Record<string, unknown> = {};
+  if (opts.grade) body.grade = opts.grade;
+  if (opts.stack) body.stack = opts.stack;
+  if (opts.profileId) body.profile_id = opts.profileId;
+  if (opts.ttsSpeaker) body.tts_speaker = opts.ttsSpeaker;
   return request<Session>('/sessions', { body });
 }
 
@@ -471,6 +522,8 @@ export interface Report {
   study_plan_2weeks?: string[];
   /** Итерация B: разрыв до целевого грейда (текст). */
   grade_gap?: string;
+  /** Путь по уровням вопросов: где держал цель, где сложность снижали. */
+  question_trail?: string;
   /** Итерация B: прогресс по прошлым интервью. */
   progress_vs_previous?: ReportProgressEntry[];
   /** spec-13B T3: per-task результаты Live-Code. */

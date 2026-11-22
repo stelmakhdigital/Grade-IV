@@ -14,7 +14,6 @@ const AUTH_OK = {
   token: 'tok',
   expires_in_s: 86400,
   user: { id: 1, email: 'cand@example.com', created_at: '2026-09-14T00:00:00Z' },
-  minutes_remaining_s: 3600,
 };
 
 /** Обёртка: AuthProvider с подменённым useAuth для изоляции полей. */

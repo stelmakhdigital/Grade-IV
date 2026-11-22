@@ -22,6 +22,31 @@ func (g Grade) Valid() bool {
 	return false
 }
 
+// gradeOrder — грейды от младшего к старшему.
+var gradeOrder = []Grade{GradeJunior, GradeMiddle, GradeSenior, GradeStaff}
+
+// GradeRank — позиция грейда (0..3); неизвестный — как middle.
+func GradeRank(g Grade) int {
+	for i, x := range gradeOrder {
+		if x == g {
+			return i
+		}
+	}
+	return 1
+}
+
+// GradeStep — грейд на n шагов от g (junior/staff — границы, дальше не растёт).
+func GradeStep(g Grade, n int) Grade {
+	i := GradeRank(g) + n
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(gradeOrder) {
+		i = len(gradeOrder) - 1
+	}
+	return gradeOrder[i]
+}
+
 // Stack — стек программирования (MVP: go, python).
 type Stack string
 
@@ -109,6 +134,10 @@ type Session struct {
 	// совместимости. Определяет состав стадий, доску и критерии отчёта.
 	TrackID string
 
+	// BaseGrade — грейд, который ИИ определил по резюме кандидата. Пусто — старт
+	// без резюме (грейд выбран вручную). Grade при этом — цель: на шаг выше базы.
+	BaseGrade Grade
+
 	// ShareToken — токен публичной ссылки на отчёт (F1-export, spec-16);
 	// '' — ссылка не создана. GET /api/v1/public/reports/{token} без auth.
 	ShareToken string
@@ -160,14 +189,4 @@ type Report struct {
 	Weaknesses          []byte // JSON: []
 	Recommendations     []byte // JSON: []
 	CreatedAt           time.Time
-}
-
-// MinutesLedger — проводка учёта минут (+грант / −расход).
-type MinutesLedger struct {
-	ID           int64
-	UserID       int64
-	SessionID    *int64
-	DeltaSeconds int
-	Reason       string
-	CreatedAt    time.Time
 }

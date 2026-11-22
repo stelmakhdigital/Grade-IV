@@ -188,8 +188,7 @@ func doJSONRaw(t *testing.T, method, url string, body any, headers map[string]st
 // валидный JSON-черновик; черновик НЕ сохраняется; не-админ → 403.
 func TestTrackGenerate(t *testing.T) {
 	cfg := &config.Config{
-		Addr: ":0", DatabaseURL: "sqlite://:memory:", JWTSecret: "test-secret",
-		JWTExpiryHours: 1, MinutesFreeS: 3600,
+		Addr: ":0", DatabaseURL: "sqlite://:memory:", JWTSecret: "test-secret", JWTExpiryHours: 1,
 	}
 	database, dialect, err := db.Open(cfg.DatabaseURL)
 	if err != nil {

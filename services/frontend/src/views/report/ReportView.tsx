@@ -271,6 +271,14 @@ export function ReportBody({
         </section>
       )}
 
+      {/* Собеседование шло на шаг выше уровня по резюме: на какой планке держали, где снижали. */}
+      {report.question_trail !== undefined && report.question_trail !== '' && (
+        <section className="report-grade-gap" data-testid="report-question-trail">
+          <h3>Уровень вопросов</h3>
+          <p>{report.question_trail}</p>
+        </section>
+      )}
+
       {report.study_plan_2weeks && report.study_plan_2weeks.length > 0 && (
         <section className="report-study-2w" data-testid="report-study-2w">
           <h3>План подготовки на 2 недели</h3>

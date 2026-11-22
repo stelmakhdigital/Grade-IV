@@ -26,10 +26,9 @@ type userOut struct {
 }
 
 type tokenResp struct {
-	Token             string  `json:"token"`
-	ExpiresInS        int64   `json:"expires_in_s"`
-	User              userOut `json:"user"`
-	MinutesRemainingS int64   `json:"minutes_remaining_s"`
+	Token      string  `json:"token"`
+	ExpiresInS int64   `json:"expires_in_s"`
+	User       userOut `json:"user"`
 }
 
 func toUserOut(u models.User) userOut {
@@ -45,22 +44,16 @@ func (s *Server) completeAuth(w http.ResponseWriter, r *http.Request, u models.U
 		writeError(w, http.StatusInternalServerError, "internal", "ошибка выпуска токена")
 		return
 	}
-	minutes, err := s.users.MinutesRemaining(r.Context(), u.ID)
-	if err != nil {
-		s.log.Error("minutes remaining", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal", "ошибка чтения баланса минут")
-		return
-	}
 	writeJSON(w, status, tokenResp{
-		Token:             token,
-		ExpiresInS:        int64(s.cfg.JWTExpiryHours) * 3600,
-		User:              toUserOut(u),
-		MinutesRemainingS: minutes,
+		Token:      token,
+		ExpiresInS: int64(s.cfg.JWTExpiryHours) * 3600,
+		User:       toUserOut(u),
 	})
 }
 
 // handleRegister — POST /api/v1/auth/register.
-// Создаёт пользователя, выдаёт стартовый грант минут (FR-B1) и возвращает JWT.
+// Создаёт пользователя и возвращает JWT (баланса минут больше нет —
+// длительность интервью учитывается как метрика, не как валюта).
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req registerReq
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
@@ -93,12 +86,6 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		s.log.Error("create user", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal", "ошибка создания пользователя")
-		return
-	}
-
-	if err := s.users.GrantMinutes(r.Context(), u.ID, nil, s.cfg.MinutesFreeS, "grant_free"); err != nil {
-		s.log.Error("grant free minutes", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal", "ошибка выдачи бесплатных минут")
 		return
 	}
 
@@ -140,16 +127,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "ошибка чтения пользователя")
 		return
 	}
-	minutes, err := s.users.MinutesRemaining(r.Context(), u.ID)
-	if err != nil {
-		s.log.Error("minutes remaining", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal", "ошибка чтения баланса минут")
-		return
-	}
 	writeJSON(w, http.StatusOK, struct {
-		User              userOut `json:"user"`
-		MinutesRemainingS int64   `json:"minutes_remaining_s"`
-	}{toUserOut(u), minutes})
+		User userOut `json:"user"`
+	}{toUserOut(u)})
 }
 
 func validEmail(s string) bool {

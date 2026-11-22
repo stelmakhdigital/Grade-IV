@@ -23,6 +23,10 @@ services:
       SANDBOX_URL: "http://sandbox:8200"
       LLM_BASE_URL: "${LLM_BASE_URL:-http://localhost:8300/v1}"
       LLM_MODEL: "${LLM_MODEL:-Qwen3-4B}"
+      RESUME_DIR: "/data/resumes"
+    volumes:
+      # Файлы резюме кандидатов (текст из них — в БД, оригинал — здесь).
+      - resumes:/data/resumes
     depends_on:
       - postgres
       - voice
@@ -172,6 +176,7 @@ services:
 
 volumes:
   pgdata:
+  resumes:
   caddy_data:
   caddy_config:
   prometheus_data:

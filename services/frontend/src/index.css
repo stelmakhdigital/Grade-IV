@@ -128,6 +128,17 @@ p {
   color: #98c379;
 }
 
+/* Загрузка файла резюме в модалке. */
+.resume-file input[type='file'] {
+  padding: 8px;
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;

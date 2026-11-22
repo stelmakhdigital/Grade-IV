@@ -1,36 +1,35 @@
 /**
- * Кабинет кандидата (WP-7): профиль + баланс минут,
- * «Новое интервью» (грейд + стек), история сессий со статусами.
- * Активные/паузные сессии ведут в голосовой интерфейс (WP-8) —
- * пока кнопка «Продолжить» ведёт в заглушку, завершённые — в транскрипт.
+ * Кабинет кандидата: резюме (описание + файл) вместо выбора роли и грейда,
+ * профиль/голос интервьюера, история сессий, вакансия кампании.
+ *
+ * Роль собеседования и грейд подбирает ИИ по резюме (POST /sessions без grade):
+ * базовый грейд — тот, что резюме подтверждает, цель интервью — на шаг выше.
+ * Время интервью — метрика (длительность в истории), а не валюта: баланса
+ * минут в кабинете больше нет.
  */
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
   createSession,
+  deleteResume,
   getReport,
+  getResume,
   getVacancy,
   listProfiles,
   listSessions,
   listTTSVoices,
   listTracks,
+  saveResume,
   saveVacancy,
   ApiError,
-  type Grade,
   type InterviewProfile,
+  type ResumeInfo,
   type Session,
   type Track,
   type TTSVoice,
 } from '../api';
 import { useAuth } from '../auth';
 import { apiErrorMessage } from './LoginView';
-import { humanMinutes, practiceLabel, statusLabel, stageLabel } from '../labels';
-
-const GRADES: { value: Grade; label: string; minutes: number }[] = [
-  { value: 'junior', label: 'Junior (45 мин)', minutes: 45 },
-  { value: 'middle', label: 'Middle (50 мин)', minutes: 50 },
-  { value: 'senior', label: 'Senior (60 мин)', minutes: 60 },
-  { value: 'staff', label: 'Staff (75 мин)', minutes: 75 },
-];
+import { humanSeconds, practiceLabel, statusLabel, stageLabel } from '../labels';
 
 /** Путь к странице сессии (hash-роутинг, App.tsx). */
 export function sessionPath(id: number): string {
@@ -49,16 +48,17 @@ function pausedLeftMs(s: Session, now: number): number | null {
   return PAUSE_TIMEOUT_MS - (now - t);
 }
 
+/** Пустое состояние резюме (пока не пришли данные). */
+const NO_RESUME: ResumeInfo = { about: '', file_name: '', text_chars: 0 };
+
 export function CabinetView() {
-  const { user, minutesRemainingMin, logout, refresh } = useAuth();
+  const { user, logout } = useAuth();
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // spec-20: фильтр истории (все/активные/завершённые).
   const [histFilter, setHistFilter] = useState<'all' | 'active' | 'finished'>('all');
-  const [grade, setGrade] = useState<Grade>('middle');
-  // spec-18: трек собеседования (backend — дефолт); список — из /tracks.
+  // Имена ролей для истории (роль выбирает ИИ — подписи берём из /tracks).
   const [tracks, setTracks] = useState<Track[]>([]);
-  const [trackId, setTrackId] = useState<string>('backend');
   useEffect(() => {
     let alive = true;
     listTracks()
@@ -66,13 +66,12 @@ export function CabinetView() {
         if (alive) setTracks(ts);
       })
       .catch(() => {
-        /* список треков необязателен: селект скрывается, дефолт — backend */
+        /* список ролей необязателен: в истории останется id роли */
       });
     return () => {
       alive = false;
     };
   }, []);
-  const track = tracks.find((t) => t.id === trackId) ?? null;
 
   // spec-20: фильтр истории. «Активные» = active|paused, «Завершённые» =
   // finished|aborted (прекращённые тоже past).
@@ -81,13 +80,6 @@ export function CabinetView() {
     if (histFilter === 'finished') return s.status === 'finished' || s.status === 'aborted';
     return true;
   });
-  // Грейды трека (fallback — все); при смене трека некорректный грейд сбрасывается.
-  const gradeOptions = track ? GRADES.filter((g) => track.grades.includes(g.value)) : GRADES;
-  useEffect(() => {
-    if (track && !track.grades.includes(grade)) {
-      setGrade(track.grades[0]);
-    }
-  }, [track, grade]);
   const [profiles, setProfiles] = useState<InterviewProfile[]>([]);
   const [profileId, setProfileId] = useState<number | undefined>(undefined);
   // F1 (Итерация 10): голос интервьюера (реестр из API, не хардкод).
@@ -102,6 +94,13 @@ export function CabinetView() {
   const [vacancyDraft, setVacancyDraft] = useState<string>('');
   const [vacancyBusy, setVacancyBusy] = useState(false);
   const [vacancyError, setVacancyError] = useState<string | null>(null);
+  // Резюме: описание + файл (pdf/docx/doc) — по ним ИИ берёт роль и грейд.
+  const [resumeOpen, setResumeOpen] = useState(false);
+  const [resume, setResume] = useState<ResumeInfo>(NO_RESUME);
+  const [resumeAbout, setResumeAbout] = useState('');
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [resumeBusy, setResumeBusy] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -188,6 +187,20 @@ export function CabinetView() {
     return () => { cancelled = true; };
   }, []);
 
+  // Резюме кандидата (описание + файл): по нему подбираются роль и грейд.
+  useEffect(() => {
+    let cancelled = false;
+    getResume()
+      .then((r) => {
+        if (cancelled) return;
+        setResume(r);
+        setResumeAbout(r.about ?? '');
+      })
+      .catch(() => {
+        /* резюме необязательно: модалка откроется с пустой формой */
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const onStart = async (e: FormEvent) => {
     e.preventDefault();
@@ -195,14 +208,11 @@ export function CabinetView() {
     setStarting(true);
     setStartError(null);
     try {
-      // spec-22: стек практики — часть роли; шаблоны выбираются на сервере.
-      const s = await createSession(grade, '', undefined, profileId, ttsSpeaker, trackId);
+      // Роль и грейд не отправляем: их подбирает ИИ по резюме.
+      const s = await createSession({ profileId, ttsSpeaker });
       window.location.hash = sessionPath(s.id);
     } catch (err) {
       setStartError(apiErrorMessage(err));
-      if (err instanceof ApiError && err.code === 'no_minutes') {
-        void refresh();
-      }
     } finally {
       setStarting(false);
     }
@@ -245,14 +255,60 @@ export function CabinetView() {
     }
   };
 
+  const openResume = () => {
+    setResumeAbout(resume.about ?? '');
+    setResumeFile(null);
+    setResumeError(null);
+    setResumeOpen(true);
+  };
+  const closeResume = () => setResumeOpen(false);
+  const onResumeSave = async () => {
+    if (resumeBusy) return;
+    setResumeBusy(true);
+    setResumeError(null);
+    try {
+      setResume(await saveResume(resumeAbout, resumeFile));
+      setResumeOpen(false);
+    } catch (e) {
+      setResumeError(apiErrorMessage(e));
+    } finally {
+      setResumeBusy(false);
+    }
+  };
+  const onResumeReset = async () => {
+    if (resumeBusy) return;
+    setResumeBusy(true);
+    setResumeError(null);
+    try {
+      setResume(await deleteResume());
+      setResumeAbout('');
+      setResumeFile(null);
+    } catch (e) {
+      setResumeError(apiErrorMessage(e));
+    } finally {
+      setResumeBusy(false);
+    }
+  };
+
+  // Время интервью — метрика (не валюта): суммарная длительность всех сессий.
+  const totalSeconds = (sessions ?? []).reduce((acc, s) => acc + s.active_seconds, 0);
+
   return (
     <main className="app cabinet">
       <header className="header">
         <div>
           <h1>Грейд</h1>
           <p className="muted small">
-            <span data-testid="user-email">{user?.email}</span> · баланс:{' '}
-            <strong data-testid="minutes" title={`${minutesRemainingMin} мин`}>{humanMinutes(minutesRemainingMin)}</strong>
+            <span data-testid="user-email">{user?.email}</span>
+            {sessions !== null && (
+              <>
+                {' '}· интервью: {sessions.length}
+                {/* Длительность интервью — метрика, а не списываемый баланс. */}
+                {totalSeconds > 0 && (
+                  <span data-testid="total-time"> · суммарно {humanSeconds(totalSeconds)}</span>
+                )}
+              </>
+            )}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -269,37 +325,15 @@ export function CabinetView() {
       <section className="card" aria-labelledby="new-interview">
         <h2 id="new-interview">Новое интервью</h2>
         <form className="start-form" onSubmit={onStart}>
-          {tracks.length > 0 && (
-            <label className="field">
-              <span>Роль</span>
-              <select
-                value={trackId}
-                onChange={(e) => setTrackId(e.target.value)}
-                data-testid="track-select"
-              >
-                {tracks.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.title}
-                  </option>
-                ))}
-              </select>
-              {track?.description && (
-                <span className="muted small" data-testid="track-desc">
-                  {track.description}
-                </span>
-              )}
-            </label>
-          )}
-          <label className="field">
-            <span>Грейды</span>
-            <select value={grade} onChange={(e) => setGrade(e.target.value as Grade)}>
-              {gradeOptions.map((g) => (
-                <option key={g.value} value={g.value}>
-                  {g.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {/* Фидбек 2026-11-22: все контролы ряда подписаны сверху и выровнены
+              по нижней линии (`.start-form` — flex, align-items: flex-end),
+              статус резюме / ошибка / бриф — отдельными строками. */}
+          <div className="field resume-field" data-testid="resume-row">
+            <span>Резюме</span>
+            <button type="button" className="btn" onClick={openResume} data-testid="resume-open">
+              Загрузить…
+            </button>
+          </div>
           {profiles.length > 0 && (
             <label className="field">
               <span>Профиль интервьюера</span>
@@ -325,25 +359,6 @@ export function CabinetView() {
               </select>
             </label>
           )}
-          {startError !== null && (
-            <p className="form-error" role="alert">
-              {startError}
-            </p>
-          )}
-          {/* spec-21 (Codility: intro до запуска таймера): короткий бриф —
-              что будет на интервью, чтобы старт не был сюрпризом. */}
-          <p className="start-brief muted small" data-testid="start-brief">
-            Голосовое интервью с ИИ: говорите в микрофон.
-            {track?.practice != null && (
-              <>
-                {' '}Практика — {practiceLabel(track.practice.runtime) ?? track.practice.runtime} в
-                редакторе, на клавиатуре.
-              </>
-            )}
-            {' '}Схему рисуете на доске. Таймер и запись включатся после старта.{' '}
-            {track ? `${track.title}, ` : ''}
-            {gradeOptions.find((g) => g.value === grade)?.label ?? grade}.
-          </p>
           <button
             type="submit"
             className="btn primary"
@@ -352,6 +367,26 @@ export function CabinetView() {
           >
             {starting ? 'Запуск…' : 'Начать интервью'}
           </button>
+          {startError !== null && (
+            <p className="form-error" role="alert">
+              {startError}
+            </p>
+          )}
+          <p className="resume-state small" data-testid="resume-indicator">
+            {resume.file_name
+              ? `${resume.file_name} · ${resume.text_chars} симв. из файла`
+              : resume.about
+                ? `описание: ${resume.about.length} симв.`
+                : 'не заполнено — роль и сложность подберём по нему'}
+          </p>
+          {/* spec-21 (Codility: intro до запуска таймера): короткий бриф —
+              что будет на интервью, чтобы старт не был сюрпризом. */}
+          <p className="start-brief muted small" data-testid="start-brief">
+            Голосовое интервью с ИИ: говорите в микрофон. Практика — в редакторе,
+            на клавиатуре, если она есть для подобранной роли. Схему рисуете на доске.
+            Таймер и запись включатся после старта. Роль и сложность интервьюер
+            подберёт по резюме и будет держать планку на шаг выше подтверждённого уровня.
+          </p>
         </form>
         <div className="vacancy-row">
           <button type="button" className="vacancy-link" onClick={openVacancy} data-testid="vacancy-open">
@@ -430,7 +465,7 @@ export function CabinetView() {
         {loadError !== null && <p className="form-error">{loadError}</p>}
         {sessions === null && loadError === null && <p className="muted">Загрузка…</p>}
         {sessions !== null && sessions.length === 0 && (
-          <p className="muted">Сессий пока нет — начните первое интервью.</p>
+          <p className="muted">Сессий пока нет — заполните резюме и начните первое интервью.</p>
         )}
         {sessions !== null && sessions.length > 0 && visibleSessions.length === 0 && (
           <p className="muted" data-testid="hist-empty-filtered">В этом фильтре сессий нет.</p>
@@ -440,8 +475,8 @@ export function CabinetView() {
             <thead>
               <tr>
                 <th>Дата</th>
-                <th>Грейд</th>
-                <th>Стек</th>
+                <th>Роль</th>
+                <th>Уровень</th>
                 <th>Стадия</th>
                 <th>Статус</th>
                 <th>Длительность</th>
@@ -455,8 +490,12 @@ export function CabinetView() {
                 <tr key={s.id} data-session-status={s.status}>
                   <td>{formatDate(s.started_at)}</td>
                   {/* spec-20: роль видна в истории (раньше только грейд); shell-стадия — «Практика». */}
-                  <td>{sTrack ? sTrack.title : s.grade}</td>
-                  <td>{s.stack}</td>
+                  <td>{sTrack ? sTrack.title : (s.track_id || '—')}</td>
+                  {/* Цель интервью + база по резюме («собесовали на шаг выше»). */}
+                  <td title={s.base_grade ? `по резюме: ${s.base_grade}` : undefined}>
+                    {s.grade}
+                    {s.base_grade && s.base_grade !== s.grade ? ` (по резюме ${s.base_grade})` : ''}
+                  </td>
                   <td>
                     {s.stage === 'livecode' && practiceLabel(sTrack?.practice?.runtime) !== null
                       ? `Практика (${practiceLabel(sTrack?.practice?.runtime)})`
@@ -525,6 +564,91 @@ export function CabinetView() {
         )}
       </section>
 
+      {resumeOpen && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => { if (e.target === e.currentTarget) closeResume(); }}
+        >
+          <div
+            className="modal-box"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="resume-title"
+            aria-describedby="resume-desc"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && !resumeBusy) closeResume();
+            }}
+          >
+            <div className="modal-head">
+              <h3 id="resume-title">Резюме</h3>
+              <button type="button" className="btn ghost small" onClick={closeResume} aria-label="Закрыть">
+                ✕
+              </button>
+            </div>
+            <p className="modal-desc" id="resume-desc">
+              Расскажите о себе и приложите файл резюме. По ним интервьюер решит, на какой
+              роли и уровне вас собеседовать, и будет держать планку на шаг выше
+              подтверждённого уровня (если не потянете — снизит и отметит это в отчёте).
+            </p>
+            <textarea
+              className="modal-textarea"
+              value={resumeAbout}
+              onChange={(e) => setResumeAbout(e.target.value)}
+              placeholder="Кто вы: стек, годы опыта, последние проекты, над чем хотите расти…"
+              maxLength={20000}
+              autoFocus
+              data-testid="resume-about"
+            />
+            <div className="muted small" style={{ marginTop: 6 }} data-testid="resume-counter">
+              {resumeAbout.length} / 20000
+            </div>
+            <label className="field resume-file">
+              <span>Файл резюме (pdf, docx, doc — до 8 МБ)</span>
+              <input
+                type="file"
+                accept=".pdf,.docx,.doc,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword"
+                onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)}
+                data-testid="resume-file"
+              />
+              <span className="muted small" data-testid="resume-current">
+                {resumeFile
+                  ? `будет загружен: ${resumeFile.name}`
+                  : resume.file_name
+                    ? `сейчас приложен: ${resume.file_name} (${resume.text_chars} симв. текста)`
+                    : 'файл не приложен'}
+              </span>
+            </label>
+            {resumeError !== null && (
+              <p className="form-error" role="alert">{resumeError}</p>
+            )}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn danger"
+                onClick={() => void onResumeReset()}
+                disabled={resumeBusy || (!resume.about && !resume.file_name)}
+                data-testid="resume-reset"
+              >
+                Сбросить
+              </button>
+              <div className="spacer" />
+              <button type="button" className="btn" onClick={closeResume} disabled={resumeBusy}>
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => void onResumeSave()}
+                disabled={resumeBusy}
+                data-testid="resume-save"
+              >
+                {resumeBusy ? 'Сохранение…' : 'Сохранить'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {vacancyOpen && (
         <div
           className="modal-overlay"
@@ -551,7 +675,7 @@ export function CabinetView() {
             <p className="modal-desc" id="vacancy-desc">
               Вставьте описание реальной вакансии, в которую хотите попасть. ИИ-интервьюер
               проведёт собеседование так, будто он из этой компании: будет отталкиваться от
-              стека, процессов и контекста вакансии, адаптируя глубину под выбранный грейд.
+              стека, процессов и контекста вакансии, адаптируя глубину под ваш уровень.
             </p>
             <textarea
               className="modal-textarea"

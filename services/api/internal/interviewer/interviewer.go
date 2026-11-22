@@ -70,6 +70,13 @@ func WithVacancyResolver(f func(ctx context.Context, userID int64) string) Optio
 	return func(i *Interviewer) { i.vacancyResolver = f }
 }
 
+// WithResumeResolver — резолвер userID→резюме кандидата (описание + текст из файла):
+// блок профиля и уровень интервью («на шаг выше базы») в system-промпт.
+// Без опции / пустая строка — без блока, сложность строго по грейду сессии.
+func WithResumeResolver(f func(ctx context.Context, userID int64) string) Option {
+	return func(i *Interviewer) { i.resumeResolver = f }
+}
+
 // SetOpenings — замена набора начал вживую (итерация 11: admin-reload).
 func (i *Interviewer) SetOpenings(o *Openings) { i.openings.Store(o) }
 
@@ -92,6 +99,7 @@ type Interviewer struct {
 	maxHistory      int
 	genderResolver  func(speaker string) string                    // F7: speaker→gender (реестр tts-voices); пусто/nil → male
 	vacancyResolver func(ctx context.Context, userID int64) string // F6: userID→текст вакансии; пусто/nil → без блока
+	resumeResolver  func(ctx context.Context, userID int64) string // userID→резюме (описание + файл); пусто/nil → без блока
 	tracks          TrackSource                                    // spec-18: источник треков; nil → хардкод-критерии/промпты
 }
 
@@ -393,10 +401,16 @@ func (i *Interviewer) buildMessages(sess models.Session, userMsg string, images 
 	if i.vacancyResolver != nil {
 		vacancy = i.vacancyResolver(context.Background(), sess.UserID)
 	}
+	// Резюме: блок профиля + уровень интервью. В system-промпт каждого голоса хода,
+	// поэтому срезается коротко — иначе деградирует SLO голосового контура.
+	resume := ""
+	if i.resumeResolver != nil {
+		resume = clampRunes(i.resumeResolver(context.Background(), sess.UserID), resumePromptRunes)
+	}
 	// Программа — из сессии (шаблон, итерация A); пустая — дефолтная gradeProgram.
 	// spec-18: контекст трека (роль, доска) в промптах стадии.
 	sys := SystemPromptWithProfileProgram(sess.Grade, string(sess.Stack), sess.Stage,
-		tone, difficulty, sess.Program, gender, vacancy, i.trackFor(sess))
+		tone, difficulty, sess.Program, gender, vacancy, resume, sess.BaseGrade, i.trackFor(sess))
 	msgs := []llm.Message{{Role: llm.RoleSystem, Content: sys}}
 	msgs = append(msgs, i.transcript(sess.ID, i.maxHistory)...)
 	msg := llm.Message{Role: llm.RoleUser, Content: userMsg}

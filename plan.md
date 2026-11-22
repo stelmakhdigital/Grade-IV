@@ -347,3 +347,79 @@ HackerRank, HireVue, Karat, BrightHire, Codility, CoderPad), 30+ паттерн�
 
 Проверки: go все пакеты ok, vitest 131/131, E2E полный сценарий + живая
 генерация роли реальным LLM (s22-02-ai-role.png).
+
+## 16. Итерация 23 — STT-дефолт GigaAM закреплен правилом (AGENTS.md)
+
+Правило «STT — GigaAM v3, не Whisper» жило только в README, а фактические
+default-ы были faster-whisper. Найден дубль ключа в .env.example:
+VOICE_STT_PROVIDER=gigaam перезабивался строкой faster-whisper ниже по файлу.
+
+Сделано: AGENTS.md (правило + почему пакет берется из git: на PyPI 0.1.0, в нем
+v3-моделей нет); дефолты сведены к gigaam — main.py (_build_stt, пустой env =
+gigaam), run-all.sh (дефолт + прокинут GIGAAM_DEVICE, в выводе больше не
+показывается STT_DEVICE как устройство gigaam), docker-compose
+(VOICE_STT_PROVIDER/GIGAAM_MODEL/GIGAAM_DEVICE/GIGAAM_DOWNLOAD_ROOT),
+.env.example (дубль убран), make install + CI-джоба voice (torchaudio с
+CPU-индекса рядом с torch), requirements.txt (gigaam@tar.gz с пином по коммиту
+master 7447938 — git в voice-образе не требуется; torchaudio отдельной строкой;
+torch>=2.6). test_health: default-env проверяет gigaam/v3_e2e_rnnt.
+
+Проверки: pip install -r requirements.txt поверх CPU torch/torchaudio —
+резолвер чистый, pip check ok; pytest voice 41 passed / 5 skipped (e2e без
+ckpt); _build_stt() без env -> gigaam v3_e2e_rnnt/auto; bash -n run-all.sh;
+docker compose config -q. Не проверяли: живое распознавание на v3_e2e_rnnt
+(ckpt не скачан; у Sber-CDN сертификат просрочен — curl проходит, urllib
+внутри gigaam.load_model нет, поэтому модель качается заранее).
+
+## 17. BUG-20261121-029 — микрофон с телефона: честная причина вместо «разрешите в браузере»
+
+Открытие с телефона по http://<LAN-IP>: getUserMedia есть только в secure
+context (HTTPS/localhost), значит navigator.mediaDevices отсутствует и
+браузер запрос не показывал — а UI обещал «разрешите в браузере».
+
+Fix: mic.ts — micUnsupportedReason() + ранний выход в initCapture (state
+denied и текст про HTTPS/localhost); useVoiceSession — в catch тот же текст
+вместо общей фразы (при настоящем отказе остаётся прежний). Доступ с телефона
+так и требует HTTPS (Caddy-профиль prod) или localhost-туннеля — отдельной
+задачей не брали.
+
+Проверки: vitest 134 passed (добавлено 2 теста на отсутствие mediaDevices),
+tsc ok, vite build ok.
+
+## 18. Итерация 24 — резюме вместо роли/грейда, время больше не валюта (spec-23)
+
+Фидбек по кабинету: «зачем Грейды и роль, если конфигурацию приходится писать
+под каждого» и «убрать время как валюту».
+
+Резюме вместо выбора роли и грейда:
+- Кабинет: селекторов «Роль»/«Грейды» нет, есть кнопка «Резюме» (модалка):
+  описание своими словами + файл pdf/docx/doc. Хранится в users.resume_*
+  (описание, извлечённый текст, имя файла, путь); файл — в RESUME_DIR
+  (dev ./data/resumes, prod — том resumes в compose).
+- Извлечение текста: docx — zip + word/document.xml (stdlib), pdf —
+  ledongthuc/pdf (чистая Go, recover на битых файлах), .doc — хранится без
+  разбора. В промпт уходит не более 6000 символов (SLO голосового контура).
+- POST /sessions без grade: ИИ по резюме выбирает роль из config/roles.json, а
+  если подходящей нет — генерирует конфиг роли и кладёт в хранилище; базовый
+  грейд — подтверждённый фактами резюме. Цель интервью — на шаг выше базы
+  (sessions.base_grade), в пределах грейдов роли. Явный grade в запросе —
+  старый путь без ИИ (смоук, API-клиенты).
+- Промпт голосовой/практической/досочной стадии получает блок резюме (ДАННЫЕ,
+  с запретом выполнять инструкции из текста) и правило шага назад: два слабых
+  ответа — уровень ниже, три уверенных — вернуть; уровни вопросов кандидат
+  вслух не слышит.
+- Отчёт: question_trail — где держал цель, где снижали (колонка + блок
+  «Уровень вопросов» в отчёте и в публичной ссылке).
+
+Время — метрика, не валюта:
+- Убраны стартовый грант (MINUTES_FREE_S), списание по ledger, проверка остатка
+  (402 out_of_minutes), minutes_remaining_s в /auth/* и баланс в шапке кабинета.
+  Таблица minutes_ledger из схемы убрана (старые БД не трогаем).
+- Длительность осталась метрикой: sessions.active_seconds, колонка
+  «Длительность» и «интервью: N · суммарно X» в шапке.
+
+Проверки: go vet + go test ./... (api) — в т.ч. новые resume (docx/pdf/garbage),
+resume-API (загрузка/сброс/формат), старт по резюме (sysadmin, middle→senior),
+fallback без резюме, targetGrade, блок резюме в промпте, активные секунды вместо
+тарификации; vitest 137 passed; tsc --noEmit ok. Не проверяли: подбор роли
+настоящим LLM (моки) и разбор реальных pdf из Word/LaTeX.
