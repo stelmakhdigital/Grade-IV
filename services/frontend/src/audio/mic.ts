@@ -86,16 +86,25 @@ export class SilenceDetector {
   }
 }
 
-const WORKLET_CODE = `
-class PcmCapture {
-  constructor(params) {
-    this.rate = params.inputRate;
-    this.target = params.targetRate;
-    this.chunkSamples = params.chunkSamples;
+// Экспортируется для теста (src/audio/worklet.test.ts): процессор собирается
+// в реальный AudioWorkletProcessor — без базового класса у инстанса нет
+// `port`, и Chrome валит процессор в processorerror (тишина → ложный переход на
+// резервный захват, «AudioWorklet молчит всегда»). options.processorOptions —
+// вложенный объект, flat-доступ (options.inputRate) давал undefined →
+// chunkSamples undefined → чанки не постились никогда.
+export const WORKLET_CODE = `
+class PcmCapture extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    const p = (options && options.processorOptions) || {};
+    // sampleRate — глобал AudioWorkletGlobalScope (фактическая частота рендера).
+    this.rate = p.inputRate || sampleRate;
+    this.target = p.targetRate || ${TARGET_RATE};
+    this.chunkSamples = p.chunkSamples || ${Math.round(TARGET_RATE * 0.25)};
     this.acc = [];
     this.accLen = 0;
     // Уровень для эквалайзера: окно ~100 мс по входной частоте.
-    this.levelWin = Math.max(1, Math.round(params.inputRate * 0.1));
+    this.levelWin = Math.max(1, Math.round(this.rate * 0.1));
     this.levelSum = 0;
     this.levelN = 0;
   }
@@ -114,7 +123,7 @@ class PcmCapture {
   process(inputs) {
     const ch = inputs[0] && inputs[0][0];
     if (!ch) {
-      return [true];
+      return true;
     }
     for (let i = 0; i < ch.length; i++) {
       this.levelSum += ch[i] * ch[i];
@@ -123,7 +132,7 @@ class PcmCapture {
     if (this.rate === this.target) {
       // однообразный случай обрабатывается ниже через общий путь
       this.push(ch);
-      return [true];
+      return true;
     }
     // ресемплинг линейной интерполяцией в worklet
     const ratio = this.rate / this.target;
@@ -137,7 +146,7 @@ class PcmCapture {
       out[i] = ch[i0] * (1 - f) + ch[i1] * f;
     }
     this.push(out);
-    return [true];
+    return true;
   }
   push(samples) {
     this.acc.push(samples);
@@ -164,7 +173,7 @@ class PcmCapture {
       }
       this.port.postMessage(i16);
     }
-    return [true];
+    return true;
   }
 }
 registerProcessor('pcm-capture', PcmCapture);

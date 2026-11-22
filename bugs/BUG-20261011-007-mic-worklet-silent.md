@@ -30,3 +30,9 @@ autoplay-политика браузера — context не запущен бе�
 + M4-реcovery. Переход на fallback остаётся прозрачным (onInfo + console.info, как было).
 
 Регресс: FE vitest 114 зелёный (mock без resume — guard не ломает тесты).
+
+## Рецидив (2026-11-22)
+Симптом вернулся: `ctx.resume()` лечил следствие. Настоящий корень — процессор в
+`WORKLET_CODE` не наследовал `AudioWorkletProcessor` и читал `processorOptions`
+flat: Chrome валил его в `processorerror`, чанков не было никогда. См.
+BUG-20261122-030-mic-worklet-never-posts.md.
