@@ -174,6 +174,21 @@ func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, s
 	return m, nil
 }
 
+// resolveTrack — роль (трек) сессии по track_id из БД. Резолвер отдаёт
+// (nil, nil) для пустого/неизвестного id → прежнее поведение: программа стадий,
+// payload доски и мета стадии считаются по легаси-правилу грейда.
+func (e *Engine) resolveTrack(trackID string) *models.Track {
+	if e.tracks == nil {
+		return nil
+	}
+	t, err := e.tracks(trackID)
+	if err != nil {
+		e.log.Warn("reconstruct: роль не разрешена — программа по грейду", "track_id", trackID, "err", err)
+		return nil
+	}
+	return t
+}
+
 // Attach регистрирует WS-соединение сессии (вызывается WS-хендлером после auth).
 func (e *Engine) Attach(ctx context.Context, id, userID int64, conn *websocket.Conn) (*Snapshot, error) {
 	m, err := e.store.GetOwned(ctx, id, userID)
@@ -183,6 +198,7 @@ func (e *Engine) Attach(ctx context.Context, id, userID int64, conn *websocket.C
 	if IsTerminalStatus(m.Status) {
 		return nil, fmt.Errorf("%w: %s", ErrSessionEnded, m.Status)
 	}
+	track := e.resolveTrack(m.TrackID) // issue #1: роль терялась при реконструкции
 	e.mu.Lock()
 	rt, ok := e.rts[id]
 	if !ok {
@@ -192,6 +208,7 @@ func (e *Engine) Attach(ctx context.Context, id, userID int64, conn *websocket.C
 			userID:      userID,
 			grade:       m.Grade,
 			stack:       m.Stack,
+			track:       track,
 			limitS:      m.DurationLimitS,
 			stage:       m.Stage,
 			status:      m.Status,
@@ -246,6 +263,7 @@ func (e *Engine) reconstructFromStore(id int64) *runtime {
 	if err != nil || IsTerminalStatus(m.Status) {
 		return nil
 	}
+	track := e.resolveTrack(m.TrackID) // issue #1: роль терялась при реконструкции
 	e.mu.Lock()
 	if rt, ok := e.rts[id]; ok { // уже реконструирован (гонка вызовов)
 		e.mu.Unlock()
@@ -255,6 +273,7 @@ func (e *Engine) reconstructFromStore(id int64) *runtime {
 		userID:      m.UserID,
 		grade:       m.Grade,
 		stack:       m.Stack,
+		track:       track,
 		limitS:      m.DurationLimitS,
 		stage:       m.Stage,
 		status:      m.Status,
