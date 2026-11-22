@@ -14,7 +14,7 @@ import {
   type Session,
   type SessionEvent,
 } from '../api';
-import { MicCapture, type MicDebugInfo, type MicState } from '../audio/mic';
+import { MicCapture, micUnsupportedReason, type MicDebugInfo, type MicState } from '../audio/mic';
 import { PcmPlayer } from '../audio/player';
 import { SessionWS, type BoardStageInfo, type StageTask, type TrackStageMeta, type WsMessage } from '../ws';
 import {
@@ -488,7 +488,9 @@ export function useVoiceSession(id: number) {
       setRecCollapsed(false);
     } catch {
       setMic('denied');
-      setError('Нет доступа к микрофону — разрешите в браузере.');
+      // Вне secure context mediaDevices нет вообще (браузер запрос не показывал) —
+      // «разрешите в браузере» там бессмысленно, нужна причина из mic.ts.
+      setError(micUnsupportedReason() ?? 'Нет доступа к микрофону — разрешите в браузере.');
     }
   };
 

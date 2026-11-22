@@ -177,6 +177,27 @@ export function micDebugEnabled(): boolean {
   return (import.meta.env.VITE_MIC_DEBUG ?? '') === 'true';
 }
 
+/**
+ * Причина, по которой микрофон недоступен в принципе (или null, если доступен).
+ *
+ * Вне secure context (http://<IP> — типичный запуск с телефона в LAN) у
+ * браузера нет navigator.mediaDevices: getUserMedia не существует, запрос
+ * разрешения даже не показывается. Подсказка «разрешите в браузере» там
+ * только путает — доступ не разрешают, а открывают страницу по HTTPS
+ * (или localhost).
+ */
+export function micUnsupportedReason(): string | null {
+  const getUserMedia = typeof navigator === 'undefined'
+    ? undefined
+    : navigator.mediaDevices?.getUserMedia;
+  if (typeof getUserMedia === 'function') return null;
+  return (
+    'Микрофон недоступен на этом адресе: браузер даёт доступ к нему только по '
+      + 'HTTPS (или localhost). Откройте страницу по https:// — либо проверьте '
+      + 'микрофон на /audio-debug.html.'
+  );
+}
+
 export interface MicDebugInfo {
   path: 'worklet' | 'fallback';
   ctxState: AudioContextState | null;
@@ -248,6 +269,12 @@ export class MicCapture {
     const events = this.events;
     if (events === null) return;
     let stream: MediaStream;
+    const unsupported = micUnsupportedReason();
+    if (unsupported !== null) {
+      this.setState('denied', events);
+      events.onError?.(unsupported);
+      throw new Error(unsupported);
+    }
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {

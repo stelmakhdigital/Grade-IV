@@ -4,7 +4,7 @@
  * эхо динамика→микрофон подавляется браузером, см. ADR-002/SRS §8).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { MicCapture, MAX_REINIT, SILENCE_MS, TTS_TAIL_GRACE_MS, type MicCaptureEvents } from './mic';
+import { MicCapture, MAX_REINIT, SILENCE_MS, TTS_TAIL_GRACE_MS, micUnsupportedReason, type MicCaptureEvents } from './mic';
 
 /** Доступ к приватным полям/методам MicCapture (dev-диагностика). */
 type MicInternal = {
@@ -490,5 +490,31 @@ describe('MicCapture: toggle = mute (init один раз, FR-S8)', () => {
     await vi.advanceTimersByTimeAsync(10_000);
     expect(h.getUserMedia).toHaveBeenCalledTimes(1);
     expect(h.mic.state).toBe('stopped');
+  });
+});
+
+describe('micUnsupportedReason — вне secure context микрофона нет вовсе', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('нет navigator.mediaDevices (http://IP с телефона) → честная причина и state denied', async () => {
+    vi.stubGlobal('navigator', {});
+    expect(micUnsupportedReason()).toContain('HTTPS');
+
+    const states: string[] = [];
+    const errors: string[] = [];
+    const mic = new MicCapture();
+    await expect(
+      mic.start({ onChunk: () => {}, onState: (s) => states.push(s), onError: (e) => errors.push(e) }),
+    ).rejects.toBeTruthy();
+
+    expect(errors[0]).toContain('HTTPS');
+    expect(states.at(-1)).toBe('denied');
+  });
+
+  it('mediaDevices есть → причины нет (дальше решает сам браузер)', () => {
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: vi.fn() } });
+    expect(micUnsupportedReason()).toBeNull();
   });
 });
