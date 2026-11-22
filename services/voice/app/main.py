@@ -1,4 +1,4 @@
-"""grade-voice: FastAPI-сервис STT/TTS (WP-1: health + фейки; WP-4: faster-whisper/Silero).
+"""grade-voice: FastAPI-сервис STT/TTS (WP-1: health + фейки; WP-4: GigaAM/faster-whisper/Silero).
 
 Контракт — ARCHITECTURE.md §4.3:
 - POST /api/v1/stt — multipart: ``audio`` (WAV/PCM16 mono, 16 кГц), опц. ``sample_rate``
@@ -9,7 +9,7 @@
 - GET /api/v1/health — состояние сервиса и провайдеров (health-check из api).
 
 Выбор провайдеров — env (режим CI/mock: "fake"):
-- ``VOICE_STT_PROVIDER``: faster-whisper (default) | gigaam | fake
+- ``VOICE_STT_PROVIDER``: gigaam (default — см. AGENTS.md) | faster-whisper | fake
 - ``VOICE_TTS_PROVIDER``: silero (default) | fake
 """
 from __future__ import annotations
@@ -32,19 +32,20 @@ CHUNK_BYTES = int(SAMPLE_RATE * 2 * 0.25)
 
 
 def _build_stt():
-    """STT-провайдер по env VOICE_STT_PROVIDER: faster-whisper (default) | gigaam | fake.
+    """STT-провайдер по env VOICE_STT_PROVIDER: gigaam (default, AGENTS.md) | faster-whisper | fake.
 
     gigaam — GigaAM v3 (Sber, MIT; RU WER в ~2 раза ниже Whisper large-v3),
-    env: GIGAAM_MODEL (default v3_rnnt), GIGAAM_DEVICE, GIGAAM_DOWNLOAD_ROOT.
+    env: GIGAAM_MODEL (default v3_e2e_rnnt), GIGAAM_DEVICE, GIGAAM_DOWNLOAD_ROOT.
+    Пустой VOICE_STT_PROVIDER — тоже gigaam (дефолт проекта), не faster-whisper.
     """
-    name = os.getenv("VOICE_STT_PROVIDER", "faster-whisper").strip().lower()
+    name = (os.getenv("VOICE_STT_PROVIDER") or "gigaam").strip().lower()
     if name == "fake":
         return FakeSTT()
     if name == "gigaam":
         from .gigaam import GigaAMSTT
 
         return GigaAMSTT()
-    if name in ("", "faster-whisper"):
+    if name == "faster-whisper":
         from .faster_whisper import FasterWhisperSTT
 
         return FasterWhisperSTT(

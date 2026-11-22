@@ -28,8 +28,14 @@ def test_health_fake() -> None:
 
 
 def test_health_env_defaults_real_providers(monkeypatch) -> None:
-    """Default-env: реальные провайдеры выбираются, но модели НЕ грузятся при старте."""
-    for var in ("VOICE_STT_PROVIDER", "VOICE_TTS_PROVIDER", "STT_MODEL"):
+    """Default-env: STT — gigaam (дефолт проекта, AGENTS.md), модели НЕ грузятся при старте."""
+    for var in (
+        "VOICE_STT_PROVIDER",
+        "VOICE_TTS_PROVIDER",
+        "STT_MODEL",
+        "GIGAAM_MODEL",
+        "GIGAAM_DEVICE",
+    ):
         monkeypatch.delenv(var, raising=False)
     import importlib
 
@@ -38,8 +44,8 @@ def test_health_env_defaults_real_providers(monkeypatch) -> None:
     importlib.reload(main_mod)
     client_real = TestClient(main_mod.app)
     body = client_real.get("/api/v1/health").json()
-    assert body["stt"]["provider"] == "faster-whisper"
-    assert body["stt"]["model"] == "small"
+    assert body["stt"]["provider"] == "gigaam"
+    assert body["stt"]["model"] == "v3_e2e_rnnt"
     assert body["stt"]["loaded"] is False  # lazy: модель скачается на первом /stt
     assert body["tts"]["provider"] == "silero"
     assert body["tts"]["model"] == "v5_ru"

@@ -68,10 +68,16 @@ services:
     ports:
       - "8100:8100"
     environment:
-      # GPU-профиль: CUDA-torch + large-v3 (переопределяется host-переменными)
+      # STT — GigaAM v3 (дефолт проекта, AGENTS.md); faster-whisper — опция
+      # (её переменные STT_*/GPU-профиль переопределяются host-ENV).
+      VOICE_STT_PROVIDER: "${VOICE_STT_PROVIDER:-gigaam}"
+      GIGAAM_MODEL: "${GIGAAM_MODEL:-v3_e2e_rnnt}"
+      GIGAAM_DEVICE: "${GIGAAM_DEVICE:-}"
+      # ML-модели — каталог ./models в корне репо (scripts/download-models.sh).
+      # Монтируется ro, то gigaam-ckpt (.ckpt) должен быть скачан заранее.
+      GIGAAM_DOWNLOAD_ROOT: /models/stt-gigaam
       STT_DEVICE: "${STT_DEVICE:-cpu}"
       STT_MODEL: "${STT_MODEL:-small}"
-      # ML-модели — каталог ./models в корне репо (scripts/download-models.sh)
       STT_DOWNLOAD_ROOT: /models/stt
       TTS_MODEL_DIR: /models/tts
       TTS_SPEAKER: "${TTS_SPEAKER:-ru_01}"

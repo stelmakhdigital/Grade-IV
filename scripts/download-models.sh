@@ -66,7 +66,11 @@ fi
 echo ""
 echo "=== [3/4] STT: GigaAM v3 E2E/CTC/RNNT (CDN Sber, ~1.8 ГБ всего) ==="
 GIGAAM_DIR="$MODELS_DIR/stt-gigaam"
-GIGAAM_URL="https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM"
+# URL переопределяется: у Sber-CDN просрочен TLS-сертификат (notAfter 2026-11-04),
+# curl/urllib на нём падают. Качают зеркало или файл вручную и сверяют md5 с пином
+# пакета (gigaam/__init__.py::_MODEL_HASHES, v3_e2e_rnnt = 2730de7545ac43ad256485a462b0a27a),
+# пакет проверяет этот хеш сам при загрузке модели.
+GIGAAM_URL="${GIGAAM_URL:-https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM}"
 for f in v3_e2e_rnnt.ckpt v3_e2e_ctc.ckpt v3_rnnt.ckpt v3_ctc.ckpt \
          v3_e2e_rnnt_tokenizer.model v3_e2e_ctc_tokenizer.model; do
   if [ -f "$GIGAAM_DIR/$f" ]; then

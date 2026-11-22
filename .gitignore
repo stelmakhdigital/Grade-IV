@@ -72,3 +72,6 @@ credentials/
 *.temp
 .tmp/
 services/models/
+
+# Локальная рабочая копия (артефакты сборки, логи, база; никогда в git)
+FOR_FUN/

@@ -6,17 +6,22 @@ uvicorn[standard]>=0.30
 python-multipart>=0.0.9  # multipart-загрузка /api/v1/stt
 pytest>=8.2
 httpx>=0.27
-# ML-стек (WP-4): STT — faster-whisper (ctranslate2) + Silero VAD (onnxruntime);
-# TTS — Silero v5 (torch-пакет v5_ru, для загрузки нужен scipy).
-# ВАЖНО: на CPU-машинах torch ставится ОТДЕЛЬНО до этого файла с CPU-индексом
-# (иначе pip потащит nvidia-* ~2 ГБ):
-#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# ML-стек: STT — GigaAM v3 (дефолт, torch) + faster-whisper (ctranslate2,
+# опция) + Silero VAD (onnxruntime); TTS — Silero v5 (для загрузки нужен scipy).
+# ВАЖНО: на CPU-машинах torch и torchaudio ставятся ОТДЕЛЬНО до этого файла с
+# CPU-индексом (иначе pip потянет nvidia-* ~2 ГБ):
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 # (делает make install). GPU-узел: torch из PyPI с CUDA.
 faster-whisper>=1.2.1
 onnxruntime>=1.20
 numpy>=1.26
 scipy>=1.13
-torch>=2.4
+torch>=2.6
+torchaudio>=2.6
+# STT-дефолт проекта — GigaAM v3 (gigaam.py): пакет ТОЛЬКО из git, на PyPI
+# выложено 0.1.0 без v3-моделей (v3_e2e_rnnt там нет). tar.gz вместо git+ —
+# чтобы не нужен был git в voice-образе. Закреплен по коммиту (pin).
+gigaam @ https://github.com/salute-developers/GigaAM/archive/7447938d791c4f3e643386ee22c33777004293a5.tar.gz
 # GPU (STT_DEVICE=cuda): ctranslate2 требует внешние CUDA 12-библиотеки —
 # доустановить в voice-venv: pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
 # (CPU-ноды/CI: не ставить, STT_DEVICE=cpu).

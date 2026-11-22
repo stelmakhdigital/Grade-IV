@@ -26,12 +26,13 @@ help:
 install:
 	@for m in $(GO_MODULES); do (cd $$m && go mod download) || exit 1; done
 	@cd services/frontend && pnpm install
-	# voice: venv без ensurepip (get-pip bootstrap) + torch CPU ПЕРЕД requirements
-	# (иначе pip потянет nvidia-* ~2 ГБ; на GPU-узле torch ставится с CUDA-индексом).
+	# voice: venv без ensurepip (get-pip bootstrap) + torch/torchaudio CPU ПЕРЕД
+	# requirements (иначе pip потянет nvidia-* ~2 ГБ; на GPU-узле torch ставится с
+	# CUDA-индексом). torchaudio — нужен STT-дефолту gigaam (см. AGENTS.md).
 	@cd services/voice && rm -rf .venv && python3 -m venv --without-pip .venv \
 		&& curl -fsSL -o .get-pip.py https://bootstrap.pypa.io/get-pip.py \
 		&& .venv/bin/python .get-pip.py -q && rm .get-pip.py \
-		&& .venv/bin/pip install -q torch --index-url https://download.pytorch.org/whl/cpu \
+		&& .venv/bin/pip install -q torch torchaudio --index-url https://download.pytorch.org/whl/cpu \
 		&& .venv/bin/pip install -q -r requirements.txt
 
 test:

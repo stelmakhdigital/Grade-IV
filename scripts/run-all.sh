@@ -12,10 +12,13 @@
 #                 можно без /v1 — нормализуется; модель знать не обязательно)
 #   LLM_MODEL     (пусто → авто-детект по GET {LLM_BASE_URL}/models)
 #   LLM_MOCK      (дефолт 0; 1 — без LLM-узла, эхо-интервьюер)
-#   STT_MODEL     (дефолт — локальная директория models/stt: faster-whisper large-v3,
-#                 конвертированная под локальный ctranslate2; HF-снапшоты могут
-#                 иметь несовместимую версию бинарника)
-#   STT_DEVICE    (дефолт cuda; cpu — без GPU)
+#   VOICE_STT_PROVIDER (дефолт gigaam — см. AGENTS.md; faster-whisper | fake)
+#   GIGAAM_MODEL  (дефолт v3_e2e_rnnt; ckpt — в models/stt-gigaam/)
+#   GIGAAM_DEVICE (пусто — auto: cuda при CUDA-сборке, иначе cpu)
+#   STT_MODEL     (только faster-whisper; дефолт — локальная директория models/stt:
+#                 faster-whisper large-v3, конвертированная под локальный
+#                 ctranslate2; HF-снапшоты могут иметь несовместимую версию бинарника)
+#   STT_DEVICE    (только faster-whisper; дефолт cuda; cpu — без GPU)
 #   STT_COMPUTE_TYPE (дефолт float16; int8 для CPU)
 #
 # Файлы: БД и PID/логи — в FOR_RUN/ (вне git). Модели — в services/voice/models/
@@ -44,12 +47,14 @@ LLM_BASE_URL="${LLM_BASE_URL:-http://192.168.1.114:8080/v1}"
 LLM_MODEL="${LLM_MODEL:-}"
 LLM_MOCK="${LLM_MOCK:-0}"
 VOICE_MODELS="$ROOT/services/voice/models"
-# STT-провайдер: faster-whisper (default: large-v3 на GPU, ctranslate2) | gigaam
-# (GigaAM v3 — RU WER в ~2 раза ниже, но torch в venv пока CPU-сборка — медленнее)
+# STT-провайдер: gigaam (default — см. AGENTS.md: RU WER в ~2 раза ниже Whisper,
+# работает на CPU) | faster-whisper (запасная опция: large-v3 на GPU, ctranslate2)
 # | fake. Переопределяется env.
-VOICE_STT_PROVIDER="${VOICE_STT_PROVIDER:-faster-whisper}"
+VOICE_STT_PROVIDER="${VOICE_STT_PROVIDER:-gigaam}"
 GIGAAM_MODEL="${GIGAAM_MODEL:-v3_e2e_rnnt}"
-# STT: локальная директория модели (model.bin + config) — без скачивания из HF.
+# GIGAAM_DEVICE: пусто — auto (torch сам возьмёт cuda при CUDA-сборке).
+GIGAAM_DEVICE="${GIGAAM_DEVICE:-}"
+# Ниже — только для faster-whisper: локальная директория модели (model.bin + config).
 STT_MODEL="${STT_MODEL:-$VOICE_MODELS/stt}"
 STT_DEVICE="${STT_DEVICE:-cuda}"
 STT_COMPUTE_TYPE="${STT_COMPUTE_TYPE:-float16}"
@@ -144,11 +149,14 @@ do_start() {
   (cd "$ROOT" && SANDBOX_MODE=subprocess SANDBOX_WORKDIR_BASE="$RUN/sbxw" \
     nohup "$SBX_BIN" >>"$LOGS/sandbox.log" 2>&1 & echo $! >"$PIDS/sandbox.pid")
 
-  # Описание STT в выводе: модель показываем только у gigaam
-  # (у faster-whisper модель — директория STT_MODEL; ранее всегда печаталась
-  # gigaam-модель «faster-whisper/v3_e2e_rnnt» — вводило в заблуждение).
-  stt_desc="$VOICE_STT_PROVIDER/$STT_DEVICE"
-  [[ "$VOICE_STT_PROVIDER" == "gigaam" ]] && stt_desc="gigaam/$GIGAAM_MODEL/$STT_DEVICE"
+  # Описание STT в выводе: у gigaam — имя модели и GIGAAM_DEVICE
+  # (STT_DEVICE относится только к faster-whisper/ctranslate2 и для torch
+  # некорректен — раньше печатался как устройство gigaam).
+  if [[ "$VOICE_STT_PROVIDER" == "gigaam" ]]; then
+    stt_desc="gigaam/$GIGAAM_MODEL/${GIGAAM_DEVICE:-auto}"
+  else
+    stt_desc="$VOICE_STT_PROVIDER/$STT_DEVICE"
+  fi
   echo "==> voice :8100 (STT: $stt_desc; TTS: $VOICE_MODELS/tts)"
   if [[ ! -f "$VOICE_MODELS/tts/silero-tts-v5_ru.pt" ]]; then
     echo "!! TTS-модель не найдена в $VOICE_MODELS — сначала: MODELS_DIR=$PWD/services/voice/models bash scripts/download-models.sh" >&2
@@ -163,6 +171,7 @@ do_start() {
   # переопределить: TTS_SPEAKER=eugene|ru_01 make run-all
   (cd "$ROOT/services/voice" && VOICE_STT_PROVIDER="$VOICE_STT_PROVIDER" \
     GIGAAM_MODEL="$GIGAAM_MODEL" GIGAAM_DOWNLOAD_ROOT="$VOICE_MODELS/stt-gigaam" \
+    GIGAAM_DEVICE="$GIGAAM_DEVICE" \
     STT_MODEL="$STT_MODEL" STT_DEVICE="$STT_DEVICE" \
     STT_COMPUTE_TYPE="$STT_COMPUTE_TYPE" \
     LD_LIBRARY_PATH="$VOICE_CUDA_LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
@@ -173,7 +182,7 @@ do_start() {
 
   echo "==> api :8000 (LLM_MOCK=$LLM_MOCK LLM=$LLM_BASE_URL модель=${LLM_MODEL:-авто по /models})"
   (cd "$ROOT" && DATABASE_URL="sqlite://FOR_RUN/run.db" \
-    JWT_SECRET="${JWT_SECRET:-grade-run-secret}" MINUTES_FREE_S="${MINUTES_FREE_S:-3600000}" \
+    JWT_SECRET="${JWT_SECRET:-grade-run-secret}" \
     SESSION_LIMIT_S="$SESSION_LIMIT_S" \
     SESSION_PAUSE_TIMEOUT_S="$SESSION_PAUSE_TIMEOUT_S" \
     LLM_MOCK="$LLM_MOCK" LLM_BASE_URL="$LLM_BASE_URL" LLM_MODEL="$LLM_MODEL" \
