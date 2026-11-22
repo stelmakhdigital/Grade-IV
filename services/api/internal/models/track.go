@@ -253,13 +253,21 @@ func (t *Track) Stages(g Grade) []Stage {
 // («Практика (Go)») и навигацию стадий из данных. practice=null — роль без
 // практики. Поле stages — программа грейда.
 func (t *Track) StageMeta(g Grade) map[string]any {
-	stages := make([]string, 0, 4)
-	for _, s := range t.Stages(g) {
+	return t.StageMetaFor(t.Stages(g), t.Runtime())
+}
+
+// StageMetaFor — то же для сессии с закреплённой при создании программой
+// стадий prog и рантаймом практики stack (issue #7): роль правят во время
+// интервью, а UI строит навигацию по программе своей сессии, а не по текущей
+// версии роли (иначе кнопка перехода пропадает, хотя движок его разрешает).
+func (t *Track) StageMetaFor(prog []Stage, stack Stack) map[string]any {
+	stages := make([]string, 0, len(prog))
+	for _, s := range prog {
 		stages = append(stages, string(s))
 	}
 	var pr any
-	if t.Practice != nil {
-		pr = map[string]any{"runtime": string(t.Practice.Runtime)}
+	if stack != "" {
+		pr = map[string]any{"runtime": string(stack)}
 	}
 	return map[string]any{
 		"id": t.ID, "title": t.Title, "practice": pr, "stages": stages,

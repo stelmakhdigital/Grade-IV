@@ -153,6 +153,59 @@ func TestAdminTrackCRUD(t *testing.T) {
 	}
 }
 
+// TestAdminTrackPracticeGuard (issue #7): практика роли — это программа стадий
+// её сессий (livecode есть или нет). Менять её можно, только когда у роли нет
+// незавершённых сессий: иначе идущее интервью теряет стадию на середине.
+func TestAdminTrackPracticeGuard(t *testing.T) {
+	ts := newTestEnv(t)
+	_, reg := doJSON(t, "POST", ts.URL+"/api/v1/auth/register",
+		map[string]any{"email": "guard-admin@example.com", "password": "Test12345"}, nil)
+	token, _ := reg["token"].(string)
+	auth := map[string]string{"Authorization": "Bearer " + token}
+	admin := func(method, path string, body any) (int, map[string]any) {
+		return doJSON(t, method, ts.URL+path, body, auth)
+	}
+
+	tk := models.Track{
+		ID:       "qa2",
+		Title:    "QA-инженер",
+		Practice: &models.Practice{Runtime: models.StackGo},
+		Grades:   []models.Grade{models.GradeMiddle},
+		Board: models.BoardConfig{
+			Title:        "Схема тест-плана",
+			ReviewPrompt: "Оцени покрытие.",
+			Groups:       []models.BlockGroup{{Title: "Тесты", Names: []string{"Модуль"}}},
+		},
+		Criteria: []models.TrackCriterion{{Name: "Дизайн", Weight: 0.5}, {Name: "Связь", Weight: 0.5}},
+	}
+	if code, m := admin("POST", "/api/v1/admin/tracks", map[string]any{"track": tk}); code != 201 {
+		t.Fatalf("create: %d %v", code, m)
+	}
+	if code, _ := doJSON(t, "POST", ts.URL+"/api/v1/sessions",
+		map[string]any{"grade": "middle", "track_id": "qa2"}, auth); code != 201 {
+		t.Fatalf("create session: %d", code)
+	}
+
+	// Снять практику у роли с идущей сессией → 409.
+	noPractice := tk
+	noPractice.Practice = nil
+	if code, _ := admin("PUT", "/api/v1/admin/tracks/qa2", map[string]any{"track": noPractice}); code != 409 {
+		t.Fatalf("снятие практики при идущей сессии: %d, want 409", code)
+	}
+	// Сменить рантайм практики (go → python) → 409: задачи другой программы.
+	otherRuntime := tk
+	otherRuntime.Practice = &models.Practice{Runtime: models.StackPython}
+	if code, _ := admin("PUT", "/api/v1/admin/tracks/qa2", map[string]any{"track": otherRuntime}); code != 409 {
+		t.Fatalf("смена рантайма практики: %d, want 409", code)
+	}
+	// Остальные поля доступны: практика не тронута.
+	retitled := tk
+	retitled.Title = "QA-инженер (обновлён)"
+	if code, m := admin("PUT", "/api/v1/admin/tracks/qa2", map[string]any{"track": retitled}); code != 200 {
+		t.Fatalf("правка title без практики: %d %v, want 200", code, m)
+	}
+}
+
 // doJSONRaw — как doJSON, но тело не парсится (для JSON-массивов).
 func doJSONRaw(t *testing.T, method, url string, body any, headers map[string]string) (int, string) {
 	t.Helper()

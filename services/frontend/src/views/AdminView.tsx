@@ -807,7 +807,13 @@ function TracksTab() {
       setForm(null);
       await load();
     } catch (e) {
-      setError(errText(e));
+      // 409 (issue #7) — правка практики при незавершённых сессиях роли:
+      // программа стадий идущего интервью не должна меняться на середине.
+      if (e instanceof ApiError && e.status === 409) {
+        setError('У роли есть незавершённые сессии — практику и рантайм меняют, когда интервью не идут.');
+      } else {
+        setError(errText(e));
+      }
     } finally {
       setSaving(false);
     }
@@ -831,6 +837,13 @@ function TracksTab() {
 
   const sum = form !== null ? weightSum(form.criteria) : 0;
   const sumWarn = form !== null && form.criteria.length > 0 && (sum < 0.95 || sum > 1.05);
+
+  // issue #7: практика роли — программа стадий её сессий. Сервер не примет её
+  // правку, пока у роли есть незавершённые сессии (409); редактор блокирует те
+  // же поля по тому же признаку (active_sessions из GET /admin/tracks).
+  const busySessions =
+    form !== null && !form.isNew ? (tracks?.find((t) => t.id === form.id)?.active_sessions ?? 0) : 0;
+  const practiceLocked = busySessions > 0;
 
   return (
     <section className="card" data-testid="admin-tracks">
@@ -967,6 +980,7 @@ function TracksTab() {
                 type="checkbox"
                 data-testid="admin-track-practice"
                 checked={form.hasPractice}
+                disabled={practiceLocked}
                 onChange={(e) => setF({ hasPractice: e.target.checked })}
               />
               <span>Практика в редакторе</span>
@@ -977,6 +991,7 @@ function TracksTab() {
                 <select
                   data-testid="admin-track-runtime"
                   value={form.runtime}
+                  disabled={practiceLocked}
                   onChange={(e) => setF({ runtime: e.target.value as TrackFormState['runtime'] })}
                 >
                   <option value="go">Go</option>
@@ -984,6 +999,14 @@ function TracksTab() {
                   <option value="shell">Bash</option>
                 </select>
               </label>
+            )}
+            {/* issue #7: блокировка практики активна, только у существующей роли
+                с незавершёнными сессиями — то же правило, что на сервере. */}
+            {practiceLocked && (
+              <p className="muted small" data-testid="admin-track-practice-locked" style={{ gridColumn: '1 / -1' }}>
+                Незавершённых сессий у роли: {busySessions}. Идущие интервью живут по своей
+                программе стадий — практику и рантайм меняют, когда интервью не идут.
+              </p>
             )}
           </div>
           <div className="start-form">

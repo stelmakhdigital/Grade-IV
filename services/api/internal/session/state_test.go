@@ -30,7 +30,7 @@ func TestCanTransitionStageForward(t *testing.T) {
 		{models.GradeMiddle, models.Stage(""), models.StageVoice, false},
 	}
 	for _, c := range cases {
-		err := CanTransitionStage(nil, c.grade, c.from, c.to)
+		err := CanTransitionStage(stagesForGrade(c.grade), c.from, c.to)
 		if c.ok && err != nil {
 			t.Errorf("%s %s→%s: ожидалось допустимо, получено %v", c.grade, c.from, c.to, err)
 		}
@@ -41,14 +41,28 @@ func TestCanTransitionStageForward(t *testing.T) {
 }
 
 func TestCanTransitionStageBackward(t *testing.T) {
-	if err := CanTransitionStage(nil, models.GradeMiddle, models.StageLiveCode, models.StageVoice); err != nil {
+	prog := stagesForGrade(models.GradeMiddle)
+	if err := CanTransitionStage(prog, models.StageLiveCode, models.StageVoice); err != nil {
 		t.Errorf("возврат livecode→voice должен быть допустим: %v", err)
 	}
-	if err := CanTransitionStage(nil, models.GradeMiddle, models.StageDesign, models.StageLiveCode); err != nil {
+	if err := CanTransitionStage(prog, models.StageDesign, models.StageLiveCode); err != nil {
 		t.Errorf("возврат design→livecode должен быть допустим: %v", err)
 	}
-	if err := CanTransitionStage(nil, models.GradeMiddle, models.StageReport, models.StageVoice); err == nil {
+	if err := CanTransitionStage(prog, models.StageReport, models.StageVoice); err == nil {
 		t.Error("из report назад переходить нельзя")
+	}
+}
+
+// TestCanTransitionStageOutsideProgram (issue #7): стадию убрали из программы,
+// пока сессия шла (легаси-строка без закреплённой программы). Выпуск в report
+// обязан остаться — иначе у кандидата на выпавшей стадии нет ни одного перехода.
+func TestCanTransitionStageOutsideProgram(t *testing.T) {
+	prog := []models.Stage{models.StageVoice, models.StageDesign, models.StageReport}
+	if err := CanTransitionStage(prog, models.StageLiveCode, models.StageReport); err != nil {
+		t.Errorf("выпуск с выпавшей стадии в report: %v", err)
+	}
+	if err := CanTransitionStage(prog, models.StageLiveCode, models.StageDesign); err == nil {
+		t.Error("voice/design остаются закрыты для стадии вне программы")
 	}
 }
 

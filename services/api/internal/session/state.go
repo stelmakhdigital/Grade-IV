@@ -42,6 +42,16 @@ func stagesForTrack(track *models.Track, g models.Grade) []models.Stage {
 	return track.Stages(g)
 }
 
+// stagePos — позиция стадии в программе (-1 — стадии в программе нет).
+func stagePos(prog []models.Stage, s models.Stage) int {
+	for i, st := range prog {
+		if st == s {
+			return i
+		}
+	}
+	return -1
+}
+
 // stagesForGrade — состав программы сессии по грейду.
 func stagesForGrade(g models.Grade) []models.Stage {
 	switch g {
@@ -61,19 +71,27 @@ func stageIndex(s models.Stage) int {
 	return -1
 }
 
-// CanTransitionStage — допустим ли переход from → to по программе трека
-// (spec-18) и грейда. Перемещение вперёд разрешается только по программе
-// (без «перескоков», но Junior backend-трека пропускает design); возврат на
+// CanTransitionStage — допустим ли переход from → to по программе стадий prog
+// (spec-18). Программа передаётся списком, а не ролью: сессия живёт по
+// программе, закреплённой при создании, а роль правят и во время интервью
+// (issue #7). Перемещение вперёд разрешается только по программе (без
+// «перескоков», но Junior backend-трека пропускает design); возврат на
 // предыдущую стадию разрешён, кроме report (терминальная).
-func CanTransitionStage(track *models.Track, grade models.Grade, from, to models.Stage) error {
+func CanTransitionStage(prog []models.Stage, from, to models.Stage) error {
 	fromIdx, toIdx := stageIndex(from), stageIndex(to)
 	if fromIdx < 0 || toIdx < 0 {
 		return ErrUnknownStage
 	}
+	fromPos := stagePos(prog, from)
 	if toIdx == stageIndex(models.StageReport) {
 		// report — только вперёд из последней рабочей стадии программы
 		// (программа всегда завершается report, рабочая стадия — предпоследняя).
-		prog := stagesForTrack(track, grade)
+		if fromPos < 0 {
+			// Стадия выпала из программы: сессия создана до колонки sessions.stages
+			// и роль поправили во время интервью (issue #7). Других переходов у
+			// кандидата не остаётся — выпускаем в report, там сессия завершится.
+			return nil
+		}
 		if len(prog) < 2 || prog[len(prog)-2] != from {
 			return fmt.Errorf("%w: %s → report", ErrIllegalStage, from)
 		}
@@ -82,16 +100,7 @@ func CanTransitionStage(track *models.Track, grade models.Grade, from, to models
 	if from == models.StageReport {
 		return fmt.Errorf("%w: report → %s", ErrIllegalStage, to)
 	}
-	prog := stagesForTrack(track, grade)
-	fromPos, toPos := -1, -1
-	for i, st := range prog {
-		switch st {
-		case from:
-			fromPos = i
-		case to:
-			toPos = i
-		}
-	}
+	toPos := stagePos(prog, to)
 	if fromPos < 0 || toPos < 0 {
 		return fmt.Errorf("%w: %s", ErrStageNotInScope, to)
 	}
@@ -102,16 +111,14 @@ func CanTransitionStage(track *models.Track, grade models.Grade, from, to models
 }
 
 // CanJumpStageDebug — отладочный прыжок (dev, ENABLE_DEBUG=1): стадия обязана быть
-// в программе роли (придумать стадию нельзя), но шаг ±1 не требуется. report
+// в программе сессии (придумать стадию нельзя), но шаг ±1 не требуется. report
 // исключён: он необратимо завершает сессию, а для этого есть «Завершить интервью».
-func CanJumpStageDebug(track *models.Track, grade models.Grade, to models.Stage) error {
+func CanJumpStageDebug(prog []models.Stage, to models.Stage) error {
 	if to == models.StageReport {
 		return fmt.Errorf("%w: %s (отчёт — завершением интервью)", ErrIllegalStage, to)
 	}
-	for _, st := range stagesForTrack(track, grade) {
-		if st == to {
-			return nil
-		}
+	if stagePos(prog, to) >= 0 {
+		return nil
 	}
 	return fmt.Errorf("%w: %s", ErrStageNotInScope, to)
 }

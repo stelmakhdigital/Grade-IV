@@ -149,6 +149,7 @@ func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, s
 		StartedAt:      now,
 		TemplateID:     templateID,
 		Program:        program,
+		Stages:         stagesForTrack(track, grade), // issue #7: роль могут поправить во время сессии
 		ProfileID:      cp.profileID,
 		TTSSpeaker:     cp.ttsspeaker,
 		TrackID:        trackID,
@@ -163,6 +164,7 @@ func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, s
 		grade:       grade,
 		stack:       stack,
 		track:       track,
+		stages:      m.Stages,
 		limitS:      m.DurationLimitS,
 		stage:       models.StageVoice,
 		status:      models.StatusActive,
@@ -211,6 +213,7 @@ func (e *Engine) Attach(ctx context.Context, id, userID int64, conn *websocket.C
 			grade:       m.Grade,
 			stack:       m.Stack,
 			track:       track,
+			stages:      m.Stages, // issue #7: программа стадий — из строки сессии
 			limitS:      m.DurationLimitS,
 			stage:       m.Stage,
 			status:      m.Status,
@@ -276,6 +279,7 @@ func (e *Engine) reconstructFromStore(id int64) *runtime {
 		grade:       m.Grade,
 		stack:       m.Stack,
 		track:       track,
+		stages:      m.Stages, // issue #7: программа стадий — из строки сессии
 		limitS:      m.DurationLimitS,
 		stage:       m.Stage,
 		status:      m.Status,
@@ -427,9 +431,9 @@ func (e *Engine) finish(id int64, byUser bool, reason string) (*Snapshot, error)
 	// issue #10: track-мета нужна и здесь — UI ставит её безусловно
 	// (m.track ?? null), и без неё на финале терялись имя роли в шапке и
 	// подпись «Практика (bash)» в отчёте (BUG-20261104-026/-028).
-	// rt.track/rt.grade после создания рантайма не меняются — чтение вне
-	// connMu безопасно, как в Transition/ResendStage.
-	if tm := trackStageMeta(rt.track, rt.grade); tm != nil {
+	// rt.track/rt.grade/rt.stages после создания рантайма не меняются — чтение
+	// вне connMu безопасно, как в Transition/ResendStage.
+	if tm := trackStageMeta(rt); tm != nil {
 		stageMsg["track"] = tm
 	}
 	e.sendJSON(id, stageMsg)
@@ -488,7 +492,7 @@ func (e *Engine) ResendStage(id int64) {
 	if e.debugStages {
 		msg["debug"] = true // UI показывает переключатель стадий (dev)
 	}
-	if tm := trackStageMeta(rt.track, rt.grade); tm != nil {
+	if tm := trackStageMeta(rt); tm != nil {
 		msg["track"] = tm
 	}
 	if stage == models.StageDesign {
@@ -514,8 +518,9 @@ func (e *Engine) Transition(id int64, to models.Stage) (*Snapshot, error) {
 		rt.connMu.Unlock()
 		return nil, fmt.Errorf("%w: %s (стадия %s)", ErrSessionEnded, cur, from)
 	}
-	if err := CanTransitionStage(rt.track, rt.grade, rt.stage, to); err != nil {
-		if !e.debugStages || CanJumpStageDebug(rt.track, rt.grade, to) != nil {
+	prog := rt.stageProgram()
+	if err := CanTransitionStage(prog, rt.stage, to); err != nil {
+		if !e.debugStages || CanJumpStageDebug(prog, to) != nil {
 			rt.connMu.Unlock()
 			return nil, err
 		}
@@ -544,7 +549,7 @@ func (e *Engine) Transition(id int64, to models.Stage) (*Snapshot, error) {
 	}
 	// spec-20: метаданные трека в КАЖДОМ stage-сообщении (ResendStage шлёт их
 	// только при реконнекте — после перехода стадии UI мог остаться без них).
-	if tm := trackStageMeta(rt.track, rt.grade); tm != nil {
+	if tm := trackStageMeta(rt); tm != nil {
 		msg["track"] = tm
 	}
 	e.sendJSON(id, msg)

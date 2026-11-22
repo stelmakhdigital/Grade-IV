@@ -66,6 +66,8 @@ export interface AdminTrack extends Track {
   };
   criteria: Track['criteria'] & { hint?: string }[];
   grade_confirm?: number;
+  /** Незавершённые сессии роли (issue #7): практика меняется, только когда их нет. */
+  active_sessions?: number;
 }
 
 export interface Session {
@@ -399,7 +401,9 @@ export function adminCreateTrack(t: AdminTrack): Promise<AdminTrack> {
 }
 
 export function adminUpdateTrack(t: AdminTrack): Promise<AdminTrack> {
-  return request<AdminTrack>(`/admin/tracks/${t.id}`, { body: { track: t }, auth: true });
+  // method обязателен: без него request идёт POST (method по умолчанию при body),
+  // а PUT /admin/tracks/{id} — единственный принявший правку маршрут.
+  return request<AdminTrack>(`/admin/tracks/${t.id}`, { method: 'PUT', body: { track: t }, auth: true });
 }
 
 export function adminDeleteTrack(id: string): Promise<{ ok: boolean }> {

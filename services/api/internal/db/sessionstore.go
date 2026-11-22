@@ -29,9 +29,35 @@ func NewSessionStore(dbx *sql.DB, d Dialect) *SessionStore {
 
 func parseTS(s string) (time.Time, error) { return time.Parse(time.RFC3339, s) }
 
+// joinStages/splitStages — программа стадий в колонке sessions.stages (через
+// запятую) и обратно. Пустая строка — программа не закреплена (строки до
+// колонки), вызывающий считает её по текущей роли.
+func joinStages(st []models.Stage) string {
+	names := make([]string, len(st))
+	for i, x := range st {
+		names[i] = string(x)
+	}
+	return strings.Join(names, ",")
+}
+
+func splitStages(s string) []models.Stage {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]models.Stage, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, models.Stage(p))
+		}
+	}
+	return out
+}
+
 // Create вставляет новую сессию (stage/status/длительность заданы вызывающим).
 // TemplateID=0 → NULL (дефолтный шаблон грейда, итерация A). Program — программа
 // шаблона (записывается на создание — сессия не меняется при правке шаблона).
+// Stages — программа стадий роли: тоже фиксируется на создание (issue #7).
 func (s *SessionStore) Create(ctx context.Context, m models.Session) (models.Session, error) {
 	var templateID any
 	if m.TemplateID != 0 {
@@ -43,10 +69,11 @@ func (s *SessionStore) Create(ctx context.Context, m models.Session) (models.Ses
 	}
 	res, err := s.db.ExecContext(ctx, s.d.q(`
 		INSERT INTO sessions (user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, started_at, template_id, program, profile_id, tts_speaker, track_id, base_grade)
-		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`),
+			active_seconds, started_at, template_id, program, profile_id, tts_speaker, track_id, base_grade, stages)
+		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		m.UserID, m.Grade, m.Stack, m.Stage, m.Status, m.DurationLimitS,
-		m.StartedAt.UTC().Format(time.RFC3339), templateID, m.Program, profileID, m.TTSSpeaker, m.TrackID, m.BaseGrade)
+		m.StartedAt.UTC().Format(time.RFC3339), templateID, m.Program, profileID, m.TTSSpeaker, m.TrackID, m.BaseGrade,
+		joinStages(m.Stages))
 	if err != nil {
 		return models.Session{}, fmt.Errorf("create session: %w", err)
 	}
@@ -61,7 +88,7 @@ func (s *SessionStore) Create(ctx context.Context, m models.Session) (models.Ses
 func (s *SessionStore) Get(ctx context.Context, id int64) (models.Session, error) {
 	return s.scanSession(s.db.QueryRowContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages
 			FROM sessions WHERE id = ?`), id))
 }
 
@@ -69,7 +96,7 @@ func (s *SessionStore) Get(ctx context.Context, id int64) (models.Session, error
 func (s *SessionStore) GetOwned(ctx context.Context, id, userID int64) (models.Session, error) {
 	m, err := s.scanSession(s.db.QueryRowContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages
 			FROM sessions WHERE id = ? AND user_id = ?`), id, userID))
 	if errors.Is(err, ErrSessionNotFound) {
 		return m, err
@@ -81,7 +108,7 @@ func (s *SessionStore) GetOwned(ctx context.Context, id, userID int64) (models.S
 func (s *SessionStore) ListByUser(ctx context.Context, userID int64) ([]models.Session, error) {
 	rows, err := s.db.QueryContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages
 			FROM sessions WHERE user_id = ? ORDER BY id DESC`), userID)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
@@ -151,7 +178,7 @@ func (s *SessionStore) Finalize(ctx context.Context, id int64, status models.Sta
 func (s *SessionStore) ListByStatus(ctx context.Context, status models.Status) ([]models.Session, error) {
 	rows, err := s.db.QueryContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages
 			FROM sessions WHERE status = ?`), status)
 	if err != nil {
 		return nil, fmt.Errorf("list by status: %w", err)
@@ -292,8 +319,9 @@ func (s *SessionStore) scanSession(row rowScanner) (models.Session, error) {
 	var shareToken string
 	var trackID string
 	var baseGrade string
+	var stagesRaw string
 	err := row.Scan(&m.ID, &m.UserID, &grade, &stack, &stage, &status,
-		&m.DurationLimitS, &m.ActiveSeconds, &pausedAt, &startedAt, &finishedAt, &templateID, &program, &profileID, &ttsSpeaker, &shareToken, &trackID, &baseGrade)
+		&m.DurationLimitS, &m.ActiveSeconds, &pausedAt, &startedAt, &finishedAt, &templateID, &program, &profileID, &ttsSpeaker, &shareToken, &trackID, &baseGrade, &stagesRaw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Session{}, ErrSessionNotFound
 	}
@@ -324,6 +352,7 @@ func (s *SessionStore) scanSession(row rowScanner) (models.Session, error) {
 		m.TemplateID = templateID.Int64
 	}
 	m.Program = program
+	m.Stages = splitStages(stagesRaw)
 	if profileID.Valid {
 		m.ProfileID = profileID.Int64
 	}
@@ -346,7 +375,7 @@ func (s *SessionStore) SetShareToken(ctx context.Context, id, userID int64, toke
 func (s *SessionStore) GetByShareToken(ctx context.Context, token string) (models.Session, error) {
 	return s.scanSession(s.db.QueryRowContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages
 			FROM sessions WHERE share_token = ?`), token))
 }
 
@@ -356,5 +385,15 @@ func (s *SessionStore) CountByTrack(ctx context.Context, trackID string) (int64,
 	var n int64
 	err := s.db.QueryRowContext(ctx, s.d.q(
 		`SELECT COUNT(*) FROM sessions WHERE track_id = ?`), trackID).Scan(&n)
+	return n, err
+}
+
+// CountActiveByTrack — незавершённые сессии роли (issue #7: правка практики
+// роли меняет программу стадий идущих интервью). 0/ошибка — роль свободна.
+func (s *SessionStore) CountActiveByTrack(ctx context.Context, trackID string) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx, s.d.q(
+		`SELECT COUNT(*) FROM sessions WHERE track_id = ? AND status NOT IN (?, ?)`),
+		trackID, models.StatusFinished, models.StatusAborted).Scan(&n)
 	return n, err
 }

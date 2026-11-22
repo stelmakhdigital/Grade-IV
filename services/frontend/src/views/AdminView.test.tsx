@@ -45,6 +45,8 @@ interface MockOpts {
   tracks?: unknown;
   createStatus?: number;
   createBody?: unknown;
+  updateStatus?: number;
+  updateBody?: unknown;
   generateStatus?: number;
   generateBody?: unknown;
   deleteStatus?: number;
@@ -78,6 +80,12 @@ function mockApi(opts: MockOpts = {}): Mock {
         return json(
           opts.deleteStatus ?? 200,
           opts.deleteBody ?? { ok: true },
+        );
+      }
+      if (init?.method === 'PUT') {
+        return json(
+          opts.updateStatus ?? 200,
+          opts.updateBody ?? (init.body ? JSON.parse(init.body as string) : {}),
         );
       }
     }
@@ -198,6 +206,44 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
     const post = fetchMock.mock.calls.find((c) => c[1]?.method === 'POST' && String(c[0]).endsWith('/admin/tracks'));
     const body = JSON.parse((post as unknown as [string, RequestInit])[1].body as string);
     expect(body.track.practice).toEqual({ runtime: 'shell' });
+  });
+
+  it('issue #7: практика заблокирована у роли с незавершёнными сессиями', async () => {
+    const fetchMock = mockApi({
+      tracks: [
+        { ...TRACKS[0], active_sessions: 2 },
+        { ...TRACKS[1], active_sessions: 0 },
+      ],
+    });
+    renderAdmin(fetchMock);
+    const user = userEvent.setup();
+    await screen.findByText('admin@example.com');
+    await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
+    await screen.findByTestId('admin-tracks');
+
+    await user.selectOptions(screen.getByTestId('admin-track-select'), 'backend');
+    expect(screen.getByTestId('admin-track-practice')).toBeDisabled();
+    expect(screen.getByTestId('admin-track-runtime')).toBeDisabled();
+    expect(screen.getByTestId('admin-track-practice-locked')).toBeInTheDocument();
+
+    // Роль без незавершённых сессий — практика доступна.
+    await user.selectOptions(screen.getByTestId('admin-track-select'), 'sysadmin');
+    expect(screen.getByTestId('admin-track-practice')).toBeEnabled();
+    expect(screen.queryByTestId('admin-track-practice-locked')).not.toBeInTheDocument();
+  });
+
+  it('issue #7: 409 на сохранение — в форме честная причина', async () => {
+    const fetchMock = mockApi({ updateStatus: 409, updateBody: { code: 'track_in_use', message: 'идут сессии' } });
+    renderAdmin(fetchMock);
+    const user = userEvent.setup();
+    await screen.findByText('admin@example.com');
+    await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
+    await screen.findByTestId('admin-tracks');
+
+    await user.selectOptions(screen.getByTestId('admin-track-select'), 'backend');
+    await user.type(screen.getByTestId('admin-track-title'), ' +');
+    await user.click(screen.getByTestId('admin-track-save'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('незавершённые сессии');
   });
 
   it('drag-n-drop: перестановка групп за ручку', async () => {

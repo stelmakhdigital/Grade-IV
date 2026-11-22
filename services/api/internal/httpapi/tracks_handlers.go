@@ -31,6 +31,13 @@ type trackPracticeView struct {
 	Runtime models.Stack `json:"runtime"`
 }
 
+// adminTrackView — полная роль в админ-списке: поля роли + число незавершённых
+// её сессий (issue #7). models.Track маршалится в строку целиком (embedding).
+type adminTrackView struct {
+	models.Track
+	ActiveSessions int64 `json:"active_sessions"`
+}
+
 type trackBoardView struct {
 	Title  string         `json:"title"`
 	Groups []trackViewGrp `json:"groups"`
@@ -78,9 +85,17 @@ func (s *Server) handleTracksList(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleAdminTracksList — GET /api/v1/admin/tracks: полные треки (для редактора).
-func (s *Server) handleAdminTracksList(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.tracks.List())
+// handleAdminTracksList — GET /api/v1/admin/tracks: полные треки (для редактора)
+// плюс число незавершённых сессий роли (issue #7: практика меняется, только
+// когда интервью не идут — редактор блокирует её по этому же числу).
+func (s *Server) handleAdminTracksList(w http.ResponseWriter, r *http.Request) {
+	list := s.tracks.List()
+	out := make([]adminTrackView, 0, len(list))
+	for _, t := range list {
+		n, _ := s.sessions.CountActiveByTrack(r.Context(), t.ID)
+		out = append(out, adminTrackView{Track: t, ActiveSessions: n})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // decodeTrack — тело admin-запроса: {"track": {...}} (канонично) либо
@@ -144,12 +159,32 @@ func (s *Server) handleAdminTrackUpdate(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "track_not_found", "трек "+id+" не найден")
 		return
 	}
+	// issue #7: практика роли — это программа стадий (livecode есть/нет) и банк
+	// задач практики. Править её можно, когда у роли нет незавершённых сессий:
+	// иначе идущее интервью теряет стадию на середине (кандидат застревает на
+	// Live-Code). Защита сопоставима с DELETE, но мягче: трогается только практика.
+	if old, err := s.tracks.Get(id); err == nil && old != nil && practiceChanged(*old, t) {
+		if n, err := s.sessions.CountActiveByTrack(r.Context(), id); err == nil && n > 0 {
+			writeError(w, http.StatusConflict, "track_in_use",
+				"у роли "+strconv.FormatInt(n, 10)+" незавершённых сессий — практика меняется, когда интервью не идут")
+			return
+		}
+	}
 	if err := s.tracks.Upsert(t); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	stored, _ := s.tracks.Get(id)
 	writeJSON(w, http.StatusOK, stored)
+}
+
+// practiceChanged — меняется ли практическая стадия роли: её наличие или рантайм
+// (и то и другое задаёт программу стадий и банк задач).
+func practiceChanged(old, next models.Track) bool {
+	if (old.Practice == nil) != (next.Practice == nil) {
+		return true
+	}
+	return old.Practice != nil && old.Practice.Runtime != next.Practice.Runtime
 }
 
 // handleAdminTrackDelete — DELETE /api/v1/admin/tracks/{id}. Трек, на котором

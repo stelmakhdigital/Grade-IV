@@ -52,7 +52,8 @@ type runtime struct {
 	userID   int64
 	grade    models.Grade
 	stack    models.Stack
-	track    *models.Track // spec-18: nil — движок без хранилища треков (fallback на грейд)
+	track    *models.Track  // spec-18: nil — движок без хранилища треков (fallback на грейд)
+	stages   []models.Stage // issue #7: программа стадий, закреплённая при создании
 	limitS   int
 	stage    models.Stage
 	status   models.Status
@@ -64,6 +65,16 @@ type runtime struct {
 	connMu      sync.Mutex // правило nhooyr: один писатель на соединение
 	lastPersist time.Time
 	lastTimer   time.Time
+}
+
+// stageProgram — программа стадий сессии: закреплённая при создании
+// (sessions.stages). У строк, созданных до колонки, её нет — считаем по текущей
+// версии роли, как раньше (issue #7).
+func (rt *runtime) stageProgram() []models.Stage {
+	if len(rt.stages) > 0 {
+		return rt.stages
+	}
+	return stagesForTrack(rt.track, rt.grade)
 }
 
 // Engine — оркестратор сессий: машина состояний, тарификация, таймер, WS-регистрация.
@@ -127,14 +138,22 @@ func WithDebugStages() Opt { return func(e *Engine) { e.debugStages = true } }
 // trackStageMeta — метаданные трека в stage-сообщении (spec-18): UI строит
 // навигацию стадий (некодовый трек: голос → доска, без Live-Code). nil-трек —
 // без track (legacy-поведение, движок без хранилища).
-func trackStageMeta(t *models.Track, g models.Grade) map[string]any {
-	if t == nil {
+//
+// spec-20: stages — программа стадий, UI показывает переход к следующей стадии
+// из данных (BUG-20261104-026: junior на shell-треке застревал на livecode —
+// переход к design скрывался грейд-правилом кодовых треков).
+//
+// issue #7: stages и practice берутся из программы, закреплённой за сессией, а
+// не из текущей версии роли: правкой роли UI не должен прятать кнопку перехода,
+// которую движок этой сессии разрешает.
+func trackStageMeta(rt *runtime) map[string]any {
+	if rt.track == nil {
 		return nil
 	}
-	// spec-20: stages — программа грейда, UI показывает переход к следующей
-	// стадии из данных (BUG-20261104-026: junior на shell-треке застревал на
-	// livecode — переход к design скрывался грейд-правилом кодовых треков).
-	return t.StageMeta(g)
+	if len(rt.stages) == 0 {
+		return rt.track.StageMeta(rt.grade) // легаси-строка без закреплённой программы
+	}
+	return rt.track.StageMetaFor(rt.stages, rt.stack)
 }
 
 // boardStagePayload — payload доски для stage-сообщения (spec-18/Ф3/Ф5).

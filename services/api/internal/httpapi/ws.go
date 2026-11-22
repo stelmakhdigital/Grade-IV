@@ -827,7 +827,13 @@ func (s *Server) enterLiveCode(ctx context.Context, id int64, ws *wsSession) {
 			}
 			if s.tracks != nil && sess.TrackID != "" {
 				if tr, err := s.tracks.Get(sess.TrackID); err == nil && tr != nil {
-					msg["track"] = tr.StageMeta(sess.Grade)
+					// issue #7: навигация — по программе стадий, закреплённой за
+					// сессией, а не по текущей версии роли.
+					if len(sess.Stages) > 0 {
+						msg["track"] = tr.StageMetaFor(sess.Stages, sess.Stack)
+					} else {
+						msg["track"] = tr.StageMeta(sess.Grade)
+					}
 				}
 			}
 			s.engine.SendTo(id, msg)
