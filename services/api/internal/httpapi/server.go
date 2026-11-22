@@ -102,14 +102,21 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 	if err := profiles.EnsurePresets(context.Background(), db.PresetProfiles()); err != nil {
 		log.Warn("profiles: пресеты не сидированы", "err", err)
 	}
-	engine := session.New(sessions, users, log,
-		session.WithPauseTimeout(time.Duration(cfg.PauseTimeoutS)*time.Second),
+	engineOpts := []session.Opt{
+		session.WithPauseTimeout(time.Duration(cfg.PauseTimeoutS) * time.Second),
 		session.WithSessionLimit(cfg.SessionLimitS),
 		session.WithTemplates(templates),
 		// spec-18: резолвер треков (программа стадий/доска/критерии).
 		session.WithTracks(func(trackID string) (*models.Track, error) {
 			return tracksStore.Get(trackID)
-		}))
+		}),
+	}
+	// Отладка стадий (dev, ENABLE_DEBUG=1): прыжок на любую стадию программы роли,
+	// чтобы не прогонять интервью с начала ради одной доски/практики.
+	if cfg.DebugEndpoints {
+		engineOpts = append(engineOpts, session.WithDebugStages())
+	}
+	engine := session.New(sessions, users, log, engineOpts...)
 	// F2 (Итерация 10) + Admin (итерация 11): настраиваемые случайные начала
 	// (по грейду). Путь — env INTRO_OPENINGS_FILE, дефолт config/openings.json
 	// (CWD-независимо, BUG-012). Итерация 11: путь хранится для admin-записи.

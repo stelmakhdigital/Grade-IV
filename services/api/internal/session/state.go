@@ -101,6 +101,21 @@ func CanTransitionStage(track *models.Track, grade models.Grade, from, to models
 	return nil
 }
 
+// CanJumpStageDebug — отладочный прыжок (dev, ENABLE_DEBUG=1): стадия обязана быть
+// в программе роли (придумать стадию нельзя), но шаг ±1 не требуется. report
+// исключён: он необратимо завершает сессию, а для этого есть «Завершить интервью».
+func CanJumpStageDebug(track *models.Track, grade models.Grade, to models.Stage) error {
+	if to == models.StageReport {
+		return fmt.Errorf("%w: %s (отчёт — завершением интервью)", ErrIllegalStage, to)
+	}
+	for _, st := range stagesForTrack(track, grade) {
+		if st == to {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %s", ErrStageNotInScope, to)
+}
+
 // statusTransitions — допустимые переходы статусов.
 var statusTransitions = map[models.Status]map[models.Status]bool{
 	models.StatusActive:   {models.StatusPaused: true, models.StatusFinished: true, models.StatusAborted: true},

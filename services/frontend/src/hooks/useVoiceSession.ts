@@ -50,6 +50,8 @@ export function useVoiceSession(id: number) {
   const [board, setBoard] = useState<BoardStageInfo | null>(null);
   // Метаданные трека (spec-18): некодовый трек — голос → доска, без Live-Code.
   const [trackMeta, setTrackMeta] = useState<TrackStageMeta | null>(null);
+  // Отладка стадий на сервере (ENABLE_DEBUG=1): stage-сообщение приносит debug=true.
+  const [stageDebug, setStageDebug] = useState(false);
   // Задачи стадии Live-Code (spec-13B T2): tasks из stage-сообщения; task = tasks[0] (совместимость).
   const [tasks, setTasks] = useState<StageTask[]>([]);
   const [remainingS, setRemainingS] = useState<number | null>(null);
@@ -191,6 +193,7 @@ export function useVoiceSession(id: number) {
             stageRef.current = m.name;
             setBoard(m.board ?? null);
             setTrackMeta(m.track ?? null);
+            setStageDebug(m.debug === true);
             {
               const list = m.tasks ?? (m.task ? [m.task] : []);
               setTasks(list);
@@ -627,6 +630,7 @@ export function useVoiceSession(id: number) {
     speaking,
     wsState,
     error,
+    stageDebug,
     micLevelRef,
     live,
     paused,

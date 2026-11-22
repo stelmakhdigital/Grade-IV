@@ -476,6 +476,9 @@ func (e *Engine) ResendStage(id int64) {
 	rt.connMu.Lock()
 	stage := rt.stage
 	msg := map[string]any{"type": "stage", "name": stage, "task": nil}
+	if e.debugStages {
+		msg["debug"] = true // UI показывает переключатель стадий (dev)
+	}
 	if tm := trackStageMeta(rt.track, rt.grade); tm != nil {
 		msg["track"] = tm
 	}
@@ -489,6 +492,7 @@ func (e *Engine) ResendStage(id int64) {
 }
 
 // Transition — смена стадии (валидация машиной состояний, с учётом программы грейда).
+// С e.debugStages (ENABLE_DEBUG=1) допускается прыжок на любую стадию программы роли.
 func (e *Engine) Transition(id int64, to models.Stage) (*Snapshot, error) {
 	rt := e.rt(id)
 	if rt == nil {
@@ -502,8 +506,10 @@ func (e *Engine) Transition(id int64, to models.Stage) (*Snapshot, error) {
 		return nil, fmt.Errorf("%w: %s (стадия %s)", ErrSessionEnded, cur, from)
 	}
 	if err := CanTransitionStage(rt.track, rt.grade, rt.stage, to); err != nil {
-		rt.connMu.Unlock()
-		return nil, err
+		if !e.debugStages || CanJumpStageDebug(rt.track, rt.grade, to) != nil {
+			rt.connMu.Unlock()
+			return nil, err
+		}
 	}
 	from := rt.stage
 	rt.stage = to
@@ -518,6 +524,9 @@ func (e *Engine) Transition(id int64, to models.Stage) (*Snapshot, error) {
 		return e.finish(id, true, "stage_report")
 	}
 	msg := map[string]any{"type": "stage", "name": to, "task": nil}
+	if e.debugStages {
+		msg["debug"] = true // UI показывает переключатель стадий (dev)
+	}
 	// spec-18/Ф3: конфиг доски идёт в stage-сообщении (палитра/заголовок/кейс).
 	if to == models.StageDesign {
 		if b := boardStagePayload(rt.track, rt.grade); b != nil {

@@ -45,6 +45,7 @@ export function SessionView({ id }: { id: number }) {
     micDbg,
     speaking,    wsState,
     error,
+    stageDebug,
     micLevelRef,
     live,
     paused,
@@ -241,6 +242,33 @@ export function SessionView({ id }: { id: number }) {
               </span>
             )}
           </div>
+
+          {/* Отладка стадий (dev: ENABLE_DEBUG=1 на api). Переключатель даёт
+              любую стадию программы роли — не нужно каждый раз прогонять
+              интервью с начала, чтобы попасть на доску или практику. */}
+          {stageDebug && (
+            <div
+              className="stage-debug"
+              role="group"
+              aria-label="Отладка стадий"
+              data-testid="stage-debug"
+            >
+              <span className="muted small">отладка: перейти к</span>
+              {(trackMeta?.stages ?? ['voice', 'livecode', 'design'])
+                .filter((s) => s !== 'report' && s !== stage)
+                .map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className="btn ghost small"
+                    onClick={() => onStageAction(s)}
+                    data-testid={`debug-stage-${s}`}
+                  >
+                    {stageLabel(s)}
+                  </button>
+                ))}
+            </div>
+          )}
 
           {/* spec-21 (CoderPad: честное предупреждение о десктопе): на узких
               экранах практика/доска тесны — подсказка видна только на мобиле. */}

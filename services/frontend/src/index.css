@@ -700,6 +700,19 @@ p {
   margin-top: 14px;
 }
 
+/* Отладка стадий (dev: ENABLE_DEBUG=1 на api) — видно только когда сервер
+   прислал debug=true; в prod блока нет. */
+.stage-debug {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px dashed #3a465c;
+  border-radius: 8px;
+}
+
 .btn.danger {
   background: #e06c75;
   border-color: #e06c75;

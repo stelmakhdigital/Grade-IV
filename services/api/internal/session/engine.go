@@ -77,6 +77,9 @@ type Engine struct {
 	now           func() time.Time
 	pauseTimeout  time.Duration
 	sessionLimitS int // SESSION_LIMIT_S: >0 фикс., <0 без лимита, 0 по грейду
+	// debugStages (ENABLE_DEBUG=1): Transition разрешает прыжок на ЛЮБУЮ стадию
+	// программы роли — dev-отладка, чтобы не проходить интервью с начала.
+	debugStages bool
 
 	mu   sync.Mutex
 	rts  map[int64]*runtime
@@ -116,6 +119,10 @@ type TrackResolver func(trackID string) (*models.Track, error)
 
 // WithTracks — резолвер треков (spec-18).
 func WithTracks(r TrackResolver) Opt { return func(e *Engine) { e.tracks = r } }
+
+// WithDebugStages — отладка стадий (dev, ENABLE_DEBUG=1): переход на любую
+// стадию программы роли, минуя правило «шаг ±1» (see CanJumpStageDebug).
+func WithDebugStages() Opt { return func(e *Engine) { e.debugStages = true } }
 
 // trackStageMeta — метаданные трека в stage-сообщении (spec-18): UI строит
 // навигацию стадий (некодовый трек: голос → доска, без Live-Code). nil-трек —

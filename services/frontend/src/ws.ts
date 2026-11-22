@@ -41,6 +41,8 @@ export type WsMessage =
       tasks?: StageTask[];
       board?: BoardStageInfo | null;
       track?: TrackStageMeta | null;
+      /** Отладка стадий на сервере (ENABLE_DEBUG=1): UI показывает переключатель. */
+      debug?: boolean;
     }
   | { type: 'timer'; remaining_s: number }
   | { type: 'ai_text'; text: string }

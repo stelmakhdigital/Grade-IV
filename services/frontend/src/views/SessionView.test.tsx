@@ -426,6 +426,46 @@ describe('SessionView (WP-8)', () => {
     });
   }, 10000);
 
+  it('отладка стадий: переключатель появляется с debug в stage-сообщении', async () => {
+    vi.stubGlobal('fetch', mockApi());
+    // Без флага (prod) блока нет — переключателя стадий кандидат не видит.
+    hookMock.fake = fakeVoiceSession(null);
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    await screen.findByTestId('mic-toggle');
+    expect(screen.queryByTestId('stage-debug')).toBeNull();
+    cleanup();
+
+    const onStageAction = vi.fn();
+    hookMock.fake = {
+      ...fakeVoiceSession(null),
+      stageDebug: true,
+      trackMeta: {
+        id: 'dev',
+        title: 'Разработчик',
+        practice: { runtime: 'go' },
+        stages: ['voice', 'livecode', 'design', 'report'],
+      },
+      onStageAction,
+    };
+    render(
+      <AuthProvider>
+        <SessionView id={9} />
+      </AuthProvider>,
+    );
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId('debug-stage-design'));
+    expect(onStageAction).toHaveBeenCalledWith('design');
+    // Текущая стадия (voice) и report (необратимое завершение) не предлагаются.
+    expect(screen.queryByTestId('debug-stage-voice')).toBeNull();
+    expect(screen.queryByTestId('debug-stage-report')).toBeNull();
+    cleanup();
+    hookMock.fake = null;
+  }, 10000);
+
   it('mic-dbg (dev): строка статистики рендерится при micDbg.chunks > 0', async () => {
     vi.stubEnv('VITE_MIC_DEBUG', 'true');
     vi.stubGlobal('fetch', mockApi());
