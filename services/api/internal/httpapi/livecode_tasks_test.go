@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -197,4 +199,213 @@ func TestEnterLiveCodeSelection(t *testing.T) {
 			t.Fatalf("seed=1: разные списки: %v vs %v", first, second)
 		}
 	}
+}
+
+// bankTask — задача банка sandbox с явными стеком, грейдом и файлами.
+func bankTask(id, stack, grade string, files map[string]string) map[string]any {
+	return map[string]any{
+		"id": id, "stack": stack, "grades": []string{grade},
+		"title": "Задача " + id, "statement": "Условие " + id, "files": files,
+	}
+}
+
+// bankProbe — какие stack были запрошены у mock-банка.
+type bankProbe struct {
+	mu     sync.Mutex
+	stacks []string
+}
+
+func (p *bankProbe) add(stack string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stacks = append(p.stacks, stack)
+}
+
+func (p *bankProbe) all() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.stacks...)
+}
+
+// sandboxBankHandler — mock sandbox GET /api/v1/tasks с семантикой Bank.List
+// (services/sandbox/internal/tasks/tasks.go): пустой stack снимает фильтр по
+// стеку, то есть отдаёт задачи всех стеков.
+func sandboxBankHandler(bank []map[string]any, probe *bankProbe) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		stack, grade := r.URL.Query().Get("stack"), r.URL.Query().Get("grade")
+		probe.add(stack)
+		out := []map[string]any{}
+		for _, t := range bank {
+			if stack != "" && t["stack"] != stack {
+				continue
+			}
+			for _, g := range t["grades"].([]string) {
+				if g == grade {
+					out = append(out, t)
+					break
+				}
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
+	}
+}
+
+// TestSanitizeTasksGraderFiles — issue #3: файлы градатора вырезаются по всем
+// маскам рантаймов сразу: стек стадии может не совпасть со стеком задачи.
+func TestSanitizeTasksGraderFiles(t *testing.T) {
+	got := sanitizeTasks([]liveCodeTask{{ID: "x", Files: map[string]string{
+		"solution.go": "package main\n", "solution_test.go": "package main\n",
+		"solution.py": "x = 1\n", "test_solution.py": "def t():\n",
+		"solution_test.py": "def t():\n", "solution.sh": "#!/bin/sh\n",
+		"check.sh": "#!/bin/sh\n", "access.log": "1.2.3.4\n",
+	}}})
+	want := []string{"access.log", "solution.go", "solution.py", "solution.sh"}
+	if len(got[0].Files) != len(want) {
+		t.Fatalf("файлы: %v, want %v", got[0].Files, want)
+	}
+	for _, name := range want {
+		if _, ok := got[0].Files[name]; !ok {
+			t.Fatalf("нет %s: %v", name, got[0].Files)
+		}
+	}
+}
+
+// TestEnterLiveCodeEmptySessionStack — issue #3: legacy-сессия (пустой stack в БД,
+// роль sysadmin с практикой shell). Оба пула берутся по стеку роли; stretch не
+// уходит в банк без фильтра (иначе senior-задачи go/python с открытыми тестами
+// градатора приходят кандидату).
+func TestEnterLiveCodeEmptySessionStack(t *testing.T) {
+	t.Setenv("LIVECODE_TASK_SEED", "1")
+	bank := []map[string]any{
+		bankTask("shell-m1", "shell", "middle", map[string]string{"solution.sh": "#!/bin/sh\n"}),
+		bankTask("shell-m2", "shell", "middle", map[string]string{"solution.sh": "#!/bin/sh\n"}),
+		bankTask("shell-m3", "shell", "middle", map[string]string{"solution.sh": "#!/bin/sh\n"}),
+		bankTask("shell-s1", "shell", "senior", map[string]string{"solution.sh": "#!/bin/sh\n"}),
+		// senior-чужих стеков: попадают в выдачу только при запросе stack=''.
+		bankTask("go-s1", "go", "senior", map[string]string{
+			"solution.go": "package main\n", "solution_test.go": "package main\n",
+		}),
+		bankTask("py-s1", "python", "senior", map[string]string{
+			"solution.py": "x = 1\n", "test_solution.py": "def test_x():\n",
+		}),
+	}
+	probe := &bankProbe{}
+	e := newRunsEnv(t, sandboxBankHandler(bank, probe))
+
+	ctx := context.Background()
+	u, err := e.server.users.GetUserByEmail(ctx, "runs@example.com")
+	if err != nil {
+		t.Fatalf("user: %v", err)
+	}
+	legacy, err := e.server.sessions.Create(ctx, models.Session{
+		UserID: u.ID, Grade: models.GradeMiddle, Stack: "", Stage: models.StageVoice,
+		Status: models.StatusActive, DurationLimitS: 2700, StartedAt: time.Now(),
+		TrackID: "sysadmin",
+	})
+	if err != nil {
+		t.Fatalf("legacy session: %v", err)
+	}
+	e.session = legacy.ID
+
+	conn := dialWS(t, e.ts, e.token, e.session)
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	_ = wsReadTypes(t, conn, 2, 3*time.Second)
+	wsWriteJSON(t, conn, map[string]any{"type": "ui", "name": "stage_action",
+		"payload": map[string]string{"stage": "livecode"}})
+	raw := wsReadRaw(t, conn, 3, 5*time.Second)
+
+	var tasks []any
+	for _, b := range raw {
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err == nil && m["type"] == "stage" && m["tasks"] != nil {
+			tasks, _ = m["tasks"].([]any)
+		}
+	}
+	if len(tasks) == 0 {
+		t.Fatalf("нет stage-сообщения с tasks: %s", raw[0])
+	}
+	for _, item := range tasks {
+		tm, _ := item.(map[string]any)
+		id := fmt.Sprint(tm["id"])
+		if !strings.HasPrefix(id, "shell-") {
+			t.Fatalf("задача чужого стека (stack='' ушла в банк): %v", idsFromMsg(tasks))
+		}
+		files, _ := tm["files"].(map[string]any)
+		for name := range files {
+			if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, "_test.py") ||
+				strings.HasPrefix(name, "test_") || name == "check.sh" {
+				t.Fatalf("файл градатора ушёл кандидату (%s): %s", id, name)
+			}
+		}
+	}
+	// stretch middle→senior жив: последняя задача — из shell senior-пула.
+	last := tasks[len(tasks)-1].(map[string]any)
+	if got := fmt.Sprint(last["id"]); got != "shell-s1" {
+		t.Fatalf("stretch: %s, want shell-s1 (все: %v)", got, idsFromMsg(tasks))
+	}
+	// В банк не уходило ни одного запроса без фильтра по стеку.
+	for _, stack := range probe.all() {
+		if stack == "" {
+			t.Fatalf("запрос к банку без стека: %v", probe.all())
+		}
+	}
+}
+
+// TestEnterLiveCodeUnknownRole — Stack сессии пуст и роль не найдена (роль
+// убрали из файла / подменили ROLE_TRACKS_FILE): задачи не берутся вообще,
+// запроса в банк без стека нет.
+func TestEnterLiveCodeUnknownRole(t *testing.T) {
+	probe := &bankProbe{}
+	e := newRunsEnv(t, sandboxBankHandler([]map[string]any{
+		bankTask("go-m1", "go", "middle", map[string]string{"solution.go": "package main\n"}),
+	}, probe))
+
+	ctx := context.Background()
+	u, err := e.server.users.GetUserByEmail(ctx, "runs@example.com")
+	if err != nil {
+		t.Fatalf("user: %v", err)
+	}
+	sess, err := e.server.sessions.Create(ctx, models.Session{
+		UserID: u.ID, Grade: models.GradeMiddle, Stack: "", Stage: models.StageVoice,
+		Status: models.StatusActive, DurationLimitS: 2700, StartedAt: time.Now(),
+		TrackID: "no-such-role",
+	})
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	e.session = sess.ID
+
+	conn := dialWS(t, e.ts, e.token, e.session)
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	_ = wsReadTypes(t, conn, 2, 3*time.Second)
+	wsWriteJSON(t, conn, map[string]any{"type": "ui", "name": "stage_action",
+		"payload": map[string]string{"stage": "livecode"}})
+	// Сообщений меньше трёх (stage с задачами нет) — читаем до таймаута.
+	ctxRead, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	for {
+		_, b, err := conn.Read(ctxRead)
+		if err != nil {
+			break
+		}
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err == nil && m["type"] == "stage" && m["tasks"] != nil {
+			t.Fatalf("задачи отданы при неизвестной роли: %v", m["tasks"])
+		}
+	}
+	for _, stack := range probe.all() {
+		if stack == "" {
+			t.Fatalf("запрос к банку без стека: %v", probe.all())
+		}
+	}
+}
+
+func idsFromMsg(list []any) []string {
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		tm, _ := item.(map[string]any)
+		out = append(out, fmt.Sprint(tm["id"]))
+	}
+	return out
 }
