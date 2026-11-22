@@ -280,4 +280,22 @@ func TestSlugifyTrackCyrillic(t *testing.T) {
 	if s := slugifyTrack("Data Engineer"); s != "data-engineer" {
 		t.Fatalf("latin slug: %q", s)
 	}
+
+	// Issue #2: длинные транслиты («ш» → sh, «щ» → shch) давали id 33–35 байт,
+	// POST /admin/tracks/generate отвечал 502 llm_bad_json.
+	long := "Старший инженер по автоматизации"
+	slug := slugifyTrack(long)
+	tk := models.Track{
+		ID:       slug,
+		Title:    long,
+		Grades:   []models.Grade{models.GradeSenior},
+		Criteria: []models.TrackCriterion{{Name: "Код", Weight: 1}},
+		Board: models.BoardConfig{
+			Title:  "Схема",
+			Groups: []models.BlockGroup{{Title: "Блоки", Names: []string{"Модуль"}}},
+		},
+	}
+	if err := tk.Validate(); err != nil {
+		t.Fatalf("validate %q: %v", slug, err)
+	}
 }

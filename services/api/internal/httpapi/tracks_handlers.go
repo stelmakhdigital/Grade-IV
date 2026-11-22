@@ -326,11 +326,13 @@ func slugifyTrack(title string) string {
 				b.WriteString(tr)
 			}
 		}
-		if b.Len() >= 32 {
-			break
-		}
 	}
+	// Обрезка строго после Trim: транслит («ш» → sh, «щ» → shch) длиной до 4 байт
+	// иначе вылезал за 32, и черновик не проходил trackIDRe в Track.Validate.
 	out := strings.Trim(b.String(), "-")
+	if len(out) > 32 {
+		out = strings.Trim(out[:32], "-")
+	}
 	if out == "" {
 		out = "role"
 	}
