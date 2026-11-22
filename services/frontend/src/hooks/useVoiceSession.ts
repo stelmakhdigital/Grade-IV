@@ -38,6 +38,9 @@ export interface Line {
 let lineSeq = 0;
 const nextLineId = () => ++lineSeq;
 
+// Сколько висит info-предупреждение (переход на резервный захват и т.п.).
+const INFO_HIDE_MS = 8000;
+
 export function useVoiceSession(id: number) {
   const [session, setSession] = useState<Session | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
@@ -93,6 +96,14 @@ export function useVoiceSession(id: number) {
   }, [speaking]);
   // Микрофон был включён до паузы — при «Продолжить» пытаемся вернуть захват.
   const micBeforePauseRef = useRef(false);
+  // Таймер автоскрытия info-предупреждения (снимается при размонтировании).
+  const infoTimerRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (infoTimerRef.current !== null) window.clearTimeout(infoTimerRef.current);
+    },
+    [],
+  );
 
   // spec-14/D1: latest-value рефes для WS-колбэков (замыкание reconnect-цикла
   // живёт между рендерами — статус/пауза должны читаться актуальными).
@@ -398,8 +409,19 @@ export function useVoiceSession(id: number) {
       },
       onState: (s) => setMic(s),
       onError: (msg) => setError(msg),
-      // info-сообщения (fallback-захват и т.п.) — в строку статуса/ошибки.
-      onInfo: (msg) => setError(msg),
+      // info-сообщения (переход на резервный захват и т.п.) — в строку статуса,
+      // но сами гаснут через INFO_HIDE_MS: это временное предупреждение, а не
+      // состояние ошибки (фидбек 2026-11-22: блок висел до конца сессии).
+      // Настоящие onError автоскрытия не получают.
+      onInfo: (msg) => {
+        setError(msg);
+        if (infoTimerRef.current !== null) window.clearTimeout(infoTimerRef.current);
+        infoTimerRef.current = window.setTimeout(() => {
+          infoTimerRef.current = null;
+          // Убираем, только если в строке до сих пор это же сообщение.
+          setError((cur) => (cur === msg ? null : cur));
+        }, INFO_HIDE_MS);
+      },
     });
   };
 

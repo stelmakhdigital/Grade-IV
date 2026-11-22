@@ -453,7 +453,7 @@ export function SessionView({ id }: { id: number }) {
                 />
                 <button
                   type="button"
-                  className="btn ghost small"
+                  className="btn ghost"
                   onClick={submitTypedAnswer}
                   disabled={
                     waitingForAI || wsState !== 'open' || typedAnswer.trim() === ''

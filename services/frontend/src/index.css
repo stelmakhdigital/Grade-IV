@@ -416,6 +416,21 @@ p {
   margin-bottom: 1px;
 }
 
+/* «Новое интервью» (фидбек 2026-11-22): кнопка «Резюме» — той же ширины, что
+   селекты рядом (поле подписано сверху, как остальные). */
+.resume-field .btn {
+  width: 100%;
+}
+
+/* Служебный текст — своими строками на всю ширину, а не втиснутый в ряд
+   контролов (иначе ряд рвётся, и высоты/базовые линии не сходятся). */
+.resume-state,
+.start-brief,
+.start-form .form-error {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
 .sessions-table {
   width: 100%;
   border-collapse: collapse;
@@ -574,7 +589,16 @@ p {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  align-items: flex-end;
+  /* Кнопки одной ширины (по самой широкой), а не «каждая своя» (фидбек
+     2026-11-22). max-width держит ряд стабильным, когда «Завершить интервью»
+     переходит в двухстрочное подтверждение. */
+  align-items: stretch;
+  min-width: 190px;
+  max-width: 230px;
+}
+
+.session-head .head-actions .btn {
+  text-align: center;
 }
 
 .voice-panel .voice-status {
@@ -680,12 +704,13 @@ p {
 .text-answer {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 7px 10px;
+  /* высота как у кнопок рядом: тот же кегль и те же вертикальные отступы */
+  font-size: 14px;
+  padding: 8px 10px;
   border: 1px solid #2a3140;
   border-radius: 8px;
   background: #0b0e14;
   color: #d6dbe5;
-  font: inherit;
 }
 .text-answer::placeholder {
   color: #6b7280;
@@ -1303,6 +1328,12 @@ a:focus-visible {
 @media (max-width: 720px) {
   .app {
     padding: 20px 12px;
+  }
+  /* На узком экране заголовку нужнее ширина: ряд кнопок сессии не держим
+     минимальными 190 px (десктопное правило выше). */
+  .session-head .head-actions {
+    min-width: 0;
+    max-width: none;
   }
   .app h1 {
     font-size: 24px;
