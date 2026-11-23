@@ -36,12 +36,13 @@ func TestSandboxDockerProbe(t *testing.T) {
 	r := New(Config{Mode: "docker", Timeout: 120 * time.Second, Images: envImages()})
 
 	// 1. go-pass: тесты проходят, сеть отключена (dial наружу падает).
+	// Тест — доверенный файл (из банка), решение — файл кандидата.
 	goFiles := map[string]string{
-		"go.mod":      "module task\n\ngo 1.21\n",
-		"main.go":     "package main\n\nfunc main() {}\n",
-		"net_test.go": "package main\n\nimport (\n\t\"net\"\n\t\"testing\"\n\t\"time\"\n)\n\n// TestNoNetwork доказывает --network=none: внешний dial обязан упасть.\nfunc TestNoNetwork(t *testing.T) {\n\tc, err := net.DialTimeout(\"tcp\", \"1.1.1.1:443\", 2*time.Second)\n\tif err == nil {\n\t\tc.Close()\n\t\tt.Fatal(\"сеть доступна — --network=none не работает\")\n\t}\n}\n",
+		"go.mod":  "module task\n\ngo 1.21\n",
+		"main.go": "package main\n\nfunc main() {}\n",
 	}
-	res, err := r.Run(t.Context(), "go", goFiles)
+	goTrusted := map[string]string{"net_test.go": "package main\n\nimport (\n\t\"net\"\n\t\"testing\"\n\t\"time\"\n)\n\n// TestNoNetwork доказывает --network=none: внешний dial обязан упасть.\nfunc TestNoNetwork(t *testing.T) {\n\tc, err := net.DialTimeout(\"tcp\", \"1.1.1.1:443\", 2*time.Second)\n\tif err == nil {\n\t\tc.Close()\n\t\tt.Fatal(\"сеть доступна — --network=none не работает\")\n\t}\n}\n"}
+	res, err := r.Run(t.Context(), "go", goFiles, goTrusted)
 	if err != nil {
 		t.Fatalf("go-pass: %v", err)
 	}
@@ -59,10 +60,10 @@ func TestSandboxDockerProbe(t *testing.T) {
 	}
 	t.Logf("go-pass: OK (network=none подтверждён), dur=%d мс", res.DurationMS)
 
-	// 2. py-pass: pytest проходит.
-	res, err = r.Run(t.Context(), "python", map[string]string{
-		"test_ok.py": "def test_ok():\n    assert 1 + 1 == 2\n",
-	})
+	// 2. py-pass: pytest проходит (тест — доверенный файл банка).
+	res, err = r.Run(t.Context(), "python",
+		map[string]string{"solution.py": "def ok():\n    return True\n"},
+		map[string]string{"test_ok.py": "from solution import ok\n\ndef test_ok():\n    assert ok()\n"})
 	if err != nil {
 		t.Fatalf("py-pass: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestSandboxDockerProbe(t *testing.T) {
 			"python": `python3 -c 'x = [b"a" * (1 << 20) for _ in range(2048)]'`,
 		},
 	})
-	res, err = rOOM.Run(t.Context(), "python", map[string]string{"dummy.txt": "x"})
+	res, err = rOOM.Run(t.Context(), "python", map[string]string{"dummy.txt": "x"}, nil)
 	if err != nil {
 		t.Fatalf("py-oom: %v", err)
 	}

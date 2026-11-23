@@ -12,8 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path"
-	"strings"
 	"syscall"
 	"time"
 
@@ -81,30 +79,31 @@ func handleRun(mode string, bank *tasks.Bank, rn *runner.Runner, log *slog.Logge
 			return
 		}
 		files := req.Files
+		var trusted map[string]string
 		if req.TaskID != "" {
 			task, ok := bank.Get(req.TaskID)
 			if !ok {
 				writeJSON(w, http.StatusBadRequest, errBody("unknown_task", "задача не найдена в банке: "+req.TaskID))
 				return
 			}
-			// Доверенность тестов (TEST_PLAN §4.4): кандидату видны тесты задачи
-			// (MVP-ограничение), но исполняются ТОЛЬКО тесты банка — «трояны»
-			// в поданных *_test.go / test_*.py игнорируются (замена на банк).
-			merged := make(map[string]string, len(files)+len(task.Files))
-			for k, v := range files {
-				merged[k] = v
-			}
+			// Доверенность тестов (TEST_PLAN §4.4): исполняются ТОЛЬКО файлы банка —
+			// «трояны» в поданных *_test.go / test_*.py / check.sh игнорируются.
+			// Файлы банка идут отдельным аргументом (BUG-20261122-033): в общий
+			// каталог с кодом кандидата их класть нельзя — оттуда их читают и
+			// переписывают из решения.
 			for name, content := range task.Files {
-				if isTaskTestFile(name, task.Stack) {
-					merged[name] = content
+				if tasks.IsGraderFile(name, task.Stack) {
+					if trusted == nil {
+						trusted = map[string]string{}
+					}
+					trusted[name] = content
 				}
 			}
-			files = merged
 			log.Info("run: тесты подставлены из банка (доверенность тестов)",
 				"session", sessionID, "task", task.ID)
 		}
 		log.Info("run", "session", sessionID, "stack", req.Stack, "task", req.TaskID, "mode", mode)
-		res, err := rn.Run(r.Context(), req.Stack, files)
+		res, err := rn.Run(r.Context(), req.Stack, files, trusted)
 		if err != nil {
 			switch {
 			case errors.Is(err, runner.ErrUnsupportedStack),
@@ -120,23 +119,6 @@ func handleRun(mode string, bank *tasks.Bank, rn *runner.Runner, log *slog.Logge
 			return
 		}
 		writeJSON(w, http.StatusOK, res)
-	}
-}
-
-// isTaskTestFile — имя файла с тестами задачи (go: *_test.go, python: test_*.py / *_test.py).
-func isTaskTestFile(name, stack string) bool {
-	switch stack {
-	case "go":
-		return strings.HasSuffix(name, "_test.go")
-	case "python":
-		base := path.Base(name)
-		return strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py")
-	case "shell":
-		// spec-19: чек-скрипт банка — доверенный (кандидат правит только
-		// solution.sh; подмена check.sh из запроса игнорируется).
-		return name == "check.sh"
-	default:
-		return false
 	}
 }
 

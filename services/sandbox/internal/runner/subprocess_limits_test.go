@@ -27,7 +27,7 @@ func TestSubprocessMemoryLimit(t *testing.T) {
 		Commands: map[string]string{"python": `python3 -c 'x = [b"a" * (1 << 20) for _ in range(2048)]'`},
 	})
 	start := time.Now()
-	res, err := r.Run(t.Context(), "python", map[string]string{"dummy.txt": "x"})
+	res, err := r.Run(t.Context(), "python", map[string]string{"dummy.txt": "x"}, nil)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestSubprocessCPULimit(t *testing.T) {
 		Commands: map[string]string{"python": "python3 -c 'while True: pass'"},
 	})
 	start := time.Now()
-	res, err := r.Run(t.Context(), "python", map[string]string{"dummy.txt": "x"})
+	res, err := r.Run(t.Context(), "python", map[string]string{"dummy.txt": "x"}, nil)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -117,7 +117,17 @@ func TestBankSubprocessRegression(t *testing.T) {
 	t.Logf("банк: %d задач (go=%d, python=%d)", len(tasksList), goN, pyN)
 	r := New(Config{Mode: "subprocess"})
 	for _, task := range tasksList {
-		res, err := r.Run(t.Context(), task.Stack, task.Files)
+		// Как в handleRun: файлы кандидата и файлы градатора раздельно
+		// (BUG-20261122-033).
+		files, trusted := map[string]string{}, map[string]string{}
+		for name, content := range task.Files {
+			if tasks.IsGraderFile(name, task.Stack) {
+				trusted[name] = content
+			} else {
+				files[name] = content
+			}
+		}
+		res, err := r.Run(t.Context(), task.Stack, files, trusted)
 		if err != nil {
 			t.Fatalf("%s: run: %v", task.ID, err)
 		}

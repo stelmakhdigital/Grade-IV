@@ -15,10 +15,11 @@ import (
 	"time"
 )
 
-// sumTaskFiles — задача shell-sum-avg: решение кандидата + чек-скрипт банка.
-func sumTaskFiles(solution string) map[string]string {
-	return map[string]string{
-		"solution.sh": solution,
+// sumTaskFiles — задача shell-sum-avg: возвращает решение кандидата и
+// чек-скрипт банка раздельно (BUG-20261122-033: градатор не лежит в одном
+// каталоге с кодом кандидата).
+func sumTaskFiles(solution string) (map[string]string, map[string]string) {
+	return map[string]string{"solution.sh": solution}, map[string]string{
 		"check.sh": `#!/usr/bin/env bash
 set -u
 fail() { echo "FAIL: $1" >&2; exit 1; }
@@ -37,8 +38,9 @@ func TestShellSubprocessRun(t *testing.T) {
 		t.Skip("shell-проба (не -short)")
 	}
 	r := New(Config{Mode: "subprocess", Timeout: 30 * time.Second})
-	res, err := r.Run(context.Background(), "shell", sumTaskFiles(
-		"#!/usr/bin/env bash\nsum=0; n=0\nwhile read -r line; do\n  for x in $line; do sum=$((sum + x)); n=$((n + 1)); done\ndone\necho \"sum=$sum\"\necho \"avg=$((sum / n))\"\n"))
+	files, trusted := sumTaskFiles(
+		"#!/usr/bin/env bash\nsum=0; n=0\nwhile read -r line; do\n  for x in $line; do sum=$((sum + x)); n=$((n + 1)); done\ndone\necho \"sum=$sum\"\necho \"avg=$((sum / n))\"\n")
+	res, err := r.Run(context.Background(), "shell", files, trusted)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -60,8 +62,8 @@ func TestShellSubprocessFail(t *testing.T) {
 		t.Skip("shell-проба (не -short)")
 	}
 	r := New(Config{Mode: "subprocess", Timeout: 30 * time.Second})
-	res, err := r.Run(context.Background(), "shell", sumTaskFiles(
-		"#!/usr/bin/env bash\necho \"sum=42\"\n"))
+	files, trusted := sumTaskFiles("#!/usr/bin/env bash\necho \"sum=42\"\n")
+	res, err := r.Run(context.Background(), "shell", files, trusted)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -86,10 +88,9 @@ func TestShellForkBombGroupKill(t *testing.T) {
 	baseline := countSleepProcs(t)
 	r := New(Config{Mode: "subprocess", Timeout: 5 * time.Second})
 	start := time.Now()
-	res, err := r.Run(context.Background(), "shell", map[string]string{
-		"solution.sh": "#!/usr/bin/env bash\nfor i in $(seq 1 300); do sleep 30 & done\nwait\n",
-		"check.sh":    "#!/usr/bin/env bash\nbash solution.sh\n",
-	})
+	res, err := r.Run(context.Background(), "shell",
+		map[string]string{"solution.sh": "#!/usr/bin/env bash\nfor i in $(seq 1 300); do sleep 30 & done\nwait\n"},
+		map[string]string{"check.sh": "#!/usr/bin/env bash\nbash solution.sh\n"})
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -152,11 +153,10 @@ func TestShellDockerForkBomb(t *testing.T) {
 	}
 	r := New(Config{Mode: "docker", Timeout: 20 * time.Second})
 	start := time.Now()
-	res, err := r.Run(context.Background(), "shell", map[string]string{
-		// Классическая бомба: каждая вызывавшая функция плодит двух детей.
-		"solution.sh": "#!/usr/bin/env bash\nb(){ b | b & }; b\n",
-		"check.sh":    "#!/usr/bin/env bash\nbash solution.sh\necho OK\n",
-	})
+	// Классическая бомба: каждая вызывавшая функция плодит двух детей.
+	res, err := r.Run(context.Background(), "shell",
+		map[string]string{"solution.sh": "#!/usr/bin/env bash\nb(){ b | b & }; b\n"},
+		map[string]string{"check.sh": "#!/usr/bin/env bash\nbash solution.sh\necho OK\n"})
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -192,8 +192,9 @@ func TestShellDockerRun(t *testing.T) {
 		t.Skipf("docker-демон недоступен: %v (%s)", err, out)
 	}
 	r := New(Config{Mode: "docker", Timeout: 60 * time.Second})
-	res, err := r.Run(context.Background(), "shell", sumTaskFiles(
-		"#!/usr/bin/env bash\nsum=0; n=0\nwhile read -r line; do\n  for x in $line; do sum=$((sum + x)); n=$((n + 1)); done\ndone\necho \"sum=$sum\"\necho \"avg=$((sum / n))\"\n"))
+	files, trusted := sumTaskFiles(
+		"#!/usr/bin/env bash\nsum=0; n=0\nwhile read -r line; do\n  for x in $line; do sum=$((sum + x)); n=$((n + 1)); done\ndone\necho \"sum=$sum\"\necho \"avg=$((sum / n))\"\n")
+	res, err := r.Run(context.Background(), "shell", files, trusted)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

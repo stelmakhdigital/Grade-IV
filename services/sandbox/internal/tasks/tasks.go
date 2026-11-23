@@ -7,6 +7,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"path"
+	"strings"
 	"sync"
 )
 
@@ -96,4 +98,24 @@ func (b *Bank) Count() int {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return len(b.tasks)
+}
+
+// IsGraderFile — файл градатора задачи (доверенный): его нельзя отдавать
+// кандидату ни в редактор, ни в рабочий каталог прогона (BUG-20261104-027 —
+// граница WS, BUG-20261122-033 — граница песочницы).
+// go: *_test.go, python: test_*.py / *_test.py, shell: check.sh.
+func IsGraderFile(name, stack string) bool {
+	switch stack {
+	case "go":
+		return strings.HasSuffix(name, "_test.go")
+	case "python":
+		base := path.Base(name)
+		return strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py")
+	case "shell":
+		// spec-19: чек-скрипт банка — доверенный (кандидат правит только
+		// solution.sh; подмена check.sh из запроса игнорируется).
+		return name == "check.sh"
+	default:
+		return false
+	}
 }

@@ -22,7 +22,7 @@ func TestSandboxProbeInfiniteLoop(t *testing.T) {
 		Commands: map[string]string{"go": "python3 -c 'import time\nwhile True: time.sleep(1)'"},
 	})
 	start := time.Now()
-	res, err := r.Run(t.Context(), "go", map[string]string{"dummy.txt": "x"})
+	res, err := r.Run(t.Context(), "go", map[string]string{"dummy.txt": "x"}, nil)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestSandboxProbeMemoryBomb(t *testing.T) {
 		Timeout:  8 * time.Second,
 		Commands: map[string]string{"go": "python3 -c 'x = [b\"a\" * (1 << 20) for _ in range(2048)]'"},
 	})
-	res, err := r.Run(t.Context(), "go", map[string]string{"dummy.txt": "x"})
+	res, err := r.Run(t.Context(), "go", map[string]string{"dummy.txt": "x"}, nil)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestSandboxProbeOutputFlood(t *testing.T) {
 		MaxBytes: 1024,
 		Commands: map[string]string{"go": "python3 -c 'print(\"x\" * 100000)'"},
 	})
-	res, err := r.Run(t.Context(), "go", map[string]string{"dummy.txt": "x"})
+	res, err := r.Run(t.Context(), "go", map[string]string{"dummy.txt": "x"}, nil)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestSandboxProbeWorkDirIsolation(t *testing.T) {
 		WorkDirBase: base,
 		Commands:    map[string]string{"go": "python3 -c 'import os;print(os.environ.get(\"PWD\",\"?\"))'"},
 	})
-	res, err := r.Run(t.Context(), "go", map[string]string{"dummy.txt": "x"})
+	res, err := r.Run(t.Context(), "go", map[string]string{"dummy.txt": "x"}, nil)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}

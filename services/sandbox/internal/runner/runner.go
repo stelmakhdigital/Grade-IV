@@ -80,9 +80,10 @@ type Config struct {
 	MaxBytes int
 	// Images: stack → docker-образ (по умолчанию golang:1.24 / python:3.12-slim).
 	Images map[string]string
-	// Commands: stack → команда тестов в subprocess-режиме
-	// (по умолчанию: go — "go test -count=1 -json ./...", python — "python3 -m pytest -q").
+	// Commands: stack → команда тестов (по умолчанию — см. New).
 	// Тестируется подменой на произвольные команды.
+	// В команде %GRADER% раскрывается в каталог доверенных файлов (см. Run):
+	// в docker — отдельный ro-mount /grade, в subprocess — соседний каталог.
 	Commands map[string]string
 	// WorkDirBase — корень рабочих каталогов (по умолчанию $SANDBOX_WORKDIR_BASE
 	// или ~/.local/share/grade-sandbox; НЕ /tmp — см. newWorkDir).
@@ -128,12 +129,16 @@ func New(cfg Config) *Runner {
 	}
 	cfg.Images = defaults
 	if cfg.Commands == nil {
+		// Градатор берётся из %GRADER% (отдельный от кандидата каталог —
+		// BUG-20261122-033), а не из рабочего каталога решения.
 		cfg.Commands = map[string]string{
-			"go":     "go test -count=1 -json ./...",
-			"python": "python3 -m pytest -q",
+			// go: тесты банка подмешиваются в пакет оверлеем (go test видит их
+			// как файлы пакета, но на диске кандидата их нет).
+			"go":     "go test -count=1 -json -overlay %GRADER%/overlay.json ./...",
+			"python": "python3 -m pytest -q -p no:cacheprovider %GRADER%",
 			// spec-19: shell-задания — чек-скрипт банка (check.sh) запускает
 			// решение кандидата (solution.sh) и ассертит результат.
-			"shell": "bash check.sh",
+			"shell": "bash %GRADER%/check.sh",
 		}
 	}
 	maxConc := cfg.MaxConcurrent
@@ -171,8 +176,35 @@ func (r *Runner) WarmupImage(ctx context.Context, stack string) error {
 	return nil
 }
 
-// Run выполняет тесты файлов задачи (action "test").
-func (r *Runner) Run(ctx context.Context, stack string, files map[string]string) (Result, error) {
+// Run выполняет тесты (action "test").
+//
+//	files   — файлы кандидата: пишутся в run-каталог, он же cwd прогона;
+//	trusted — доверенные файлы банка (градатор: check.sh, *_test.go, test_*.py):
+//	          пишутся в СОСЕДНИЙ каталог, который в docker монтируется в /grade
+//	          только на чтение.
+//
+// Разведение каталогов — BUG-20261122-033: раньше файлы банка лежали в cwd
+// решения, и одна сдача `cat check.sh` возвращала градатор в stdout прогона и
+// одновременно давала гарантированный pass (ожидаемые значения читались из того
+// же файла); `sed -i check.sh` переписывал чек — workdir примонтирован :rw.
+//
+// Что закрывается, а что нет (честно):
+//   - cwd решения: файлов банка в нём больше нет, штатный приём `cat check.sh`
+//     не читает ничего; подставной check.sh/*_test.go/test_*.py из файлов
+//     кандидата не исполняется (go — подмена тестом банка через -overlay,
+//     python — pytest собирается по каталогу градатора, shell — bash /grade/check.sh);
+//   - запись в docker: /grade примонтирован только на чтение — ни `> check.sh`,
+//     ни rename/unlink не проходят (права ни при чём — uid контейнера равен uid
+//     процесса sandbox, см. --user в runDocker);
+//   - запись в subprocess: файлы 0444, перенаправление не проходит; rename и
+//     unlink возможны (каталог принадлежит тому же uid) — изоляция недостаточна,
+//     режим dev-fallback;
+//   - чтение по абсолютному пути (../grade/check.sh, /grade/check.sh) возможно в
+//     обоих режимах: код кандидата идёт под тем же uid, что и процесс sandbox.
+//     shortcut: реальная read-изоляция требует раздельных uid для процесса
+//     кандидата и каталога градатора (прод-режим docker — ближайший шаг к этому);
+//     здесь закрыты: утечка из cwd, гарантированный pass и подмена градатора.
+func (r *Runner) Run(ctx context.Context, stack string, files, trusted map[string]string) (Result, error) {
 	switch stack {
 	case "go", "python", "shell":
 	default:
@@ -184,6 +216,11 @@ func (r *Runner) Run(ctx context.Context, stack string, files map[string]string)
 	for path := range files {
 		if !safePath(path) {
 			return Result{}, fmt.Errorf("%w: %q (пути — относительно, без ..)", ErrBadFiles, path)
+		}
+	}
+	for path := range trusted {
+		if !safePath(path) {
+			return Result{}, fmt.Errorf("%w: доверенный файл %q (пути — относительно, без ..)", ErrBadFiles, path)
 		}
 	}
 
@@ -202,15 +239,32 @@ func (r *Runner) Run(ctx context.Context, stack string, files map[string]string)
 		return Result{}, fmt.Errorf("workdir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(workdir) }()
-	for path, content := range files {
-		full := filepath.Join(workdir, filepath.FromSlash(path))
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			return Result{}, fmt.Errorf("mkdir %s: %w", path, err)
-		}
-		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-			return Result{}, fmt.Errorf("write %s: %w", path, err)
-		}
+
+	runDir := filepath.Join(workdir, "run")
+	gradeDir := filepath.Join(workdir, "grade")
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		return Result{}, fmt.Errorf("mkdir run: %w", err)
 	}
+	if err := os.MkdirAll(gradeDir, 0o700); err != nil {
+		return Result{}, fmt.Errorf("mkdir grade: %w", err)
+	}
+	if err := writeTree(runDir, files, 0o644); err != nil {
+		return Result{}, err
+	}
+	if err := writeTree(gradeDir, trusted, 0o444); err != nil {
+		return Result{}, err
+	}
+
+	// Пути, которые видит исполняемая команда: в docker это точки монтирования
+	// (/work — на запись, /grade — только чтение), в subprocess — пути хоста.
+	candRef, gradeRef := runDir, gradeDir
+	if r.cfg.Mode == "docker" {
+		candRef, gradeRef = "/work", "/grade"
+	}
+	if err := writeGoOverlay(gradeDir, gradeRef, candRef, stack, trusted); err != nil {
+		return Result{}, err
+	}
+	cmdLine := strings.ReplaceAll(r.cfg.Commands[stack], graderToken, gradeRef)
 
 	ctx, cancel := context.WithTimeout(ctx, r.cfg.Timeout)
 	defer cancel()
@@ -221,7 +275,7 @@ func (r *Runner) Run(ctx context.Context, stack string, files map[string]string)
 	switch r.cfg.Mode {
 	case "subprocess":
 		var runErr error
-		raw, exitCode, runErr = r.runSubprocess(ctx, stack, workdir)
+		raw, exitCode, runErr = r.runSubprocess(ctx, stack, runDir, cmdLine)
 		if runErr != nil && !errors.Is(runErr, context.DeadlineExceeded) {
 			if errors.Is(runErr, ErrNoDocker) {
 				return Result{}, runErr
@@ -230,7 +284,7 @@ func (r *Runner) Run(ctx context.Context, stack string, files map[string]string)
 		}
 	case "docker":
 		var runErr error
-		raw, exitCode, runErr = r.runDocker(ctx, stack, workdir)
+		raw, exitCode, runErr = r.runDocker(ctx, stack, runDir, gradeDir, cmdLine)
 		if runErr != nil && !errors.Is(runErr, context.DeadlineExceeded) {
 			return Result{}, runErr
 		}
@@ -271,6 +325,50 @@ func (r *Runner) Run(ctx context.Context, stack string, files map[string]string)
 	}
 	result.Passed = !result.Timeout && exitCode == 0
 	return result, nil
+}
+
+// graderToken — плейсхолдер каталога доверенных файлов в команде прогона.
+const graderToken = "%GRADER%"
+
+// writeTree — пишет файлы в каталог (пути относительные, подкаталоги
+// создаются) с указанными правами.
+func writeTree(dir string, files map[string]string, perm os.FileMode) error {
+	for path, content := range files {
+		full := filepath.Join(dir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			return fmt.Errorf("mkdir %s: %w", path, err)
+		}
+		if err := os.WriteFile(full, []byte(content), perm); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+// writeGoOverlay — go-оверлей: тесты банка подмешиваются в пакет кандидата на
+// время сборки (`go test -overlay`), поэтому в рабочем каталоге решения их
+// файлов нет вообще — ни solution_test.go на диске, ни чтения из init()/теста
+// по относительному пути. Пустой Replace — чтобы команда не падала на задаче
+// без тестов банка.
+//
+// Оверлеятся только *_test.go (то, что читает go-инструмент на сборке).
+// shortcut: доверенные go-файлы другого вида (например testdata/) банку не
+// нужны; появятся — их надо отдавать отдельным ro-путём.
+func writeGoOverlay(gradeDir, gradeRef, candRef, stack string, trusted map[string]string) error {
+	if stack != "go" {
+		return nil
+	}
+	replace := map[string]string{}
+	for name := range trusted {
+		if strings.HasSuffix(name, "_test.go") {
+			replace[candRef+"/"+name] = gradeRef + "/" + name
+		}
+	}
+	body, err := json.Marshal(map[string]any{"Replace": replace})
+	if err != nil {
+		return fmt.Errorf("overlay: %w", err)
+	}
+	return os.WriteFile(filepath.Join(gradeDir, "overlay.json"), body, 0o444)
 }
 
 // newWorkDir — рабочий каталог запуска.
@@ -325,8 +423,7 @@ func safePath(p string) bool {
 // (без гонки и без parent-состояния). Примечание: syscall.SysProcAttr в
 // Go stdlib не имеет Rlimit (только x/sys/unix, который не совместим с
 // os/exec) — ulimit-пролог даёт те же семантики без зависимостей.
-func (r *Runner) runSubprocess(ctx context.Context, stack, workdir string) ([]byte, int, error) {
-	cmdLine := r.cfg.Commands[stack]
+func (r *Runner) runSubprocess(ctx context.Context, stack, workdir, cmdLine string) ([]byte, int, error) {
 	memLimit := r.cfg.MemLimitBytes
 	if memLimit <= 0 {
 		memLimit = defaultMemLimitPython
@@ -431,13 +528,15 @@ func isResourceLimitKill(ee *exec.ExitError) bool {
 	return false
 }
 
-// runDocker — prod-режим: контейнер на run с лимитами ADR-003.
-func (r *Runner) runDocker(ctx context.Context, stack, workdir string) ([]byte, int, error) {
+// runDocker — prod-режим: контейнер на run с лимитами ADR-003. Каталог
+// градатора монтируется отдельно и только на чтение (/grade) — код кандидата
+// живёт в /work и не может ни изменить, ни найти файлы банка в своём дереве
+// (BUG-20261122-033).
+func (r *Runner) runDocker(ctx context.Context, stack, runDir, gradeDir, cmdLine string) ([]byte, int, error) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return nil, -1, ErrNoDocker
 	}
 	image := r.cfg.Images[stack]
-	cmdLine := r.cfg.Commands[stack]
 	// ENV для /tmp (rootfs read-only): HOME + кэши Go. spec-14/C6: GOPROXY=off —
 	// с --network=none попытка скачать зависимости даёт честную ошибку вместо
 	// сетевого зависания dial.
@@ -493,7 +592,11 @@ func (r *Runner) runDocker(ctx context.Context, stack, workdir string) ([]byte, 
 		// spec-14/C6: минимальные привилегии контейнера.
 		"--cap-drop=ALL",
 		"--security-opt", "no-new-privileges",
-		"-v", workdir + ":/work:rw",
+		"-v", runDir + ":/work:rw",
+		// Градатор — вне /work и только на чтение: подмена чека из решения
+		// кандидата невозможна на уровне монтирования (права не спасли бы —
+		// --user ниже это uid хоста).
+		"-v", gradeDir + ":/grade:ro",
 	}
 	for _, e := range env {
 		args = append(args, "-e", e)

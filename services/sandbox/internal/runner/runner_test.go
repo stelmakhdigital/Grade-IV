@@ -15,7 +15,7 @@ func fakeCmds(goCmd, pyCmd string) map[string]string {
 
 func TestRunSubprocessPass(t *testing.T) {
 	rn := New(Config{Mode: "subprocess", Commands: fakeCmds("printf 'hello\\n' && exit 0", "exit 0")})
-	res, err := rn.Run(context.Background(), "go", map[string]string{"a.txt": "x"})
+	res, err := rn.Run(context.Background(), "go", map[string]string{"a.txt": "x"}, nil)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestRunSubprocessPass(t *testing.T) {
 func TestRunSubprocessFail(t *testing.T) {
 	rn := New(Config{Mode: "subprocess", Commands: fakeCmds("exit 5", "exit 7")})
 	for stack, want := range map[string]int{"go": 5, "python": 7} {
-		res, err := rn.Run(context.Background(), stack, map[string]string{"a.txt": "x"})
+		res, err := rn.Run(context.Background(), stack, map[string]string{"a.txt": "x"}, nil)
 		if err != nil {
 			t.Fatalf("%s: %v", stack, err)
 		}
@@ -56,7 +56,7 @@ func TestRunTimeout(t *testing.T) {
 			"sh -c 'sleep 5; echo never'", // вложенный sleep — проверка убийства группы
 			"sh -c 'sleep 5'"),
 	})
-	res, err := rn.Run(context.Background(), "go", map[string]string{"a.txt": "x"})
+	res, err := rn.Run(context.Background(), "go", map[string]string{"a.txt": "x"}, nil)
 	if err != nil {
 		t.Fatalf("timeout должен давать результат, а не ошибку: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestRunTimeout(t *testing.T) {
 
 func TestRunBadStack(t *testing.T) {
 	rn := New(Config{Mode: "subprocess"})
-	if _, err := rn.Run(context.Background(), "rust", map[string]string{"a": "x"}); !errors.Is(err, ErrUnsupportedStack) {
+	if _, err := rn.Run(context.Background(), "rust", map[string]string{"a": "x"}, nil); !errors.Is(err, ErrUnsupportedStack) {
 		t.Fatalf("ожидался ErrUnsupportedStack: %v", err)
 	}
 }
@@ -83,7 +83,7 @@ func TestRunBadFiles(t *testing.T) {
 		"abs":    {"/etc/passwd": "x"},
 	}
 	for name, files := range bad {
-		if _, err := rn.Run(context.Background(), "go", files); !errors.Is(err, ErrBadFiles) {
+		if _, err := rn.Run(context.Background(), "go", files, nil); !errors.Is(err, ErrBadFiles) {
 			t.Fatalf("%s: ожидался ErrBadFiles, получено %v", name, err)
 		}
 	}
@@ -135,7 +135,7 @@ func TestParseGoTests(t *testing.T) {
 func TestFilesWrittenToWorkdir(t *testing.T) {
 	// Команда проверяет наличие вложенного файла — путь создаётся рекурсивно.
 	rn := New(Config{Mode: "subprocess", Commands: fakeCmds("test -f sub/dir/a.txt && echo ok", "test -f sub/dir/a.txt && echo ok")})
-	res, err := rn.Run(context.Background(), "go", map[string]string{"sub/dir/a.txt": "data"})
+	res, err := rn.Run(context.Background(), "go", map[string]string{"sub/dir/a.txt": "data"}, nil)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
