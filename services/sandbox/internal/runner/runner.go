@@ -549,7 +549,10 @@ func (r *Runner) runDocker(ctx context.Context, stack, runDir, gradeDir, cmdLine
 	// и раньше: GOPROXY=off).
 	env := []string{
 		"HOME=/tmp", "TMPDIR=/tmp",
-		"GOCACHE=/work/.gocache", "GOPATH=/tmp/gopath", "GOTOOLCHAIN=local", "GOFLAGS=-mod=mod",
+		"GOCACHE=/work/.gocache", "GOPATH=/tmp/gopath", "GOTOOLCHAIN=local",
+		// -p=2: при сборке std на много-ядерном хосте параллельные compile не влезают
+		// в --pids-limit/--memory (BUG-20261122-035)
+		"GOFLAGS=-mod=mod -p=2",
 		"GOPROXY=off", "CGO_ENABLED=0",
 	}
 	// spec-14/C1: раньше --user 1000:1000 при uid хоста ≠ 1000 не мог ни читать,
@@ -663,7 +666,7 @@ func cleanEnv(workdir, stack string) []string {
 			"GOCACHE="+workdir+"/.gocache",
 			"GOPATH="+workdir+"/.gopath",
 			"GOTOOLCHAIN=local",
-			"GOFLAGS=-mod=mod",
+			"GOFLAGS=-mod=mod -p=2", // -p=2: 28 параллельных compile не влезают в RLIMIT_AS (см. BUG-20261122-035)
 			"GOPROXY=off", // ADR-003: без сети — зависимости из банка задач
 		)
 	}
