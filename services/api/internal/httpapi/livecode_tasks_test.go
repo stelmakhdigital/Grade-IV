@@ -58,7 +58,7 @@ func TestPickLiveCodeTasks(t *testing.T) {
 	// middle: N=3, последняя — stretch, без повторов.
 	for _, seed := range []int64{1, 2, 42} {
 		rng := rand.New(rand.NewSource(seed))
-		got := pickLiveCodeTasks(models.GradeMiddle, pool, stretch, rng)
+		got, _ := pickLiveCodeTasks(models.GradeMiddle, pool, stretch, nil, rng)
 		if len(got) != 3 {
 			t.Fatalf("middle: len = %d, want 3", len(got))
 		}
@@ -79,7 +79,7 @@ func TestPickLiveCodeTasks(t *testing.T) {
 
 	// junior: N=2, без stretch — только основной пул.
 	rng := rand.New(rand.NewSource(1))
-	got := pickLiveCodeTasks(models.GradeJunior, pool, nil, rng)
+	got, _ := pickLiveCodeTasks(models.GradeJunior, pool, nil, nil, rng)
 	if len(got) != 2 {
 		t.Fatalf("junior: len = %d, want 2", len(got))
 	}
@@ -89,13 +89,13 @@ func TestPickLiveCodeTasks(t *testing.T) {
 
 	// Пул меньше N — взять всё (деградация).
 	small := pool[:1]
-	got = pickLiveCodeTasks(models.GradeMiddle, small, nil, rand.New(rand.NewSource(1)))
+	got, _ = pickLiveCodeTasks(models.GradeMiddle, small, nil, nil, rand.New(rand.NewSource(1)))
 	if len(got) != 1 || got[0].ID != "m0" {
 		t.Fatalf("малый пул: %v", idsOf2(got))
 	}
 
 	// staff: без stretch.
-	got = pickLiveCodeTasks(models.GradeStaff, pool, nil, rand.New(rand.NewSource(1)))
+	got, _ = pickLiveCodeTasks(models.GradeStaff, pool, nil, nil, rand.New(rand.NewSource(1)))
 	if len(got) != 3 {
 		t.Fatalf("staff: len = %d, want 3", len(got))
 	}
@@ -189,15 +189,36 @@ func TestEnterLiveCodeSelection(t *testing.T) {
 		t.Fatalf("нет события livecode_tasks: %+v", events)
 	}
 
-	// Детерминизм: та же seed → тот же выбор (новая сессия).
+	// Детерминизм: та же seed у кандидата без истории → тот же выбор.
+	code, reg := doJSON(t, "POST", e.ts.URL+"/api/v1/auth/register",
+		map[string]string{"email": "fresh-candidate@example.ru", "password": "password1"}, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("register: %d %v", code, reg)
+	}
+	freshToken, _ := reg["token"].(string)
+	freshSession, _ := createSession(t, e.ts, freshToken, "middle", "go")
+	e.session, e.token = freshSession, freshToken
+	same := enter()
+	for i := range first {
+		if first[i] != same[i] {
+			t.Fatalf("seed=1: кандидат без истории получил другой выбор: %v vs %v", first, same)
+		}
+	}
+
+	// Новая сессия того же кандидата — другие задачи (spec-24: одну и ту же задачу
+	// кандидат не решает дважды; банк позволяет выбрать свежие).
 	e2session, _ := createSession(t, e.ts, e.token, "middle", "go")
-	_ = e2session
 	e.session = e2session
 	second := enter()
+	sameAgain := true
 	for i := range first {
 		if first[i] != second[i] {
-			t.Fatalf("seed=1: разные списки: %v vs %v", first, second)
+			sameAgain = false
+			break
 		}
+	}
+	if sameAgain {
+		t.Fatalf("seed=1: вторая сессия того же кандидата получила те же задачи: %v", second)
 	}
 }
 

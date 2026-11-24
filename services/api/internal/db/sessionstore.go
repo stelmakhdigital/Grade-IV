@@ -290,6 +290,31 @@ func (s *SessionStore) ListEventsTail(ctx context.Context, sessionID int64, n in
 	return out, nil
 }
 
+// ListRecentEventDataByKindForUser — данные последних событий kind по всем
+// сессиям пользователя (кроме exceptSession). Нужен «не повторять задачи»:
+// история кандидата живёт в событиях его прошлых сессий, а ходить по ним
+// сессия-за-сессией (ListByUser + ListEvents) — O(N) запросов на вход в стадию.
+func (s *SessionStore) ListRecentEventDataByKindForUser(ctx context.Context, userID int64, kind string, exceptSession int64, limit int) ([][]byte, error) {
+	rows, err := s.db.QueryContext(ctx,
+		s.d.q(`SELECT e.data FROM session_events e
+			JOIN sessions s ON s.id = e.session_id
+			WHERE s.user_id = ? AND e.kind = ? AND s.id <> ?
+			ORDER BY e.id DESC LIMIT ?`), userID, kind, exceptSession, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list events by user kind: %w", err)
+	}
+	defer rows.Close()
+	var out [][]byte
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return nil, fmt.Errorf("scan event data: %w", err)
+		}
+		out = append(out, data)
+	}
+	return out, rows.Err()
+}
+
 // HasEventKind — EXISTS-проверка без чтения всех событий (spec-14/A6:
 // hasAIUtterance сканировал всю историю на каждое WS-подключение).
 func (s *SessionStore) HasEventKind(ctx context.Context, sessionID int64, kind string) (bool, error) {

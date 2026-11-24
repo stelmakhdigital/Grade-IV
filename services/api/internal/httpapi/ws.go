@@ -741,10 +741,64 @@ func liveCodeSeed() (int64, bool) {
 	return n, true
 }
 
-// pickLiveCodeTasks — N различных случайных (uniform, без повторов) задач из пула
-// грейда; для middle/senior последняя — случайная из пула следующего грейда
-// (stretch, если непустой). Пул меньше N — взять всё (грациозная деградация).
-func pickLiveCodeTasks(grade models.Grade, pool, stretchPool []liveCodeTask, rng *rand.Rand) []liveCodeTask {
+// pickLiveCodeTasks — N различных случайных задач из пула грейда; для
+// middle/senior последняя — из пула следующего грейда (stretch, если непустой).
+//
+// seen — задачи, которые этот кандидат уже получал (spec-24: пул не должен
+// повторяться от интервью к интервью). Свежих не хватило — добираем из виденных
+// и возвращаем reused=true: лучше повтор, чем кандидат получит одну задачу вместо
+// трёх.
+func pickLiveCodeTasks(grade models.Grade, pool, stretchPool []liveCodeTask, seen map[string]bool, rng *rand.Rand) ([]liveCodeTask, bool) {
+	fresh, stale := splitUnseen(pool, seen)
+	freshStretch, staleStretch := splitUnseen(stretchPool, seen)
+	out := pickTasksFrom(grade, fresh, freshStretch, rng)
+
+	want := liveCodeTaskCount[grade]
+	if want <= 0 {
+		want = 1
+	}
+	if len(out) >= want {
+		return out, false
+	}
+	picked := make(map[string]bool, len(out))
+	for _, t := range out {
+		picked[t.ID] = true
+	}
+	topup := make([]liveCodeTask, 0, len(stale)+len(staleStretch))
+	for _, t := range append(append([]liveCodeTask(nil), stale...), staleStretch...) {
+		if !picked[t.ID] {
+			topup = append(topup, t)
+		}
+	}
+	rng.Shuffle(len(topup), func(i, j int) { topup[i], topup[j] = topup[j], topup[i] })
+	reused := false
+	for _, t := range topup {
+		if len(out) >= want {
+			break
+		}
+		out = append(out, t)
+		picked[t.ID] = true
+		reused = true
+	}
+	return out, reused
+}
+
+// splitUnseen — свежие (не из истории кандидата) и виденные ранее задачи.
+func splitUnseen(pool []liveCodeTask, seen map[string]bool) (fresh, stale []liveCodeTask) {
+	for _, t := range pool {
+		if seen[t.ID] {
+			stale = append(stale, t)
+		} else {
+			fresh = append(fresh, t)
+		}
+	}
+	return fresh, stale
+}
+
+// pickTasksFrom — N различных случайных (uniform, без повторов) задач из пула
+// грейда; последняя — из stretch-пула, если он непустой. Пул меньше N — взять
+// всё (грациозная деградация).
+func pickTasksFrom(grade models.Grade, pool, stretchPool []liveCodeTask, rng *rand.Rand) []liveCodeTask {
 	n := liveCodeTaskCount[grade]
 	if n <= 0 {
 		n = 1
@@ -789,6 +843,8 @@ func (s *Server) enterLiveCode(ctx context.Context, id int64, ws *wsSession) {
 	// стадии задачи не берём вовсе (кандидат получит «задачи ещё не назначены»).
 	stageStack := s.liveCodeStack(sess)
 	var tasks []liveCodeTask
+	// reused — набор пришлось добирать уже виденными задачами (см. pickLiveCodeTasks).
+	reused := false
 	if stageStack == "" {
 		s.log.Warn("livecode: стек стадии неизвестен — задачи не выбраны", "session", id)
 	} else if pool, err := s.fetchLiveCodeTasks(ctx, stageStack, string(sess.Grade)); err != nil {
@@ -805,7 +861,11 @@ func (s *Server) enterLiveCode(ctx context.Context, id int64, ws *wsSession) {
 		if seeded {
 			rng = rand.New(rand.NewSource(seed))
 		}
-		tasks = pickLiveCodeTasks(sess.Grade, pool, stretchPool, rng)
+		tasks, reused = pickLiveCodeTasks(sess.Grade, pool, stretchPool, s.seenLiveCodeIDs(ctx, sess), rng)
+		if reused {
+			s.log.Info("livecode: свежих задач не хватило — добавлены уже виденные",
+				"session", id, "grade", sess.Grade)
+		}
 		if len(tasks) > 0 {
 			ids := make([]string, 0, len(tasks))
 			for _, t := range tasks {
@@ -841,6 +901,37 @@ func (s *Server) enterLiveCode(ctx context.Context, id int64, ws *wsSession) {
 	}
 	text, err := s.interviewer.OnStageChanged(ctx, id, stageNote(tasks))
 	s.speak(ctx, id, ws, text, err) // озвучка задачи (TTS)
+}
+
+// seenLiveCodeIDs — задачи, которые этот кандидат уже получал на Live-Code
+// (spec-24). Смотрим события livecode_tasks последних его сессий; ошибка БД не
+// блокирует стадию — задачи возьмём без учёта истории.
+func (s *Server) seenLiveCodeIDs(ctx context.Context, sess models.Session) map[string]bool {
+	if sess.UserID == 0 {
+		return nil
+	}
+	rows, err := s.sessions.ListRecentEventDataByKindForUser(ctx, sess.UserID, "livecode_tasks", sess.ID, 64)
+	if err != nil {
+		s.log.Warn("livecode: история задач недоступна", "session", sess.ID, "err", err)
+		return nil
+	}
+	seen := make(map[string]bool)
+	for _, raw := range rows {
+		var ev struct {
+			Tasks []struct {
+				ID string `json:"id"`
+			} `json:"tasks"`
+		}
+		if err := json.Unmarshal(raw, &ev); err != nil {
+			continue
+		}
+		for _, t := range ev.Tasks {
+			if t.ID != "" {
+				seen[t.ID] = true
+			}
+		}
+	}
+	return seen
 }
 
 // liveCodeStack — стек практической стадии (spec-19): у кодовых треков — стек
