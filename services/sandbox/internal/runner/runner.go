@@ -667,7 +667,7 @@ func cleanEnv(workdir, stack string) []string {
 			"GOPATH="+workdir+"/.gopath",
 			"GOTOOLCHAIN=local",
 			"GOFLAGS=-mod=mod -p=2", // -p=2: 28 параллельных compile не влезают в RLIMIT_AS (см. BUG-20261122-035)
-			"GOPROXY=off", // ADR-003: без сети — зависимости из банка задач
+			"GOPROXY=off",           // ADR-003: без сети — зависимости из банка задач
 		)
 	}
 	if v := os.Getenv("PYTHONPATH"); v != "" {
