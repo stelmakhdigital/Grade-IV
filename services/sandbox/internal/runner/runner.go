@@ -31,6 +31,12 @@ const (
 	DefaultMaxBytes = 1 << 20 // 1 МБ на stdout/stderr
 )
 
+// go платит за сборку std: GOCACHE — per-run (см. cleanEnv и ENV docker-режима),
+// поэтому 10 с из ADR-003 уходят на компиляцию и самим тестам бюджета не
+// оставляет (BUG-20261122-035). Отдельный бюджет вместо явного таймаута в
+// запросе: протокол /runs таймаута не передаёт.
+const defaultTimeoutGo = 60 * time.Second
+
 // RLIMIT по умолчанию для subprocess-режима (аналог лимитов docker-режима
 // ADR-003: --memory=512m, --cpus=1; dev-режим, где docker недоступен):
 // CPU — те же 10 с (RLIMIT_CPU), память — RLIMIT_AS. Важное отличие: RLIMIT_AS
@@ -108,9 +114,7 @@ type Runner struct {
 
 // New создаёт раннер (режим и пороки — из конфига).
 func New(cfg Config) *Runner {
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = DefaultTimeout
-	}
+	// Timeout == 0 — не задан, берётся по стеку в Run (go — дольше, см. defaultTimeoutGo).
 	if cfg.MaxBytes <= 0 {
 		cfg.MaxBytes = DefaultMaxBytes
 	}
@@ -266,7 +270,14 @@ func (r *Runner) Run(ctx context.Context, stack string, files, trusted map[strin
 	}
 	cmdLine := strings.ReplaceAll(r.cfg.Commands[stack], graderToken, gradeRef)
 
-	ctx, cancel := context.WithTimeout(ctx, r.cfg.Timeout)
+	timeout := r.cfg.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+		if stack == "go" {
+			timeout = defaultTimeoutGo
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	start := time.Now()
 
