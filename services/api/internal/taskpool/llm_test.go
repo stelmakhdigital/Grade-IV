@@ -227,3 +227,26 @@ func TestGradeOfID(t *testing.T) {
 		}
 	}
 }
+
+// TestSkinSkipsSkinnedTask — кожа делается только поверх базовой задачи семьи.
+// Кожа с кожи дала бы тот же id (он выводится из семьи и seed) и уткнулась бы в
+// 409 на каждом тике.
+func TestSkinSkipsSkinnedTask(t *testing.T) {
+	f, ts := newFake(t)
+	for _, g := range []string{"junior", "middle", "senior", "staff"} {
+		f.counts["shell|"+g] = 1
+	}
+	// Единственная задача в пуле — уже кожа.
+	f.listOverride = func(grade string) []map[string]any {
+		return []map[string]any{{
+			"id":        "shell-stats-" + grade + "-skin-9-abcd12",
+			"statement": baseStatement,
+			"meta":      map[string]any{"family": "shell-stats", "seed": 9, "generator": "family:shell-stats+skin:qwen"},
+		}}
+	}
+	m := &fakeLLM{resp: skinAnswer}
+	newLLMJob(ts, m, true, false, f).pass(context.Background())
+	if m.calls != 0 {
+		t.Fatalf("модель дёргалась %d раз ради уже переписанной задачи", m.calls)
+	}
+}

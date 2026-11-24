@@ -22,7 +22,8 @@ type fakeSandbox struct {
 	registered     []map[string]any
 	registerStatus int
 	families       []Family
-	unauthOK       bool // принимать запросы без токена (проверка, что токен реально шлётся)
+	listOverride   func(grade string) []map[string]any // подмена выдачи /api/v1/tasks
+	unauthOK       bool                                // принимать запросы без токена (проверка, что токен реально шлётся)
 }
 
 type genAttempt struct {
@@ -54,6 +55,10 @@ func newFake(t *testing.T) (*fakeSandbox, *httptest.Server) {
 		n := f.counts[q.Get("stack")+"|"+q.Get("grade")]
 		f.mu.Unlock()
 		grade := q.Get("grade")
+		if f.listOverride != nil {
+			_ = json.NewEncoder(w).Encode(f.listOverride(grade))
+			return
+		}
 		list := make([]map[string]any, n)
 		for i := range list {
 			// id и meta — как у настоящей семейной задачи: кожа разбирает их,
@@ -61,7 +66,7 @@ func newFake(t *testing.T) (*fakeSandbox, *httptest.Server) {
 			list[i] = map[string]any{
 				"id":        "shell-stats-" + grade + "-" + strconv.Itoa(i+1) + "-abcd12",
 				"statement": baseStatement,
-				"meta":      map[string]any{"family": "shell-stats", "seed": i + 1},
+				"meta":      map[string]any{"family": "shell-stats", "seed": i + 1, "generator": "family:shell-stats"},
 			}
 		}
 		_ = json.NewEncoder(w).Encode(list)

@@ -24,8 +24,9 @@ type bankTask struct {
 	Title     string `json:"title"`
 	Statement string `json:"statement"`
 	Meta      *struct {
-		Family string `json:"family"`
-		Seed   int64  `json:"seed"`
+		Family    string `json:"family"`
+		Seed      int64  `json:"seed"`
+		Generator string `json:"generator"`
 	} `json:"meta"`
 }
 
@@ -44,9 +45,16 @@ func (j *Job) skinTick(ctx context.Context) {
 	}
 	var cands []*bankTask
 	for i := range list {
-		if list[i].Meta != nil && list[i].Meta.Family != "" {
-			cands = append(cands, &list[i])
+		t := &list[i]
+		if t.Meta == nil || t.Meta.Family == "" {
+			continue
 		}
+		// Кожу с кожи — вечный 409: id кожи выводится из семьи и seed, поэтому
+		// повторное переписывание даёт ровно тот же id.
+		if strings.Contains(t.Meta.Generator, "+skin") {
+			continue
+		}
+		cands = append(cands, t)
 	}
 	if len(cands) == 0 {
 		// Кожа делается поверх задачи семьи: без них нечего переписывать.
@@ -72,7 +80,11 @@ func (j *Job) skinTick(ctx context.Context) {
 		return
 	}
 	if id == "" {
-		j.log.Info("taskpool: кожа отбракована gate", "task", base.ID, "detail", detail)
+		if status == http.StatusConflict {
+			j.log.Info("taskpool: кожа этой задачи уже в пуле", "task", base.ID)
+		} else {
+			j.log.Info("taskpool: кожа отбракована gate", "task", base.ID, "detail", detail)
+		}
 		return
 	}
 	j.log.Info("taskpool: кожа задачи в пуле", "id", id, "base", base.ID, "model", j.cfg.LLM.Name())
