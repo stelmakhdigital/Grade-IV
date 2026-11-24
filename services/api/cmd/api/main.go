@@ -15,6 +15,7 @@ import (
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/httpapi"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/taskpool"
 )
 
 func main() {
@@ -54,6 +55,18 @@ func main() {
 	defer engineCancel()
 	server := httpapi.New(cfg, conn, dialect, logger)
 	go server.Engine().Run(engineCtx)
+
+	// spec-24: фоновое пополнение пула задач Live-Code (выключено без
+	// SANDBOX_ADMIN_TOKEN — см. taskpool.New).
+	if job := taskpool.New(taskpool.Config{
+		SandboxURL: cfg.SandboxURL,
+		AdminToken: cfg.SandboxAdminToken,
+		Min:        cfg.SandboxTasksMin,
+		MaxPerTick: cfg.SandboxTasksPerTick,
+		Interval:   time.Duration(cfg.SandboxTasksIntervalS) * time.Second,
+	}, logger); job != nil {
+		go job.Run(engineCtx)
+	}
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           server.Handler(),

@@ -192,6 +192,7 @@ do_start() {
     LLM_MOCK="$LLM_MOCK" LLM_BASE_URL="$LLM_BASE_URL" LLM_MODEL="$LLM_MODEL" \
     ENABLE_DEBUG="${ENABLE_DEBUG:-1}" \
     VOICE_URL="$VOICE_URL" SANDBOX_URL="$SANDBOX_URL" ADDR=:8000 \
+    SANDBOX_ADMIN_TOKEN="${SANDBOX_ADMIN_TOKEN:-}" \
     nohup "$API_BIN" >>"$LOGS/api.log" 2>&1 & echo $! >"$PIDS/api.pid")
 
   echo "==> frontend :5173"

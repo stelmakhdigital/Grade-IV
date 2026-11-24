@@ -25,19 +25,31 @@ type Config struct {
 	// SessionLimitS — лимит длительности сессии (SESSION_LIMIT_S):
 	// 0 — по грейду (45/50/60/75 мин), >0 — фиксированный, с;
 	// переменная "0"/"off" → -1 (без ограничения по времени).
-	SessionLimitS     int
-	VoiceURL          string // voice-сервис: /api/v1/stt, /api/v1/tts (VOICE_URL)
-	LLMBaseURL        string // OpenAI-совместимый LLM (LLM_BASE_URL; с /v1 или без — добавится)
-	LLMModel          string // модель LLM (LLM_MODEL; пусто → авто-детект по /models)
-	LLMAPIKey         string // ключ LLM (LLM_API_KEY)
-	SandboxURL        string // sandbox-сервис (SANDBOX_URL)
-	LogLevel          string // уровень логов (LOG_LEVEL)
-	SilenceNudgeS     int    // тишина > порога → nudge от ИИ, с (SILENCE_NUDGE_S)
-	LLMMock           bool   // LLM-мок вместо реального эндпоинта (LLM_MOCK=1; dev/CI, ADR-005)
-	DebugEndpoints    bool   // dev-эндпоинты (/debug/*) — только явное включение (ENABLE_DEBUG=1; дефолт OFF)
-	LLMEnableThinking bool   // vLLM chat_template_kwargs.enable_thinking (LLM_ENABLE_THINKING, дефолт false — SLO голосового контура)
-	VADEndSilenceMS   int    // конец реплики по тишине, мс (VAD_END_SILENCE_MS, ADR-002)
-	VADRMSThreshold   int    // абсолютный мин. порог RMS int16 (VAD_RMS_THRESHOLD); фактический — адаптивный (3×шумовой пол)
+	SessionLimitS int
+	VoiceURL      string // voice-сервис: /api/v1/stt, /api/v1/tts (VOICE_URL)
+	LLMBaseURL    string // OpenAI-совместимый LLM (LLM_BASE_URL; с /v1 или без — добавится)
+	LLMModel      string // модель LLM (LLM_MODEL; пусто → авто-детект по /models)
+	LLMAPIKey     string // ключ LLM (LLM_API_KEY)
+	SandboxURL    string // sandbox-сервис (SANDBOX_URL)
+	// SandboxAdminToken — токен /admin/tasks у sandbox (SANDBOX_ADMIN_TOKEN).
+	// Нужен фоновому пополнению пула задач (spec-24); пусто — пополнение выключено.
+	SandboxAdminToken string
+	// SandboxTasksMin — сколько задач каждого (стека, грейда) должно быть в пуле
+	// хотя бы (SANDBOX_TASKS_MIN, def 4).
+	SandboxTasksMin int
+	// SandboxTasksPerTick — потолок генераций за проход (SANDBOX_TASKS_PER_TICK,
+	// def 4): сломанный генератор не должен гонять gate по кругу.
+	SandboxTasksPerTick int
+	// SandboxTasksIntervalS — период проверки пула, с (SANDBOX_TASKS_INTERVAL_S,
+	// def 600).
+	SandboxTasksIntervalS int
+	LogLevel              string // уровень логов (LOG_LEVEL)
+	SilenceNudgeS         int    // тишина > порога → nudge от ИИ, с (SILENCE_NUDGE_S)
+	LLMMock               bool   // LLM-мок вместо реального эндпоинта (LLM_MOCK=1; dev/CI, ADR-005)
+	DebugEndpoints        bool   // dev-эндпоинты (/debug/*) — только явное включение (ENABLE_DEBUG=1; дефолт OFF)
+	LLMEnableThinking     bool   // vLLM chat_template_kwargs.enable_thinking (LLM_ENABLE_THINKING, дефолт false — SLO голосового контура)
+	VADEndSilenceMS       int    // конец реплики по тишине, мс (VAD_END_SILENCE_MS, ADR-002)
+	VADRMSThreshold       int    // абсолютный мин. порог RMS int16 (VAD_RMS_THRESHOLD); фактический — адаптивный (3×шумовой пол)
 	// VADPreSilenceMS — предварительная тишина для pre-STT (VAD_PRESTT_SILENCE_MS,
 	// default 400; 0 — отключает pre-STT).
 	VADPreSilenceMS int
@@ -87,29 +99,33 @@ func isProdEnv(env string) bool {
 // Load читает окружение и валидирует минимум.
 func Load() (*Config, error) {
 	c := &Config{
-		Addr:              getEnv("ADDR", ":8000"),
-		DatabaseURL:       getEnv("DATABASE_URL", "sqlite:///./data/grade.db"),
-		JWTSecret:         getEnv("JWT_SECRET", DevInsecureSecret),
-		Env:               strings.ToLower(strings.TrimSpace(getEnv("APP_ENV", "dev"))),
-		JWTExpiryHours:    getEnvInt("JWT_EXPIRY_HOURS", 168),
-		PauseTimeoutS:     getEnvInt("SESSION_PAUSE_TIMEOUT_S", 1800),
-		SessionLimitS:     sessionLimitFromEnv(),
-		VoiceURL:          getEnv("VOICE_URL", "http://localhost:8100"),
-		LLMBaseURL:        getEnv("LLM_BASE_URL", "http://localhost:8300/v1"),
-		LLMModel:          os.Getenv("LLM_MODEL"), // пусто → авто по /models
-		LLMAPIKey:         os.Getenv("LLM_API_KEY"),
-		SandboxURL:        getEnv("SANDBOX_URL", "http://localhost:8200"),
-		LogLevel:          getEnv("LOG_LEVEL", "info"),
-		SilenceNudgeS:     getEnvInt("SILENCE_NUDGE_S", 45),
-		LLMMock:           getEnv("LLM_MOCK", "") == "1",
-		DebugEndpoints:    getEnv("ENABLE_DEBUG", "") == "1",
-		LLMEnableThinking: getEnv("LLM_ENABLE_THINKING", "") == "true",
-		VADEndSilenceMS:   getEnvInt("VAD_END_SILENCE_MS", 900),
-		VADRMSThreshold:   getEnvInt("VAD_RMS_THRESHOLD", 100),
-		VADPreSilenceMS:   getEnvInt("VAD_PRESTT_SILENCE_MS", 400),
-		LLMMockResponse:   getEnv("LLM_MOCK_RESPONSE", ""),
-		LLMMockTokensPerS: getEnvFloat("LLM_MOCK_TOKENS_PER_S", 0),
-		ResumeDir:         getEnv("RESUME_DIR", "./data/resumes"),
+		Addr:                  getEnv("ADDR", ":8000"),
+		DatabaseURL:           getEnv("DATABASE_URL", "sqlite:///./data/grade.db"),
+		JWTSecret:             getEnv("JWT_SECRET", DevInsecureSecret),
+		Env:                   strings.ToLower(strings.TrimSpace(getEnv("APP_ENV", "dev"))),
+		JWTExpiryHours:        getEnvInt("JWT_EXPIRY_HOURS", 168),
+		PauseTimeoutS:         getEnvInt("SESSION_PAUSE_TIMEOUT_S", 1800),
+		SessionLimitS:         sessionLimitFromEnv(),
+		VoiceURL:              getEnv("VOICE_URL", "http://localhost:8100"),
+		LLMBaseURL:            getEnv("LLM_BASE_URL", "http://localhost:8300/v1"),
+		LLMModel:              os.Getenv("LLM_MODEL"), // пусто → авто по /models
+		LLMAPIKey:             os.Getenv("LLM_API_KEY"),
+		SandboxURL:            getEnv("SANDBOX_URL", "http://localhost:8200"),
+		SandboxAdminToken:     os.Getenv("SANDBOX_ADMIN_TOKEN"),
+		SandboxTasksMin:       getEnvInt("SANDBOX_TASKS_MIN", 4),
+		SandboxTasksPerTick:   getEnvInt("SANDBOX_TASKS_PER_TICK", 4),
+		SandboxTasksIntervalS: getEnvInt("SANDBOX_TASKS_INTERVAL_S", 600),
+		LogLevel:              getEnv("LOG_LEVEL", "info"),
+		SilenceNudgeS:         getEnvInt("SILENCE_NUDGE_S", 45),
+		LLMMock:               getEnv("LLM_MOCK", "") == "1",
+		DebugEndpoints:        getEnv("ENABLE_DEBUG", "") == "1",
+		LLMEnableThinking:     getEnv("LLM_ENABLE_THINKING", "") == "true",
+		VADEndSilenceMS:       getEnvInt("VAD_END_SILENCE_MS", 900),
+		VADRMSThreshold:       getEnvInt("VAD_RMS_THRESHOLD", 100),
+		VADPreSilenceMS:       getEnvInt("VAD_PRESTT_SILENCE_MS", 400),
+		LLMMockResponse:       getEnv("LLM_MOCK_RESPONSE", ""),
+		LLMMockTokensPerS:     getEnvFloat("LLM_MOCK_TOKENS_PER_S", 0),
+		ResumeDir:             getEnv("RESUME_DIR", "./data/resumes"),
 	}
 	if c.JWTExpiryHours <= 0 {
 		return nil, fmt.Errorf("JWT_EXPIRY_HOURS должен быть > 0 (получено %d)", c.JWTExpiryHours)
