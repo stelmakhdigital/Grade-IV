@@ -164,3 +164,85 @@ func TestWhiteboardPutPNGInvalidBase64(t *testing.T) {
 		t.Fatalf("invalid base64: %d", code)
 	}
 }
+
+// lastEvent — последнее событие указанного kind из истории сессии (через /events).
+func lastEvent(t *testing.T, e *interviewEnv, kind string) (map[string]any, bool) {
+	t.Helper()
+	code, body := doRaw(t, "GET",
+		fmt.Sprintf("%s/api/v1/sessions/%d/events", e.ts.URL, e.session), nil, nil, e.token)
+	if code != http.StatusOK {
+		t.Fatalf("events: %d", code)
+	}
+	var events []map[string]any
+	if err := json.Unmarshal(body, &events); err != nil {
+		t.Fatalf("events decode: %v (%s)", err, body)
+	}
+	var out map[string]any
+	for _, ev := range events {
+		if ev["kind"] == kind {
+			out = ev
+		}
+	}
+	return out, out != nil
+}
+
+// TestDesignCheckEvent — spec-24: обязательные артефакты кейса сверяются с
+// блоками схемы при сдаче доски и уходят в отдельное событие design_check.
+// Отчёт пересчитывает то же по whiteboard_save, но события — первоисточник:
+// если в роли поменяется формулировка кейса или required, аудит должен остаться
+// прежним. Для кейса без required события нет.
+func TestDesignCheckEvent(t *testing.T) {
+	e := newInterviewEnv(t)
+	code, m := doJSON(t, "POST", e.ts.URL+"/api/v1/sessions",
+		map[string]any{"grade": "middle", "track_id": "sysadmin"}, authHeader(e.token))
+	if code != http.StatusCreated {
+		t.Fatalf("сессия sysadmin: %d %v", code, m)
+	}
+	sid, _ := m["id"].(float64)
+	if sid == 0 {
+		t.Fatal("сессия sysadmin: пустой id")
+	}
+	e.session = int64(sid)
+
+	code, _ = doJSON(t, "PUT", fmt.Sprintf("%s/api/v1/sessions/%d/whiteboard", e.ts.URL, e.session),
+		map[string]any{
+			"state":     json.RawMessage(`{"elements":[]}`),
+			"structure": map[string]any{"blocks": []string{"Сегмент LAN", "Файрвол"}, "links": 2},
+		}, authHeader(e.token))
+	if code != http.StatusOK {
+		t.Fatalf("PUT: %d", code)
+	}
+
+	ev, ok := lastEvent(t, e, "design_check")
+	if !ok {
+		t.Fatal("нет design_check для кейса с обязательными артефактами")
+	}
+	data, _ := ev["data"].(map[string]any)
+	if data == nil {
+		t.Fatalf("data не объект: %v", ev["data"])
+	}
+	missing, _ := data["missing"].([]any)
+	if len(missing) == 0 {
+		t.Fatalf("missing пуст при 2 блоках из 6: %v", data)
+	}
+	if !strings.Contains(fmt.Sprint(missing), "VPN") {
+		t.Fatalf("в missing нет VPN: %v", missing)
+	}
+	if req, _ := data["required"].(float64); req < 3 {
+		t.Fatalf("required = %v, ожидалось >= 3", data["required"])
+	}
+
+	// Кейс без обязательных артефактов (backend) — событий не появляется.
+	back := newInterviewEnv(t)
+	code, _ = doJSON(t, "PUT", fmt.Sprintf("%s/api/v1/sessions/%d/whiteboard", back.ts.URL, back.session),
+		map[string]any{
+			"state":     json.RawMessage(`{"elements":[]}`),
+			"structure": map[string]any{"blocks": []string{"API", "БД"}, "links": 1},
+		}, authHeader(back.token))
+	if code != http.StatusOK {
+		t.Fatalf("PUT backend: %d", code)
+	}
+	if ev, ok := lastEvent(t, back, "design_check"); ok {
+		t.Fatalf("design_check появился для кейса без required: %v", ev)
+	}
+}

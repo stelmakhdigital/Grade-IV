@@ -339,6 +339,28 @@ func (s *Server) writeSessionEngineError(w http.ResponseWriter, err error) {
 //	structure? {blocks: [имена], links: n}} — структура схемы для оценки ИИ.
 //
 // После сохранения — fire-and-forget ИИ-оценка (ai_text по WS, как code review).
+// logDesignCheck — детерминированная сверка схемы с обязательными артефактами
+// кейса (spec-24). Отчёт пересчитывает то же самое по событию whiteboard_save;
+// отдельное событие нужно для аудита: «чего не хватило» на момент сдачи, а не
+// после того, как формулировка кейса или required поменяются в роли.
+func (s *Server) logDesignCheck(ctx context.Context, m models.Session, blocks []string) {
+	track, err := s.tracks.GetOrDefault(string(m.TrackID))
+	if err != nil {
+		return
+	}
+	c := track.Board.CaseForGrade(m.Grade)
+	if c == nil || len(c.Required) == 0 {
+		return // кейс без обязательных артефактов — сверять нечего
+	}
+	found, missing := c.Coverage(blocks)
+	_, _ = s.sessions.AddEvent(ctx, m.ID, "design_check", mustMarshal(map[string]any{
+		"case":     c.Title,
+		"required": len(c.Required),
+		"found":    found,
+		"missing":  missing,
+	}))
+}
+
 func (s *Server) handleWhiteboardPut(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseSessionID(w, r)
 	if !ok {
@@ -401,7 +423,9 @@ func (s *Server) handleWhiteboardPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = s.sessions.AddEvent(r.Context(), id, "whiteboard_save", mustMarshal(structure))
-	s.log.Info("whiteboard сохранён", "session", id, "blocks", len(structure["blocks"].([]string)))
+	blocks, _ := structure["blocks"].([]string)
+	s.log.Info("whiteboard сохранён", "session", id, "blocks", len(blocks))
+	s.logDesignCheck(r.Context(), m, blocks)
 
 	// ИИ-оценка по рубрике (fire-and-forget; транскрипт устного ответа
 	// стадии подтягивает interviewer из событий).
