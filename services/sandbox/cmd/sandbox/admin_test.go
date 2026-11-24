@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stelmakhdigital/grade-iv/services/sandbox/internal/runner"
@@ -166,6 +167,75 @@ func TestAdminGeneratePersists(t *testing.T) {
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("повторной генерацией ожидалось 409, получено %d: %v", resp.StatusCode, body)
 	}
+}
+
+// TestAdminGenerateSkin — «кожа» меняет только прозу: файлы (то есть проверки)
+// остаются из семьи, id отдельный, в meta видно, что это skin.
+func TestAdminGenerateSkin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("реальные прогоны bash в песочнице (не -short)")
+	}
+	file := filepath.Join(t.TempDir(), "gen.json")
+	ts, token := newTestServerWithBank(t, "subprocess", file)
+
+	base, body := postJSON(t, ts.URL+"/admin/tasks/generate", token, map[string]any{"family": "shell-stats", "seed": 33, "grade": "middle"})
+	if base.StatusCode != http.StatusCreated {
+		t.Fatalf("base: %d %v", base.StatusCode, body)
+	}
+	baseID, _ := body["id"].(string)
+
+	resp, out := postJSON(t, ts.URL+"/admin/tasks/generate", token, map[string]any{
+		"family": "shell-stats", "seed": 33, "grade": "middle",
+		"statement": "Ты обслуживаешь склад: в файле лежат остатки по позициям. Посчитай сумму, количество, среднее, минимум и максимум.",
+		"title":     "Сводка по складу",
+		"generator": "qwen3",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("skin: %d %v", resp.StatusCode, out)
+	}
+	skinID, _ := out["id"].(string)
+	if skinID == baseID || !strings.Contains(skinID, "-skin-") {
+		t.Fatalf("id кожи должен отличаться от базового: %s vs %s", skinID, baseID)
+	}
+
+	getTask := func(id string) (map[string]any, bool) {
+		raw, err := http.Get(ts.URL + "/api/v1/tasks")
+		if err != nil {
+			t.Fatalf("tasks: %v", err)
+		}
+		defer raw.Body.Close()
+		var list []map[string]any
+		if err := json.NewDecoder(raw.Body).Decode(&list); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		for _, tl := range list {
+			if tl["id"] == id {
+				return tl, true
+			}
+		}
+		return nil, false
+	}
+	skin, ok := getTask(skinID)
+	if !ok {
+		t.Fatalf("задача кожи %s не найдена в банке", skinID)
+	}
+	if skin["statement"].(string) == "" || !strings.Contains(skin["statement"].(string), "склад") {
+		t.Fatalf("условие кожи не сохранилось: %.80v", skin["statement"])
+	}
+	baseTask, _ := getTask(baseID)
+	if !sameFiles(skin["files"], baseTask["files"]) {
+		t.Fatalf("кожа поменяла файлы задачи (проверки должны оставаться из семьи)")
+	}
+	meta, _ := skin["meta"].(map[string]any)
+	if gen, _ := meta["generator"].(string); !strings.Contains(gen, "+skin:qwen3") {
+		t.Fatalf("meta.generator не помечен skin: %v", meta)
+	}
+}
+
+func sameFiles(a, b any) bool {
+	ra, _ := json.Marshal(a)
+	rb, _ := json.Marshal(b)
+	return bytes.Equal(ra, rb)
 }
 
 // TestAdminFamiliesContract — контракт списка семей: объекты со стеками и

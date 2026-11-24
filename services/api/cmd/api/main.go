@@ -15,6 +15,7 @@ import (
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/httpapi"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/taskpool"
 )
 
@@ -58,13 +59,25 @@ func main() {
 
 	// spec-24: фоновое пополнение пула задач Live-Code (выключено без
 	// SANDBOX_ADMIN_TOKEN — см. taskpool.New).
-	if job := taskpool.New(taskpool.Config{
+	poolCfg := taskpool.Config{
 		SandboxURL: cfg.SandboxURL,
 		AdminToken: cfg.SandboxAdminToken,
 		Min:        cfg.SandboxTasksMin,
 		MaxPerTick: cfg.SandboxTasksPerTick,
 		Interval:   time.Duration(cfg.SandboxTasksIntervalS) * time.Second,
-	}, logger); job != nil {
+		Skin:       cfg.SandboxTasksSkin,
+		FullGen:    cfg.SandboxTasksLLMGen,
+		Domain:     cfg.SandboxTasksDomain,
+	}
+	// Модель нужна только уровням B и C — без них не заводим лишний клиент.
+	if poolCfg.Skin || poolCfg.FullGen {
+		if cfg.LLMMock {
+			poolCfg.LLM = llm.NewMockProvider()
+		} else {
+			poolCfg.LLM = llm.NewClient(cfg.LLMBaseURL, cfg.LLMModel, cfg.LLMAPIKey)
+		}
+	}
+	if job := taskpool.New(poolCfg, logger); job != nil {
 		go job.Run(engineCtx)
 	}
 	srv := &http.Server{

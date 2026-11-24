@@ -14,21 +14,30 @@ import (
 )
 
 type fakeSandbox struct {
-	mu       sync.Mutex
-	counts   map[string]int // "stack|grade" -> число задач
-	gateOK   bool
-	authWant string
-	attempts []genAttempt
-	families []Family
-	unauthOK bool // принимать запросы без токена (проверка, что токен реально шлётся)
+	mu             sync.Mutex
+	counts         map[string]int // "stack|grade" -> число задач
+	gateOK         bool
+	authWant       string
+	attempts       []genAttempt
+	registered     []map[string]any
+	registerStatus int
+	families       []Family
+	unauthOK       bool // принимать запросы без токена (проверка, что токен реально шлётся)
 }
 
 type genAttempt struct {
-	Family string `json:"family"`
-	Seed   int64  `json:"seed"`
-	Grade  string `json:"grade"`
-	Auth   string
+	Family    string `json:"family"`
+	Seed      int64  `json:"seed"`
+	Grade     string `json:"grade"`
+	Statement string `json:"statement"`
+	Generator string `json:"generator"`
+	Auth      string
 }
+
+// baseStatement — условие семейной задачи (с ним кожа сравнивает ответ модели).
+const baseStatement = `Напишите bash-скрипт solution.sh: первый аргумент — путь к файлу данных. ` +
+	`Формат данных: строки, значения разделены пробелом или запятой. Мусор NA не учитывается. ` +
+	`Напечатать ровно 5 строк: sum=, n=, avg=, min=, max=. Проверка сверяет вывод построчно.`
 
 func newFake(t *testing.T) (*fakeSandbox, *httptest.Server) {
 	t.Helper()
@@ -40,12 +49,20 @@ func newFake(t *testing.T) (*fakeSandbox, *httptest.Server) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/tasks", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
 		f.mu.Lock()
-		n := f.counts[r.URL.Query().Get("stack")+"|"+r.URL.Query().Get("grade")]
+		n := f.counts[q.Get("stack")+"|"+q.Get("grade")]
 		f.mu.Unlock()
-		list := make([]map[string]string, n)
+		grade := q.Get("grade")
+		list := make([]map[string]any, n)
 		for i := range list {
-			list[i] = map[string]string{"id": strconv.Itoa(i)}
+			// id и meta — как у настоящей семейной задачи: кожа разбирает их,
+			// чтобы попросить пересборку той же семьи с тем же seed.
+			list[i] = map[string]any{
+				"id":        "shell-stats-" + grade + "-" + strconv.Itoa(i+1) + "-abcd12",
+				"statement": baseStatement,
+				"meta":      map[string]any{"family": "shell-stats", "seed": i + 1},
+			}
 		}
 		_ = json.NewEncoder(w).Encode(list)
 	})
@@ -79,8 +96,31 @@ func newFake(t *testing.T) (*fakeSandbox, *httptest.Server) {
 		key := "shell|" + a.Grade
 		f.counts[key]++
 		f.mu.Unlock()
+		id := a.Family + "-" + a.Grade
+		if a.Statement != "" {
+			id += "-skin"
+		}
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]string{"id": a.Family + "-" + a.Grade})
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": id})
+	})
+	// Уровень C: готовое содержимое задачи; исход ответа настраивает тест.
+	mux.HandleFunc("POST /admin/tasks", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		f.mu.Lock()
+		f.registered = append(f.registered, body)
+		status := f.registerStatus
+		f.mu.Unlock()
+		if status != http.StatusCreated {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"ok":false,"reasons":["mutant-2 прошёл тесты"]}`))
+			return
+		}
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "llm-task-1"})
 	})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)

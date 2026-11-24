@@ -8,10 +8,8 @@
 package taskpool
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -33,6 +31,19 @@ type Config struct {
 	// бракует всё, тикет не должен гонять gate по кругу.
 	MaxPerTick int
 	Interval   time.Duration // период проверки (def 10m)
+	// LLM — модель для уровня B (кожа условия) и C (задача целиком). nil —
+	// оба уровня выключены.
+	LLM LLM
+	// Skin — разрешить Level B (переписать условие семьи под домен роли).
+	Skin bool
+	// FullGen — разрешить уровень C (модель пишет задачу целиком). Оставлен
+	// выключенным по умолчанию: пока не видно, что местная модель выдаёт
+	// проходившие gate задачи чаще, чем мусор.
+	FullGen bool
+	// Domain — предметная область для кожи («log-анализ», «инфраструктура»);
+	// пусто — общая разработка.
+	Domain string
+
 	// HTTP — транспорт (в тестах — httptest); nil → http.DefaultClient.
 	HTTP *http.Client
 	Rand *rand.Rand
@@ -103,9 +114,28 @@ func (j *Job) Run(ctx context.Context) {
 	}
 }
 
-// pass — один проход: для каждой пары (стек, грейд) сравнить число задач с
-// порогом и добрать недостающее. Возвращает число принятых задач.
+// pass — один проход: долить пул семьями-генераторами, затем (если разрешено)
+// одна попытка кожи условия и одна — задачи целиком. Возвращает число принятых
+// семейных задач.
+//
+// LLM-проходы идут всегда, даже когда порог выполнен: пополнение и разнообразие
+// — разные задачи, и «пул полный» не означает «кандидату нечего нового показать».
 func (j *Job) pass(ctx context.Context) int {
+	made := j.fillFamilies(ctx)
+	if j.cfg.LLM != nil {
+		if j.cfg.Skin {
+			j.skinTick(ctx)
+		}
+		if j.cfg.FullGen {
+			j.fullGenTick(ctx)
+		}
+	}
+	return made
+}
+
+// fillFamilies — для каждой пары (стек, грейд) сравнить число задач с порогом и
+// добрать недостающее.
+func (j *Job) fillFamilies(ctx context.Context) int {
 	fams, err := j.families(ctx)
 	if err != nil {
 		j.log.Warn("taskpool: семьи недоступны", "err", err)
@@ -168,41 +198,24 @@ func (j *Job) families(ctx context.Context) ([]Family, error) {
 	return out.Families, err
 }
 
-// generate — попросить sandbox собрать и зарегистрировать задачу. Возвращает id
-// принятой задачи ("" — не принято).
+// generate — попросить sandbox собрать и зарегистрировать задачу семьи.
 func (j *Job) generate(ctx context.Context, family string, seed int64, grade string) (string, error) {
 	body, _ := json.Marshal(map[string]any{"family": family, "seed": seed, "grade": grade})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		j.cfg.SandboxURL+"/admin/tasks/generate", bytes.NewReader(body))
+	id, status, detail, err := j.postAdmin(ctx, "/admin/tasks/generate", body)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+j.cfg.AdminToken)
-	resp, err := j.cfg.HTTP.Do(req)
-	if err != nil {
-		return "", err
+	if id == "" && status == http.StatusUnprocessableEntity {
+		// Gate отверг: задача не в пуле, в этом проходе сюда не лезем повторно.
+		return "", fmt.Errorf("gate отверг задачу: %s", detail)
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	switch {
-	case resp.StatusCode == http.StatusCreated:
-		var out struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(raw, &out); err != nil {
-			return "", fmt.Errorf("разбор ответа генерации: %w", err)
-		}
-		return out.ID, nil
-	case resp.StatusCode == http.StatusConflict:
-		// Такой seed уже в пуле — это не поломка, просто следующий тик возьмёт
-		// другой seed.
-		return "", nil
-	case resp.StatusCode == http.StatusUnprocessableEntity:
-		return "", errors.New("gate отверг задачу: " + string(raw))
-	default:
-		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(raw))
-	}
+	return id, nil
+}
+
+// readLimited — чтение ответа с потолком (sandbox может ответить и большим
+// списком задач).
+func readLimited(r io.Reader, n int64) ([]byte, error) {
+	return io.ReadAll(io.LimitReader(r, n))
 }
 
 func (j *Job) getJSON(ctx context.Context, url string, headers map[string]string, out any) error {

@@ -43,13 +43,22 @@ type Config struct {
 	// SandboxTasksIntervalS — период проверки пула, с (SANDBOX_TASKS_INTERVAL_S,
 	// def 600).
 	SandboxTasksIntervalS int
-	LogLevel              string // уровень логов (LOG_LEVEL)
-	SilenceNudgeS         int    // тишина > порога → nudge от ИИ, с (SILENCE_NUDGE_S)
-	LLMMock               bool   // LLM-мок вместо реального эндпоинта (LLM_MOCK=1; dev/CI, ADR-005)
-	DebugEndpoints        bool   // dev-эндпоинты (/debug/*) — только явное включение (ENABLE_DEBUG=1; дефолт OFF)
-	LLMEnableThinking     bool   // vLLM chat_template_kwargs.enable_thinking (LLM_ENABLE_THINKING, дефолт false — SLO голосового контура)
-	VADEndSilenceMS       int    // конец реплики по тишине, мс (VAD_END_SILENCE_MS, ADR-002)
-	VADRMSThreshold       int    // абсолютный мин. порог RMS int16 (VAD_RMS_THRESHOLD); фактический — адаптивный (3×шумовой пол)
+	// SandboxTasksSkin — уровень B: LLM переписывает условие семьи под домен
+	// (SANDBOX_TASKS_SKIN=1). Файлы и проверки при этом остаются из семьи.
+	SandboxTasksSkin bool
+	// SandboxTasksLLMGen — уровень C: LLM пишет задачу целиком, приём только по
+	// вердикту gate (SANDBOX_TASKS_LLM_GEN=1). По умолчанию выключено.
+	SandboxTasksLLMGen bool
+	// SandboxTasksDomain — предметная область для кожи (SANDBOX_TASKS_DOMAIN);
+	// пусто — общая разработка.
+	SandboxTasksDomain string
+	LogLevel           string // уровень логов (LOG_LEVEL)
+	SilenceNudgeS      int    // тишина > порога → nudge от ИИ, с (SILENCE_NUDGE_S)
+	LLMMock            bool   // LLM-мок вместо реального эндпоинта (LLM_MOCK=1; dev/CI, ADR-005)
+	DebugEndpoints     bool   // dev-эндпоинты (/debug/*) — только явное включение (ENABLE_DEBUG=1; дефолт OFF)
+	LLMEnableThinking  bool   // vLLM chat_template_kwargs.enable_thinking (LLM_ENABLE_THINKING, дефолт false — SLO голосового контура)
+	VADEndSilenceMS    int    // конец реплики по тишине, мс (VAD_END_SILENCE_MS, ADR-002)
+	VADRMSThreshold    int    // абсолютный мин. порог RMS int16 (VAD_RMS_THRESHOLD); фактический — адаптивный (3×шумовой пол)
 	// VADPreSilenceMS — предварительная тишина для pre-STT (VAD_PRESTT_SILENCE_MS,
 	// default 400; 0 — отключает pre-STT).
 	VADPreSilenceMS int
@@ -115,6 +124,9 @@ func Load() (*Config, error) {
 		SandboxTasksMin:       getEnvInt("SANDBOX_TASKS_MIN", 4),
 		SandboxTasksPerTick:   getEnvInt("SANDBOX_TASKS_PER_TICK", 4),
 		SandboxTasksIntervalS: getEnvInt("SANDBOX_TASKS_INTERVAL_S", 600),
+		SandboxTasksSkin:      getEnv("SANDBOX_TASKS_SKIN", "") == "1",
+		SandboxTasksLLMGen:    getEnv("SANDBOX_TASKS_LLM_GEN", "") == "1",
+		SandboxTasksDomain:    os.Getenv("SANDBOX_TASKS_DOMAIN"),
 		LogLevel:              getEnv("LOG_LEVEL", "info"),
 		SilenceNudgeS:         getEnvInt("SILENCE_NUDGE_S", 45),
 		LLMMock:               getEnv("LLM_MOCK", "") == "1",

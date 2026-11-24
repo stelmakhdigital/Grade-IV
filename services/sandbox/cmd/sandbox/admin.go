@@ -30,6 +30,13 @@ type generateRequest struct {
 	Family string `json:"family"`
 	Seed   int64  `json:"seed"`
 	Grade  string `json:"grade"`
+	// Statement/Title — «кожа» (spec-24 B): прозу переписывает LLM под домен
+	// роли, файлы и проверки остаются из семьи. Проза не исполняется, поэтому
+	// её пускаем сюда; файлы по-прежнему только через /admin/tasks и gate.
+	Statement string `json:"statement"`
+	// Generator — кто сделал задачу (для meta и отчёта), например
+	// "family:shell-stats+skin:qwen3".
+	Generator string `json:"generator"`
 }
 
 // registerRequest — POST /admin/tasks: готовое содержимое задачи (уровни B и C:
@@ -90,15 +97,32 @@ func handleTaskGenerate(bank *tasks.Bank, rn taskgen.Runner, log *slog.Logger) h
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "build_failed", "detail": err.Error()})
 			return
 		}
+		skinned := req.Statement != ""
+		if skinned {
+			draft.Statement = req.Statement
+		}
+		gen := "family:" + req.Family
+		if skinned {
+			gen += "+skin"
+			if req.Generator != "" {
+				gen += ":" + req.Generator
+			}
+		}
 		t := &tasks.Task{
 			Stack:     familyStack(req.Family),
 			Grades:    draft.Grades,
 			Title:     draft.Title,
 			Statement: draft.Statement,
 			Files:     draft.Files,
-			Meta:      &tasks.Meta{Family: req.Family, Seed: req.Seed, Generator: "family:" + req.Family},
+			Meta:      &tasks.Meta{Family: req.Family, Seed: req.Seed, Generator: gen},
 		}
-		t.ID = generatedID(req.Family, req.Grade, req.Seed, tasks.Hash(draft.Files))
+		// Кожа — отдельная задача: id с -skin-, иначе она спорит с базовой за
+		// одно место в банке, а в пуле нужны обе.
+		idGrade := req.Grade
+		if skinned {
+			idGrade += "-skin"
+		}
+		t.ID = generatedID(req.Family, idGrade, req.Seed, tasks.Hash(draft.Files))
 		resp, status, err := gateAndStore(r.Context(), bank, rn, t, draft.Reference, draft.Mutants, log)
 		if err != nil {
 			writeJSON(w, status, map[string]string{"error": "gate_failed", "detail": err.Error()})
