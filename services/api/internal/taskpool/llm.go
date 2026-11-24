@@ -36,9 +36,12 @@ type bankTask struct {
 //
 // Одна попытка за тик: ответ модели — секунды, а пул работа фоновая.
 func (j *Job) skinTick(ctx context.Context) {
-	stack := j.cfg.Stacks[j.cfg.Rand.Intn(len(j.cfg.Stacks))]
-	grade := j.cfg.Grades[j.cfg.Rand.Intn(len(j.cfg.Grades))]
+	stack, grade, ok := j.randomPair(ctx)
+	if !ok {
+		return
+	}
 	var list []bankTask
+	var err error
 	if err := j.getJSON(ctx, j.cfg.SandboxURL+"/api/v1/tasks?stack="+stack+"&grade="+grade, nil, &list); err != nil {
 		j.log.Warn("taskpool: кожа — список задач не получен", "err", err)
 		return
@@ -142,13 +145,32 @@ func (j *Job) rewriteStatement(ctx context.Context, base *bankTask, grade string
 	return text, nil
 }
 
+// randomPair — случайная пара (стек, грейд) из того, что умеют семьи sandbox.
+// Отдельного списка стеков в конфиге нет намеренно: пара без семьи всё равно
+// ничего не даст, а забыть обновить список — обычный способ получить молчание.
+func (j *Job) randomPair(ctx context.Context) (string, string, bool) {
+	fams, err := j.families(ctx)
+	if err != nil {
+		j.log.Warn("taskpool: семьи недоступны", "err", err)
+		return "", "", false
+	}
+	pairs := j.watchedPairs(fams)
+	if len(pairs) == 0 {
+		return "", "", false
+	}
+	p := pairs[j.cfg.Rand.Intn(len(pairs))]
+	return p.stack, p.grade, true
+}
+
 // fullGenTick — уровень C: модель пишет задачу целиком (условие, файлы, эталон,
 // мутанты). Единственная причина, по которой это вообще безопасно, — pre-flight
 // gate: эталон обязан пройти, мутанты обязаны упасть. Маленькая модель будет
 // браковаться часто; это нормальный исход, а не поломка.
 func (j *Job) fullGenTick(ctx context.Context) {
-	stack := j.cfg.Stacks[j.cfg.Rand.Intn(len(j.cfg.Stacks))]
-	grade := j.cfg.Grades[j.cfg.Rand.Intn(len(j.cfg.Grades))]
+	stack, grade, ok := j.randomPair(ctx)
+	if !ok {
+		return
+	}
 
 	d, err := j.askTaskJSON(ctx, stack, grade)
 	if err != nil {

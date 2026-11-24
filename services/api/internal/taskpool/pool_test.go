@@ -225,18 +225,42 @@ func TestGateRejectStops(t *testing.T) {
 	}
 }
 
-// TestFamilyMismatch — для стека нет семьи: генерации нет (иначе слались бы
-// запросы заведомо в ошибку).
+// TestFamilyMismatch — явный фильтр по стеку, для которого семьи нет: генерации
+// нет и запросов нет (иначе слались бы запросы заведомо в ошибку). Пары слежки
+// берутся из семей sandbox, поэтому «нет семьи» теперь означает просто «пустой
+// список семей», а не «не совпал со списком в конфиге».
 func TestFamilyMismatch(t *testing.T) {
 	f, ts := newFake(t)
 	f.families = []Family{{ID: "go-algo", Stacks: []string{"go"}, Grades: []string{"senior"}}}
-	if made := newJob(ts, 3, 100).pass(context.Background()); made != 0 {
+	job := newJob(ts, 3, 100)
+	// Оператор сказал следить за shell, а семья только go/senior.
+	job.cfg.Stacks = []string{"shell"}
+	job.cfg.Grades = []string{"junior", "middle", "senior", "staff"}
+	if made := job.pass(context.Background()); made != 0 {
 		t.Fatalf("сгенерировано %d задач без подходящей семьи", made)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.attempts) != 0 {
 		t.Fatalf("поступили запросы генерации без подходящей семьи: %+v", f.attempts)
+	}
+}
+
+// TestPairsComeFromFamilies — новая логика: следить за парами из семей, а не за
+// жёстко прописанным списком стеков. Семья go/senior должна порождать запросы на
+// go+senior, хотя в конфиге стеков нет вовсе.
+func TestPairsComeFromFamilies(t *testing.T) {
+	f, ts := newFake(t)
+	f.families = []Family{{ID: "go-algo", Stacks: []string{"go"}, Grades: []string{"senior"}}}
+	if made := newJob(ts, 3, 100).pass(context.Background()); made == 0 {
+		t.Fatalf("ни одной задачи: пул не увидел пару go/senior из семьи")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, a := range f.attempts {
+		if a.Family != "go-algo" || a.Grade != "senior" {
+			t.Fatalf("запрос не по паре из семьи: %+v", a)
+		}
 	}
 }
 
@@ -256,5 +280,30 @@ func TestRunStopsOnContext(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatalf("Run не завершился по отмене ctx")
+	}
+}
+
+// TestThresholdCountsGeneratedOnly — порог считается по задачам генератора.
+// Встроенный банк велик и конечен: если считать его, пары go/python были бы
+// «сыты» всегда, и семьи для них не работали бы никогда.
+func TestThresholdCountsGeneratedOnly(t *testing.T) {
+	f, ts := newFake(t)
+	f.listOverride = func(grade string) []map[string]any {
+		list := make([]map[string]any, 0, 11)
+		for i := 0; i < 10; i++ {
+			// задачи встроенного банка: meta нет
+			list = append(list, map[string]any{"id": "go-a-" + strconv.Itoa(i), "statement": baseStatement})
+		}
+		list = append(list, map[string]any{
+			"id": "shell-stats-" + grade + "-1-abcd12", "statement": baseStatement,
+			"meta": map[string]any{"family": "shell-stats", "seed": 1, "generator": "family:shell-stats"},
+		})
+		return list
+	}
+	job := newJob(ts, 4, 100)
+	job.cfg.Stacks = []string{"shell"} // одна пара, чтобы число попыток было точным
+	job.cfg.Grades = []string{"middle"}
+	if made := job.pass(context.Background()); made != 3 {
+		t.Fatalf("добавлено %d задач, ожидалось 3 (в пуле была 1 семейная из четырёх)", made)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"net/http"
+	"sort"
 	"time"
 )
 
@@ -62,15 +63,11 @@ type Family struct {
 	Grades []string `json:"grades"`
 }
 
-// Defaults: следим за shell — единственная семья пока shell-ная, и именно по
-// shell банк был тоньше всего (1 задача на junior, 0 на senior/staff).
+// Defaults. Стеки и грейды по умолчанию НЕ задаются: за чем следить, решает
+// sandbox — пары (стек, грейд) берутся из его семей (familyPairs). Иначе список
+// пришлось бы синхронизировать с двумя репозиториями кода: новая семья молчала
+// бы, пока кто-нибудь не допишет сюда стек.
 func applyDefaults(c *Config) {
-	if len(c.Stacks) == 0 {
-		c.Stacks = []string{"shell"}
-	}
-	if len(c.Grades) == 0 {
-		c.Grades = []string{"junior", "middle", "senior", "staff"}
-	}
 	if c.Min <= 0 {
 		c.Min = 4
 	}
@@ -142,50 +139,113 @@ func (j *Job) fillFamilies(ctx context.Context) int {
 		return 0
 	}
 	made := 0
-	for _, stack := range j.cfg.Stacks {
-		for _, grade := range j.cfg.Grades {
-			if made >= j.cfg.MaxPerTick {
-				return made
+	for _, p := range j.watchedPairs(fams) {
+		stack, grade := p.stack, p.grade
+		if made >= j.cfg.MaxPerTick {
+			return made
+		}
+		have, err := j.count(ctx, stack, grade)
+		if err != nil {
+			j.log.Warn("taskpool: счёт задач не получен", "stack", stack, "grade", grade, "err", err)
+			continue
+		}
+		for have < j.cfg.Min && made < j.cfg.MaxPerTick {
+			fam := pickFamily(fams, stack, grade, j.cfg.Rand)
+			if fam == "" {
+				j.log.Warn("taskpool: нет семьи для стека/грейда", "stack", stack, "grade", grade)
+				break
 			}
-			have, err := j.count(ctx, stack, grade)
+			seed := j.cfg.Rand.Int63n(1_000_000) + 1
+			accepted, err := j.generate(ctx, fam, seed, grade)
 			if err != nil {
-				j.log.Warn("taskpool: счёт задач не получен", "stack", stack, "grade", grade, "err", err)
-				continue
+				// Gate отверг задачу или sandbox недоступен. Повторим на
+				// следующем тике с другим seed; в этом проходе больше не лезем.
+				j.log.Warn("taskpool: генерация не принята",
+					"family", fam, "seed", seed, "stack", stack, "grade", grade, "err", err)
+				break
 			}
-			for have < j.cfg.Min && made < j.cfg.MaxPerTick {
-				fam := pickFamily(fams, stack, grade, j.cfg.Rand)
-				if fam == "" {
-					j.log.Warn("taskpool: нет семьи для стека/грейда", "stack", stack, "grade", grade)
-					break
-				}
-				seed := j.cfg.Rand.Int63n(1_000_000) + 1
-				accepted, err := j.generate(ctx, fam, seed, grade)
-				if err != nil {
-					// Gate отверг задачу или sandbox недоступен. Повторим на
-					// следующем тике с другим seed; в этом проходе больше не лезем.
-					j.log.Warn("taskpool: генерация не принята",
-						"family", fam, "seed", seed, "stack", stack, "grade", grade, "err", err)
-					break
-				}
-				if accepted == "" {
-					break
-				}
-				j.log.Info("taskpool: задача в пуле", "id", accepted, "family", fam, "seed", seed, "grade", grade)
-				have++
-				made++
+			if accepted == "" {
+				break
 			}
+			j.log.Info("taskpool: задача в пуле", "id", accepted, "family", fam, "seed", seed, "grade", grade)
+			have++
+			made++
 		}
 	}
 	return made
 }
 
+// pair — пара (стек, грейд), по которой пул держит порог задач.
+type pair struct{ stack, grade string }
+
+// familyPairs — пары, которые умеют семьи sandbox: порядок детерминированный
+// (стек, затем грейд), дубликаты убраны.
+func familyPairs(fams []Family) []pair {
+	set := map[pair]bool{}
+	for _, f := range fams {
+		for _, st := range f.Stacks {
+			for _, g := range f.Grades {
+				set[pair{st, g}] = true
+			}
+		}
+	}
+	out := make([]pair, 0, len(set))
+	for p := range set {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].stack != out[j].stack {
+			return out[i].stack < out[j].stack
+		}
+		return out[i].grade < out[j].grade
+	})
+	return out
+}
+
+// watchedPairs — за чем следим: пары семей; если в конфиге задан явный фильтр по
+// стекам/грейдам — он ограничивает (операторскийrучкой, не дефолт).
+func (j *Job) watchedPairs(fams []Family) []pair {
+	all := familyPairs(fams)
+	if len(j.cfg.Stacks) == 0 && len(j.cfg.Grades) == 0 {
+		return all
+	}
+	inList := func(list []string, v string) bool {
+		if len(list) == 0 {
+			return true
+		}
+		for _, x := range list {
+			if x == v {
+				return true
+			}
+		}
+		return false
+	}
+	out := make([]pair, 0, len(all))
+	for _, p := range all {
+		if inList(j.cfg.Stacks, p.stack) && inList(j.cfg.Grades, p.grade) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // count — сколько задач стека/грейда видно в банке.
+// count — сколько задач пары выдал генератор (у таких meta.family заполнен).
+// Встроенный банк в порог не входит: он конечен и велик, поэтому «не меньше Min
+// на пару» поверх встроенных 12 задач означало бы, что динамический слой для
+// go и python не включается никогда — ровно то, ради чего семьи и заводили.
 func (j *Job) count(ctx context.Context, stack, grade string) (int, error) {
-	var tasks []json.RawMessage
+	var tasks []bankTask
 	if err := j.getJSON(ctx, j.cfg.SandboxURL+"/api/v1/tasks?stack="+stack+"&grade="+grade, nil, &tasks); err != nil {
 		return 0, err
 	}
-	return len(tasks), nil
+	n := 0
+	for i := range tasks {
+		if tasks[i].Meta != nil && tasks[i].Meta.Family != "" {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // families — список семей-генераторов (админский маршрут: семья — про генерацию,
