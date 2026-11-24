@@ -31,6 +31,12 @@ export function humanSeconds(sec: number): string {
   return `${min} мин`;
 }
 
+/** Остаток лимита времени сессии в м:сс (таймер в шапке интервью). */
+export function formatClock(totalS: number): string {
+  const s = Math.max(0, Math.round(totalS));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 /**
  * spec-22: человекочитаемое имя рантайма практики («Go», «Python», «bash»);
  * null — практики нет (подпись стадии — не «Практика»).

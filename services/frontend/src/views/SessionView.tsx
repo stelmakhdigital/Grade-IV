@@ -10,7 +10,7 @@ import { MicVisualizer, type MicEqMode } from './MicVisualizer';
 import { useVoiceSession } from '../hooks/useVoiceSession';
 import { micDebugEnabled } from '../audio/mic';
 import { formatRecDuration, mergeRecording, MIN_SPEECH_MS } from '../recording';
-import { practiceLabel, statusLabel, stageLabel } from '../labels';
+import { formatClock, practiceLabel, statusLabel, stageLabel } from '../labels';
 import { PanelLoading } from './PanelLoading';
 
 // Тяжёлые панели — лениво (B2): чанки Live-Code (Monaco-обёртка), System
@@ -40,10 +40,12 @@ export function SessionView({ id }: { id: number }) {
     trackMeta,
     task,
     tasks,
+    remainingS,
     lastAiText,
     mic,
     micDbg,
-    speaking,    wsState,
+    speaking,
+    wsState,
     error,
     stageDebug,
     micLevelRef,
@@ -217,6 +219,19 @@ export function SessionView({ id }: { id: number }) {
                 : wsState === 'error' ? 'ошибка соединения'
                 : 'соединение закрыто'}
             </span>
+            {/* Лимит времени сессии есть (грейд → duration_limit_s), а увидеть
+               его было негде: сервер шлёт timer/remaining_s, UI его молча
+               терял (ui-review 2026-11-24). Без лимита (remaining = 0) не показываем. */}
+            {remainingS !== null && remainingS > 0 && (
+              <span
+                className={`timer${remainingS < 300 ? ' warn' : ''}`}
+                role="timer"
+                aria-label={`Осталось ${formatClock(remainingS)}`}
+                data-testid="session-timer"
+              >
+                осталось {formatClock(remainingS)}
+              </span>
+            )}
             {(wsState === 'closed' || wsState === 'error') && (
               <button
                 type="button"

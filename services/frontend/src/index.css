@@ -37,7 +37,7 @@ p {
 }
 
 .muted {
-  color: #6b7688;
+  color: #8f9bb0; /* было #6b7688 — 4.01:1 на карточке, не проходило AA */
 }
 
 .small {
@@ -75,6 +75,12 @@ p {
 
 .btn:hover {
   border-color: #3a465c;
+}
+
+/* Отклик на нажатие: на тач-устройствах :hover не срабатывает, и без
+   :active кнопка выглядела мёртвой (ui-review 2026-11-24). */
+.btn:active {
+  transform: translateY(1px);
 }
 
 .btn.primary {
@@ -193,7 +199,6 @@ p {
   padding: 12px;
 }
 .modal-textarea:focus {
-  outline: none;
   border-color: #7aa2f7;
 }
 
@@ -217,7 +222,7 @@ p {
 .field span {
   display: block;
   font-size: 12px;
-  color: #6b7688;
+  color: #8f9bb0; /* было #6b7688 — 4.01:1 на карточке, не проходило AA */
   margin-bottom: 4px;
 }
 
@@ -234,7 +239,8 @@ p {
 
 .field input:focus,
 .field select:focus {
-  outline: none;
+  /* outline не снимаем: :focus-visible ниже даёт рамку обвода, а specificity у
+     этого правила выше — с outline:none клавиатурный фокус в полях пропал. */
   border-color: #7aa2f7;
 }
 
@@ -439,7 +445,7 @@ p {
 
 .sessions-table th {
   text-align: left;
-  color: #6b7688;
+  color: #8f9bb0; /* было #6b7688 — 4.01:1 на карточке, не проходило AA */
   font-weight: normal;
   padding: 6px 8px;
   border-bottom: 1px solid #232a3a;
@@ -539,7 +545,7 @@ p {
   justify-content: space-between;
   gap: 12px;
   font-size: 12px;
-  color: #6b7688;
+  color: #8f9bb0; /* было #6b7688 — 4.01:1 на карточке, не проходило AA */
 }
 
 .event-kind {
@@ -610,7 +616,7 @@ p {
 }
 
 .conn {
-  color: #6b7688;
+  color: #8f9bb0; /* было #6b7688 — 4.01:1 на карточке, не проходило AA */
 }
 
 .conn.open {
@@ -619,6 +625,15 @@ p {
 
 .conn.error {
   color: #e06c75;
+}
+
+/* Остаток лимита времени сессии (серверский timer/remaining_s). */
+.timer {
+  font-variant-numeric: tabular-nums;
+  color: #9aa4b8;
+}
+.timer.warn {
+  color: #e5c07b;
 }
 
 .saying {
@@ -756,7 +771,7 @@ p {
 
 .line-who {
   font-size: 12px;
-  color: #6b7688;
+  color: #8f9bb0; /* было #6b7688 — 4.01:1 на карточке, не проходило AA */
 }
 
 .line.user .line-who {
@@ -1365,7 +1380,7 @@ a:focus-visible {
   display: inline-block;
   margin: 4px 8px 0 0;
   font-size: 12px;
-  color: #6b7688;
+  color: #8f9bb0; /* было #6b7688 — 4.01:1 на карточке, не проходило AA */
 }
 
 /* spec-14/D16: мобильная раскладка (раньше ни одного @media — таблицы и
@@ -1384,7 +1399,8 @@ a:focus-visible {
     font-size: 24px;
   }
   .table-wrap,
-  .sessions-table {
+  .sessions-table,
+  .progress-table {
     display: block;
     overflow-x: auto;
   }
@@ -1396,6 +1412,15 @@ a:focus-visible {
   .report-columns {
     grid-template-columns: 1fr !important;
   }
+  /* Share-блок с min-width: 200px вылезал за вьюпорт (375 → 446 px, скролл
+     по горизонтали на странице отчёта). */
+  .report-head {
+    flex-wrap: wrap;
+  }
+  .report-share {
+    min-width: 0;
+    align-items: flex-start;
+  }
   .voice-controls {
     flex-wrap: wrap;
   }
@@ -1405,5 +1430,25 @@ a:focus-visible {
   }
   .modal-box {
     max-width: 92vw;
+  }
+}
+
+/* Тап-таргеты на устройствах без мыши (замеры 2026-11-24): .btn 34 px,
+   .btn.small 25 px, чипы фильтра 23 px, ссылка «Хочу попасть в кампанию»
+   15 px, вкладки задач 27 px, плитки палитры 29 px — ниже 44 px. */
+@media (pointer: coarse) {
+  .btn,
+  .btn.small,
+  .tab,
+  .task-tab,
+  .palette-item,
+  .history-filter .chip {
+    min-height: 44px;
+  }
+  .history-filter .chip {
+    padding: 8px 14px;
+  }
+  .vacancy-link {
+    padding: 10px 12px 10px 0;
   }
 }

@@ -236,6 +236,16 @@ describe('SessionView (WP-8)', () => {
     fake.deliver(JSON.stringify({ type: 'ai_text', text: 'Подпись' }));
     expect(await screen.findByTestId('ai-say')).toHaveTextContent('Подпись');
 
+    // ui-review 2026-11-24: серверный остаток лимита показан в шапке, при 0 — скрыт
+    fake.deliver(JSON.stringify({ type: 'timer', remaining_s: 125 }));
+    const timer = await screen.findByTestId('session-timer');
+    expect(timer).toHaveTextContent('2:05');
+    expect(timer).toHaveClass('warn'); // меньше 5 минут
+    fake.deliver(JSON.stringify({ type: 'timer', remaining_s: 2400 }));
+    await waitFor(() => expect(screen.getByTestId('session-timer')).not.toHaveClass('warn'));
+    fake.deliver(JSON.stringify({ type: 'timer', remaining_s: 0 }));
+    await waitFor(() => expect(screen.queryByTestId('session-timer')).toBeNull());
+
     // finish → ui-событие в WS (spec-14/D14: подтверждение двойным кликом)
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Завершить интервью' }));
