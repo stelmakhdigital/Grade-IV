@@ -16,15 +16,25 @@ import (
 
 func newTestServer(t *testing.T, mode string) *httptest.Server {
 	t.Helper()
+	ts, _ := newTestServerWithBank(t, mode, "")
+	return ts
+}
+
+// newTestServerWithBank — сервер с банком, overlay которого лежит в file
+// (пусто — банк read-only). Возвращает и токен /admin/*, чтобы тесты не
+// держали его строку-константу.
+func newTestServerWithBank(t *testing.T, mode, file string) (*httptest.Server, string) {
+	t.Helper()
+	const adminToken = "test-admin-token"
 	log := slog.New(slog.DiscardHandler)
-	bank, err := tasks.Default()
+	bank, err := tasks.Load(file)
 	if err != nil {
 		t.Fatalf("tasks: %v", err)
 	}
 	rn := runner.New(runner.Config{Mode: mode})
-	ts := httptest.NewServer(withLogging(buildMux(mode, bank, rn, log), log))
+	ts := httptest.NewServer(withLogging(buildMux(mode, bank, rn, adminToken, log), log))
 	t.Cleanup(ts.Close)
-	return ts
+	return ts, adminToken
 }
 
 func TestHealth(t *testing.T) {
@@ -123,7 +133,7 @@ func TestRunSubprocess(t *testing.T) {
 			"python": "printf 'boom\\n' && exit 3",
 		},
 	})
-	mux := buildMux("subprocess", bank, rn, log)
+	mux := buildMux("subprocess", bank, rn, "test-admin-token", log)
 	ts := httptest.NewServer(withLogging(mux, log))
 	t.Cleanup(ts.Close)
 

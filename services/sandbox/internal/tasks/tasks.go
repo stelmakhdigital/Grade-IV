@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -18,18 +19,31 @@ var rawTasks string
 // Task — задача банка.
 type Task struct {
 	ID        string            `json:"id"`
-	Stack     string            `json:"stack"` // go | python
+	Stack     string            `json:"stack"` // go | python | shell
 	Grades    []string          `json:"grades"`
 	Title     string            `json:"title"`
 	Statement string            `json:"statement"`
 	Files     map[string]string `json:"files"`
+	// Meta — происхождение задачи (spec-24): у сгенерированных задач семья, seed
+	// и хэш содержимого, чтобы отчёт можно было пересобрать и оспорить.
+	Meta *Meta `json:"meta,omitempty"`
 }
 
-// Bank — банк задач.
+// Meta — происхождение задачи (spec-24).
+type Meta struct {
+	Family    string `json:"family"`
+	Seed      int64  `json:"seed,omitempty"`
+	Generator string `json:"generator,omitempty"`
+	Hash      string `json:"hash"`
+}
+
+// Bank — банк задач: встроенный JSON плюс overlay из файла (spec-24).
 type Bank struct {
 	mu    sync.RWMutex
 	tasks []*Task
 	byID  map[string]*Task
+	// file — куда писать overlay (пусто — банк только из embed, Add запрещён).
+	file string
 }
 
 var (
@@ -41,22 +55,50 @@ var (
 // Default — глобальный банк из встраиваемого JSON.
 func Default() (*Bank, error) {
 	defaultBankOnce.Do(func() {
-		var list []*Task
-		if err := json.Unmarshal([]byte(rawTasks), &list); err != nil {
-			defaultBankErr = fmt.Errorf("разбор tasks.json: %w", err)
+		list, byID, err := parseEmbedded()
+		if err != nil {
+			defaultBankErr = err
 			return
-		}
-		byID := make(map[string]*Task, len(list))
-		for _, t := range list {
-			if _, dup := byID[t.ID]; dup {
-				defaultBankErr = fmt.Errorf("дубликат задачи: %s", t.ID)
-				return
-			}
-			byID[t.ID] = t
 		}
 		defaultBank = &Bank{tasks: list, byID: byID}
 	})
 	return defaultBank, defaultBankErr
+}
+
+// parseEmbedded — свежие задачи из встраиваемого JSON. Каждый банк получает
+// свою копию: банк, в который можно добавлять задачи (overlay), не должен
+// менять общее встроенное состояние.
+func parseEmbedded() ([]*Task, map[string]*Task, error) {
+	var list []*Task
+	if err := json.Unmarshal([]byte(rawTasks), &list); err != nil {
+		return nil, nil, fmt.Errorf("разбор tasks.json: %w", err)
+	}
+	byID := make(map[string]*Task, len(list))
+	for _, t := range list {
+		if _, dup := byID[t.ID]; dup {
+			return nil, nil, fmt.Errorf("дубликат задачи: %s", t.ID)
+		}
+		byID[t.ID] = t
+	}
+	return list, byID, nil
+}
+
+// IsTrustedFile — файлы, которые кандидат не задаёт своим сабмитом: тесты/чеки
+// (IsGraderFile) и данные, на которых они работают. Отданные кандидотом версии
+// таких файлов раннер выбрасывает (см. runner): иначе «пришли свой check.sh»
+// превращается в «получи pass» (issue #8, issue #9).
+func IsTrustedFile(name, stack string) bool {
+	if IsGraderFile(name, stack) {
+		return true
+	}
+	if stack != "shell" {
+		return false
+	}
+	switch filepath.Base(name) {
+	case "input.txt", "empty.txt", "data.txt":
+		return true
+	}
+	return false
 }
 
 // Get — задача по ID.

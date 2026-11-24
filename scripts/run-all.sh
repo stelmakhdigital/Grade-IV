@@ -146,7 +146,11 @@ do_start() {
   # Один процесс с env (инцидент 2026-10-12: дублированный запуск — второй
   # инстанс умирал на bind: address already in use, pid-файл указывал на него
   # → status показывал «стоп» при живом healthz).
+  # SANDBOX_TASKS_FILE — пул сгенерированных задач (spec-24); без него банк
+  # read-only. Токен управления берём из окружения (см. .env.example).
   (cd "$ROOT" && SANDBOX_MODE=subprocess SANDBOX_WORKDIR_BASE="$RUN/sbxw" \
+    SANDBOX_TASKS_FILE="${SANDBOX_TASKS_FILE:-$RUN/generated-tasks.json}" \
+    SANDBOX_ADMIN_TOKEN="${SANDBOX_ADMIN_TOKEN:-}" \
     nohup "$SBX_BIN" >>"$LOGS/sandbox.log" 2>&1 & echo $! >"$PIDS/sandbox.pid")
 
   # Описание STT в выводе: у gigaam — имя модели и GIGAAM_DEVICE

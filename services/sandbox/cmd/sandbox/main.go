@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/sandbox/internal/runner"
+	"github.com/stelmakhdigital/grade-iv/services/sandbox/internal/taskgen"
 	"github.com/stelmakhdigital/grade-iv/services/sandbox/internal/tasks"
 )
 
@@ -27,18 +28,25 @@ func getenv(key, def string) string {
 }
 
 // buildMux — маршруты сервиса (вынесено для тестов).
-func buildMux(mode string, bank *tasks.Bank, rn *runner.Runner, log *slog.Logger) *http.ServeMux {
+func buildMux(mode string, bank *tasks.Bank, rn *runner.Runner, adminToken string, log *slog.Logger) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status":  "ok",
-			"service": "grade-sandbox",
-			"mode":    mode,
-			"tasks":   bank.Count(),
+			"status":    "ok",
+			"service":   "grade-sandbox",
+			"mode":      mode,
+			"tasks":     bank.Count(),
+			"generated": bank.GeneratedCount(),
 		})
 	})
 	mux.HandleFunc("GET /api/v1/tasks", handleTasksList(bank))
 	mux.HandleFunc("POST /api/v1/sessions/{id}/runs", handleRun(mode, bank, rn, log))
+	// spec-24: генерация задач — под токеном и всегда через gate.
+	mux.HandleFunc("POST /admin/tasks", adminOnly(adminToken, handleTaskRegister(bank, rn, log)))
+	mux.HandleFunc("POST /admin/tasks/generate", adminOnly(adminToken, handleTaskGenerate(bank, rn, log)))
+	mux.HandleFunc("GET /admin/families", adminOnly(adminToken, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"families": taskgen.Families()})
+	}))
 	return mux
 }
 
@@ -88,11 +96,13 @@ func handleRun(mode string, bank *tasks.Bank, rn *runner.Runner, log *slog.Logge
 			}
 			// Доверенность тестов (TEST_PLAN §4.4): исполняются ТОЛЬКО файлы банка —
 			// «трояны» в поданных *_test.go / test_*.py / check.sh игнорируются.
+			// Данные, на которых работает чек (input.txt и т.п.), — тоже из банка:
+			// подменив input.txt, кандидат подгоняет вывод под ожидаемые числа.
 			// Файлы банка идут отдельным аргументом (BUG-20261122-033): в общий
 			// каталог с кодом кандидата их класть нельзя — оттуда их читают и
 			// переписывают из решения.
 			for name, content := range task.Files {
-				if tasks.IsGraderFile(name, task.Stack) {
+				if tasks.IsTrustedFile(name, task.Stack) {
 					if trusted == nil {
 						trusted = map[string]string{}
 					}
@@ -131,10 +141,16 @@ func main() {
 	addr := getenv("ADDR", ":8200")
 	mode := getenv("SANDBOX_MODE", "subprocess") // dev-по-умолчанию: без docker-демона (prod: docker, compose)
 
-	bank, err := tasks.Default()
+	// spec-24: overlay сгенерированных задач (пусто — банк read-only, генерация
+	// выключена) и токен управления банком.
+	bank, err := tasks.Load(getenv("SANDBOX_TASKS_FILE", ""))
 	if err != nil {
 		logger.Error("tasks", "err", err)
 		os.Exit(1)
+	}
+	adminToken := os.Getenv("SANDBOX_ADMIN_TOKEN")
+	if bank.File() != "" && adminToken == "" {
+		logger.Warn("SANDBOX_TASKS_FILE задан, но SANDBOX_ADMIN_TOKEN пуст: /admin/tasks закрыты (503)")
 	}
 	rn := runner.New(runner.Config{
 		Mode: mode,
@@ -186,7 +202,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           withLogging(buildMux(mode, bank, rn, logger), logger),
+		Handler:           withLogging(buildMux(mode, bank, rn, adminToken, logger), logger),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
