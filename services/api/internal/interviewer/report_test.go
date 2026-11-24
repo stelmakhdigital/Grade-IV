@@ -106,7 +106,11 @@ func TestHeuristicReportNewFields(t *testing.T) {
 
 // TestHeuristicReportTaskIDGate — issue #8: прогон с пустым или чужим task_id
 // (sandbox не подставляет тесты банка, и stub кандидата «проходит») не должен
-// поднимать балл Live-Code; 4 — только за passed по задаче, назначенной сессии.
+// поднимать балл Live-Code.
+//
+// spec-24 меняет сами числа: было «есть проходы — 4» независимо от того, сколько
+// задач решено из трёх; теперь 1 + 4·доля решённых. Смысл гейта не изменился —
+// чужой прогон не даёт ни доли, ни балла.
 func TestHeuristicReportTaskIDGate(t *testing.T) {
 	sess := models.Session{Grade: models.GradeMiddle, Stack: models.StackGo}
 	liveCodeScore := func(mat reportMaterial) float64 {
@@ -118,21 +122,96 @@ func TestHeuristicReportTaskIDGate(t *testing.T) {
 		t.Fatal("нет критерия Live-Code")
 		return 0
 	}
-	assigned := []LiveCodeTaskRef{{ID: "go-a", Title: "А"}}
+	one := []LiveCodeTaskRef{{ID: "go-a", Title: "А"}}
+	three := []LiveCodeTaskRef{{ID: "go-a"}, {ID: "go-b"}, {ID: "go-c"}}
 
 	cases := []struct {
-		name string
-		run  map[string]any
-		want float64
+		name     string
+		assigned []LiveCodeTaskRef
+		runs     []map[string]any
+		want     float64
 	}{
-		{"passed с пустым task_id", map[string]any{"task_id": "", "passed": true}, 2},
-		{"passed с чужим task_id", map[string]any{"task_id": "go-z", "passed": true}, 2},
-		{"passed по назначенной задаче", map[string]any{"task_id": "go-a", "passed": true}, 4},
+		{"passed с пустым task_id", one, []map[string]any{{"task_id": "", "passed": true}}, 1},
+		{"passed с чужим task_id", one, []map[string]any{{"task_id": "go-z", "passed": true}}, 1},
+		{"passed по назначенной задаче (1 из 1)", one, []map[string]any{{"task_id": "go-a", "passed": true}}, 5},
+		// 1 из 3 с сдачами по остальным: 1 + 4·1/3 + 0.5 (пытался везде)
+		{"passed 1 из 3, сдавался по всем", three, []map[string]any{
+			{"task_id": "go-a", "passed": true},
+			{"task_id": "go-b", "passed": false},
+			{"task_id": "go-c", "passed": false},
+		}, 2.83},
+		// 1 из 3 и больше ни одной сдачи: полбалла за попытки нет
+		{"passed 1 из 3, других сдач нет", three, []map[string]any{
+			{"task_id": "go-a", "passed": true},
+		}, 2.33},
+		{"сдач нет вовсе", one, nil, 1},
 	}
 	for _, tc := range cases {
-		got := liveCodeScore(reportMaterial{LiveCodeTasks: assigned, CodeRuns: []map[string]any{tc.run}})
+		got := liveCodeScore(reportMaterial{LiveCodeTasks: tc.assigned, CodeRuns: tc.runs})
 		if got != tc.want {
 			t.Errorf("%s: score = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestHeuristicReportStageScores — инкремент 4: критерии берутся из стадий, а
+// «нет данных» не превращается в ноль.
+func TestHeuristicReportStageScores(t *testing.T) {
+	sess := models.Session{Grade: models.GradeSenior, Stack: models.StackGo}
+	mat := reportMaterial{
+		Grade:         "senior",
+		LiveCodeTasks: []LiveCodeTaskRef{{ID: "go-a"}, {ID: "go-b"}},
+		CodeRuns:      []map[string]any{{"task_id": "go-a", "passed": true}, {"task_id": "go-b", "passed": true}},
+		Design:        map[string]any{"blocks": []any{"БД", "Кэш"}, "links": float64(3)},
+		Transcript:    []string{"кандидат: " + strings.Repeat("объяснение архитектуры ", 20), "интервьюер: вопрос"},
+	}
+	r := heuristicReport(sess, mat, nil)
+	byStage := map[string]StageReport{}
+	for _, st := range r.Stages {
+		byStage[st.Stage] = st
+	}
+	if len(r.Stages) != 3 {
+		t.Fatalf("стадий %d, want 3 (устная, livecode, доска): %+v", len(r.Stages), r.Stages)
+	}
+	if byStage["livecode"].Score != 5 {
+		t.Errorf("livecode = %v, want 5 (обе задачи решены)", byStage["livecode"].Score)
+	}
+	if byStage["design"].Score < 3 {
+		t.Errorf("design = %v, want >= 3 (схема с блоками и связями)", byStage["design"].Score)
+	}
+	if byStage["voice"].Score <= 2 {
+		t.Errorf("voice = %v, want > 2 (развёрнутые ответы)", byStage["voice"].Score)
+	}
+	for _, c := range r.Criteria {
+		switch {
+		case strings.Contains(c.Name, "Live-Code"):
+			if c.Score != 5 {
+				t.Errorf("критерий %q = %v, want 5", c.Name, c.Score)
+			}
+		case strings.Contains(c.Name, "System Design"):
+			if c.Score != byStage["design"].Score {
+				t.Errorf("критерий %q = %v, want %v", c.Name, c.Score, byStage["design"].Score)
+			}
+			if !strings.Contains(c.Comment, "доска") && !strings.Contains(c.Comment, "Доска") && c.Comment == "" {
+				t.Errorf("критерий %q: в комментарии нет основания оценки: %q", c.Name, c.Comment)
+			}
+		}
+	}
+}
+
+// TestHeuristicReportNoBoard — стадии, по которым данных нет, не оцениваются и
+// не тянут отчёт вниз.
+func TestHeuristicReportNoBoard(t *testing.T) {
+	sess := models.Session{Grade: models.GradeMiddle, Stack: models.StackGo}
+	r := heuristicReport(sess, reportMaterial{Grade: "middle"}, nil)
+	for _, st := range r.Stages {
+		if st.Stage == "design" {
+			t.Fatalf("оценка доски появилась без данных доски: %+v", st)
+		}
+	}
+	for _, c := range r.Criteria {
+		if strings.Contains(c.Name, "System Design") && c.Score != 3 {
+			t.Errorf("%q = %v, want 3 (нет данных — средняя, а не ноль)", c.Name, c.Score)
 		}
 	}
 }

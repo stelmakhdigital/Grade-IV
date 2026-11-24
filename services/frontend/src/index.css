@@ -864,6 +864,51 @@ p {
 }
 
 /* Live-Code per-task в отчёте (spec-13B T3). */
+/* spec-24: детерминированные оценки по стадиям под суждением оценщика. */
+.report-stages {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.report-stage {
+  border: 1px solid #232a3a;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.report-stage-title {
+  font-weight: 600;
+}
+.report-stage-score {
+  float: right;
+  font-variant-numeric: tabular-nums;
+}
+.report-stage-score.good {
+  color: #3fb950;
+}
+.report-stage-score.mid {
+  color: #d29922;
+}
+.report-stage-score.bad {
+  color: #f85149;
+}
+.report-stage-basis,
+.report-stage-missing {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #9aa7bd;
+}
+.report-stage-missing {
+  color: #d29922;
+}
+.report-stage-evidence {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: #9aa7bd;
+}
+
 .livecode-tasks {
   list-style: none;
   margin: 0 0 16px;

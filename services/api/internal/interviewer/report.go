@@ -46,6 +46,10 @@ type ReportData struct {
 	ProgressVsPrevious []ProgressEntry `json:"progress_vs_previous"`
 	// LiveCodeTasks — per-task результаты Live-Code (spec-13B T3), детерминированно.
 	LiveCodeTasks []LiveCodeTaskResult `json:"livecode_tasks"`
+	// Stages — оценки по стадиям (spec-24, инкремент 4): число, которое можно
+	// пересчитать по событиям сессии. Лежат под суждением LLM-оценщика, а не
+	// вместо него.
+	Stages []StageReport `json:"stages"`
 }
 
 // ProgressEntry — прошлое интервью для сравнения прогресса (Итерация B).
@@ -239,43 +243,17 @@ func heuristicReport(sess models.Session, mat reportMaterial, track *models.Trac
 	if track != nil {
 		confirm = track.GradeConfirm
 	}
-	scoreOf := func(substr string, fallback float64) float64 { return fallback }
-	_ = scoreOf
-	// Live-Code: были проходы — 4, запуски без проходов — 3, нет запусков — 2.
-	// Учитываются только прогоны назначенных задач (см. assignedCodeRuns).
-	codeScore := 2.0
-	runs := assignedCodeRuns(mat)
-	passed, failed := 0, 0
-	for _, r := range runs {
-		if p, ok := r["passed"].(bool); ok && p {
-			passed++
-		} else {
-			failed++
-		}
-	}
-	switch {
-	case passed > 0:
-		codeScore = 4
-	case len(runs) > 0 && failed > 0:
-		codeScore = 3
-	}
-	// System Design: схема с блоками — 3, без — 2.
-	designScore := 2.0
-	if blocks, ok := mat.Design["blocks"].([]any); ok && len(blocks) > 0 {
-		designScore = 3
-	}
-	// Коммуникация: была речь кандидата — 3, молчал — 2.
-	speech := 2.0
-	for _, t := range mat.Transcript {
-		if strings.HasPrefix(t, "кандидат:") {
-			speech = 3
-			break
-		}
-	}
+	// spec-24: критерии берутся из оценок стадий. Раньше Live-Code давал 4 и за
+	// «решил одну задачу из трёх», и за «решил все».
+	stages := stageReports(mat, track)
+	code := stageByStage(stages, string(models.StageLiveCode))
+	design := stageByStage(stages, string(models.StageDesign))
+	speech := stageByStage(stages, string(models.StageVoice))
 	for i := range crit {
+		var src *StageReport
 		switch {
 		case strings.Contains(crit[i].Name, "Live-Code"):
-			crit[i].Score = codeScore
+			src = code
 		case strings.Contains(crit[i].Name, "System Design"),
 			strings.Contains(crit[i].Name, "Кросс-системный"),
 			strings.Contains(crit[i].Name, "Архитектурные"),
@@ -283,15 +261,22 @@ func heuristicReport(sess models.Session, mat reportMaterial, track *models.Trac
 			// названием (схема инфраструктуры, план проекта).
 			strings.Contains(crit[i].Name, "Схем"),
 			strings.Contains(crit[i].Name, "План проекта"),
-			strings.Contains(crit[i].Name, "Декомпозиция"):
-			crit[i].Score = designScore
+			strings.Contains(crit[i].Name, "Декомпозиция"),
+			strings.Contains(crit[i].Name, "Сети"):
+			src = design
 		case strings.Contains(crit[i].Name, "Коммуникация"):
-			crit[i].Score = speech
-		default:
-			crit[i].Score = 3 // без глубинного анализа — средняя оценка уровня
+			src = speech
 		}
-		crit[i].Comment = "оценка по данным сессии (авто)"
-		crit[i].GapToGrade = round2(3 - crit[i].Score) // 3 — соответствует грейду
+		if src != nil {
+			crit[i].Score = src.Score
+			crit[i].Comment = src.Title + ": " + src.Basis
+		} else {
+			// Критерий не про измеренную стадию (фундамент, leadership): на
+			// авто-отчёте — средняя оценка уровня, рассудит LLM-оценщик.
+			crit[i].Score = 3
+			crit[i].Comment = "нет данных стадии по этому критерию (авто)"
+		}
+		crit[i].GapToGrade = round2(3 - crit[i].Score)
 	}
 	overall := 0.0
 	for _, c := range crit {
@@ -302,8 +287,9 @@ func heuristicReport(sess models.Session, mat reportMaterial, track *models.Trac
 		Overall:             overall,
 		GradeRecommendation: gradeRecommendation(overall, confirm),
 		Criteria:            crit,
-		Strengths:           []string{fmt.Sprintf("активное участие в интервью (%d реплик)", len(mat.Transcript))},
-		Weaknesses:          []string{"детальный разбор — после подключения LLM-оценщика"},
+		Stages:              stages,
+		Strengths:           stageStrengths(stages),
+		Weaknesses:          stageWeaknesses(stages),
 		Recommendations:     []string{"повторное интервью с акцентом на слабые критерии"},
 		// Итерация B: LLM-полей нет (fallback — базовые/пустые).
 		Verdict:            "Детальный разбор — после подключения LLM-оценщика",
@@ -450,6 +436,12 @@ func (i *Interviewer) GenerateReport(ctx context.Context, sessionID int64) (Repo
 	finish := func(r ReportData) ReportData {
 		// Прогресс — детерминированно (числовые delta не доверяем LLM).
 		r.ProgressVsPrevious = buildProgress(sess, r.Criteria, prev)
+		// Оценки по стадиям — детерминированно и всегда (в LLM-отчёте тоже):
+		// под суждением оценщика должны лежать числа, которые можно пересчитать.
+		r.Stages = stageReports(mat, track)
+		if r.Stages == nil {
+			r.Stages = []StageReport{}
+		}
 		// Per-task Live-Code — детерминированно по событиям сессии (spec-13B T3).
 		r.LiveCodeTasks = liveCodeTaskResults(mat)
 		if r.LiveCodeTasks == nil {
@@ -489,6 +481,7 @@ func (i *Interviewer) GenerateReport(ctx context.Context, sessionID int64) (Repo
 	}
 	userMsg := fmt.Sprintf(
 		"Оцени кандидата (%s). Критерии и веса: %s. "+
+			"Уже посчитано по событиям сессии (не пересчитывай, опирайся): %s\n"+
 			"Транскрипт:\n%s\nКодовые запуски: %s\nСхема доски: %s\n"+
 			"Прошлые интервью: %s\n"+
 			"Ответь СТРОГО JSON без пояснений: {\"criteria\":[{\"name\":...,\"weight\":...,\"score\":1-5,\"comment\":...,"+
@@ -499,7 +492,7 @@ func (i *Interviewer) GenerateReport(ctx context.Context, sessionID int64) (Repo
 			"question_trail: 1-2 предложения, на каком уровне кандидат держал ответы и где "+
 			"сложность пришлось снизить (уровни: junior, middle, senior, staff). "+
 			"Если уровень не снизился — так и напиши.",
-		role, string(critJSON), tr, string(codeJSON), string(designJSON), string(prevJSON))
+		role, string(critJSON), stageSummary(stageReports(mat, track)), tr, string(codeJSON), string(designJSON), string(prevJSON))
 	sys := "Ты — технический интервьюер-оценщик. Оцениваешь кандидата по критериям с весами, " +
 		"шкала 1–5 (1 — не соответствует уровню грейда, 3 — соответствует, 5 — существенно выше). " +
 		"Тон конструктивный, для кандидата (не для HR). Каждый критерий: evidence (2–3 примера из " +

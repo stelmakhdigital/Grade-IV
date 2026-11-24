@@ -512,6 +512,19 @@ export interface ReportLiveCodeTask {
   status: string;
 }
 
+/** Оценка стадии по данным сессии (spec-24): число с основанием, его можно
+ * пересчитать по событиям сессии, а не только поверить оценщику. */
+export interface ReportStage {
+  stage: string;
+  title: string;
+  score: number;
+  /** Что посчитано (коротко, человеком). */
+  basis: string;
+  evidence?: string[];
+  /** Обязательные артефакты доски, которых не оказалось. */
+  missing?: string[];
+}
+
 /** Итоговый отчёт (WP-11, §12; итерация B — детальные поля для кандидата). */
 export interface Report {
   overall: number;
@@ -532,6 +545,8 @@ export interface Report {
   progress_vs_previous?: ReportProgressEntry[];
   /** spec-13B T3: per-task результаты Live-Code. */
   livecode_tasks?: ReportLiveCodeTask[];
+  /** spec-24: оценки по стадиям (детерминированный слой под суждением ИИ). */
+  stages?: ReportStage[];
 }
 
 /**

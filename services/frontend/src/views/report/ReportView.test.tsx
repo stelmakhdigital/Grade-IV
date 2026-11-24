@@ -143,3 +143,42 @@ describe('ReportView (WP-11)', () => {
     expect(screen.getByTestId('livecode-task-go-s1')).toHaveTextContent('без сдачи');
   });
 });
+
+describe('ReportView: оценки по стадиям (spec-24)', () => {
+  const withStages = {
+    ...REPORT,
+    stages: [
+      {
+        stage: 'livecode',
+        title: 'Live-Code',
+        score: 2.33,
+        basis: 'задач 3, сдано 2, пройдено 1',
+        evidence: ['прогонов по назначенным задачам: 2'],
+      },
+      {
+        stage: 'design',
+        title: 'Схема инфраструктуры',
+        score: 3.9,
+        basis: 'обязательных артефактов кейса: 3 из 5',
+        missing: ['VPN', 'Мониторинг'],
+      },
+    ],
+  };
+
+  it('показывает число, основание и пропущенные артефакты', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(200, withStages)));
+    render(<ReportView sessionId={9} />);
+    const list = await screen.findByTestId('report-stages');
+    expect(list).toHaveTextContent('задач 3, сдано 2, пройдено 1');
+    expect(list).toHaveTextContent('2.3 / 5');
+    expect(list).toHaveTextContent('обязательных артефактов кейса: 3 из 5');
+    expect(screen.getByText(/VPN, Мониторинг/)).toBeInTheDocument();
+  });
+
+  it('отчёта без стадий не ломает блок (старые сессии)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(200, REPORT)));
+    render(<ReportView sessionId={9} />);
+    await screen.findByTestId('report');
+    expect(screen.queryByTestId('report-stages')).toBeNull();
+  });
+});

@@ -224,6 +224,33 @@ export function ReportBody({
         ))}
       </ul>
 
+      {report.stages && report.stages.length > 0 && (
+        <>
+          <h3>Как считалось по стадиям</h3>
+          <ul className="report-stages" data-testid="report-stages">
+            {report.stages.map((st) => (
+              <li key={st.stage} className="report-stage">
+                <span className="report-stage-title">{st.title}</span>
+                <span className={`report-stage-score ${scoreColor(st.score)}`}>
+                  {st.score.toFixed(1)} / 5
+                </span>
+                <p className="report-stage-basis">{st.basis}</p>
+                {st.evidence && st.evidence.length > 0 && (
+                  <ul className="report-stage-evidence">
+                    {st.evidence.map((e, i) => <li key={i}>{e}</li>)}
+                  </ul>
+                )}
+                {st.missing && st.missing.length > 0 && (
+                  <p className="report-stage-missing">
+                    На доске нет обязательного: {st.missing.join(', ')}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
       {report.livecode_tasks && report.livecode_tasks.length > 0 && (
         <>
           {/* spec-20: shell-трек (сисадмин) — практика, а не Live-Code. */}

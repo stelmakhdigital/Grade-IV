@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,15 +83,20 @@ func TestReportLifecycle(t *testing.T) {
 	if len(crit) == 0 {
 		t.Fatalf("criteria пуст: %v", body)
 	}
-	// heuristic: Live-Code 4 (запуск прошёл), коммуникация 3 (была речь).
+	// spec-24: Live-Code = 1 + 4·доля решённых. Одна задача, решена → 5 (раньше
+	// было 4 за «был проход», то же число, что и за 1 из 3). Коммуникация
+	// считается по речи, её точное число тут не проверяем.
 	for _, c := range crit {
 		switch {
 		case fmt.Sprint(c["name"]) == "Live-Code (алгоритм, качество кода, тесты)":
-			if c["score"] != 4.0 {
+			if c["score"] != 5.0 {
 				t.Fatalf("livecode score: %v", c)
 			}
+			if !strings.Contains(fmt.Sprint(c["comment"]), "задач 1") {
+				t.Fatalf("в комментарии нет основания оценки: %v", c)
+			}
 		case fmt.Sprint(c["name"]) == "Коммуникация (ясность, структура, русский язык)":
-			if c["score"] != 3.0 {
+			if c["score"] == nil {
 				t.Fatalf("comm score: %v", c)
 			}
 		}
