@@ -250,3 +250,25 @@ func TestSkinSkipsSkinnedTask(t *testing.T) {
 		t.Fatalf("модель дёргалась %d раз ради уже переписанной задачи", m.calls)
 	}
 }
+
+// TestSkinSkipsAlreadySkinned — у базовой задачи уже есть кожа: кандидата не
+// отдаём модели (зачем платить секундой LLM за заведомый 409).
+func TestSkinSkipsAlreadySkinned(t *testing.T) {
+	f, ts := newFake(t)
+	for _, g := range []string{"junior", "middle", "senior", "staff"} {
+		f.counts["shell|"+g] = 2
+	}
+	f.listOverride = func(grade string) []map[string]any {
+		return []map[string]any{
+			{"id": "shell-stats-" + grade + "-9-abcd12", "statement": baseStatement,
+				"meta": map[string]any{"family": "shell-stats", "seed": 9, "generator": "family:shell-stats"}},
+			{"id": "shell-stats-" + grade + "-skin-9-abcd12", "statement": skinAnswer,
+				"meta": map[string]any{"family": "shell-stats", "seed": 9, "generator": "family:shell-stats+skin:qwen"}},
+		}
+	}
+	m := &fakeLLM{resp: skinAnswer}
+	newLLMJob(ts, m, true, false, f).pass(context.Background())
+	if m.calls != 0 {
+		t.Fatalf("модель вызвана %d раз, хотя кожа этой задачи уже в пуле", m.calls)
+	}
+}

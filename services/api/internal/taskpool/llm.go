@@ -43,15 +43,27 @@ func (j *Job) skinTick(ctx context.Context) {
 		j.log.Warn("taskpool: кожа — список задач не получен", "err", err)
 		return
 	}
+	// Кожа выводится из пары (семия, seed) — по ней и отсекаем: уже переписанные
+	// seeds не просим повторно (это было бы пусто: тот же id → 409), и кожу с
+	// кожи тем более не делаем.
+	type famSeed struct {
+		family string
+		seed   int64
+	}
+	skinned := map[famSeed]bool{}
+	for i := range list {
+		t := &list[i]
+		if t.Meta != nil && strings.Contains(t.Meta.Generator, "+skin") {
+			skinned[famSeed{t.Meta.Family, t.Meta.Seed}] = true
+		}
+	}
 	var cands []*bankTask
 	for i := range list {
 		t := &list[i]
 		if t.Meta == nil || t.Meta.Family == "" {
 			continue
 		}
-		// Кожу с кожи — вечный 409: id кожи выводится из семьи и seed, поэтому
-		// повторное переписывание даёт ровно тот же id.
-		if strings.Contains(t.Meta.Generator, "+skin") {
+		if strings.Contains(t.Meta.Generator, "+skin") || skinned[famSeed{t.Meta.Family, t.Meta.Seed}] {
 			continue
 		}
 		cands = append(cands, t)
