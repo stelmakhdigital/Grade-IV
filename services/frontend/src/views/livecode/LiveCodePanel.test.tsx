@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { LiveCodePanel, DEFAULT_CODE } from './LiveCodePanel';
+import { LiveCodePanel, DEFAULT_CODE, saveDraft, restoreDraft } from './LiveCodePanel';
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status });
@@ -75,6 +75,8 @@ function renderPanel(opts: {
 
 beforeEach(() => {
   vi.unstubAllGlobals();
+  // панель чернит код в sessionStorage — тесты не должны видеть черновики друг друга
+  sessionStorage.clear();
 });
 
 describe('LiveCodePanel (WP-9)', () => {
@@ -157,6 +159,27 @@ describe('LiveCodePanel (WP-9)', () => {
     );
     expect(screen.getByTestId('editor')).toHaveValue(DEFAULT_CODE.python);
     expect(screen.getByTestId('editor')).toHaveAttribute('data-lang', 'python');
+  });
+
+  it('черновик кода переживает перезагрузку (sessionStorage, не только память вкладки)', async () => {
+    const user = userEvent.setup();
+    // новый render: в памяти вкладки кода этой сессии нет — спасает только хранилище
+    render(
+      <LiveCodePanel
+        sessionId={91}
+        stack="go"
+        tasks={[{ id: 'go-t9', title: 'Девятая', files: { 'solution.go': 'package task // шаблон' } }]}
+        review=""
+        editor={stubEditor()}
+      />,
+    );
+    await user.clear(screen.getByTestId('editor'));
+    await user.type(screen.getByTestId('editor'), 'package draft // из хранилища');
+    expect(JSON.parse(sessionStorage.getItem('grade.code.91') ?? '{}')['go-t9'])
+      .toEqual({ 'solution.go': 'package draft // из хранилища' });
+    // и читается по своему ключу задачи
+    expect(restoreDraft(91, 'go-t9')).toEqual({ 'solution.go': 'package draft // из хранилища' });
+    expect(restoreDraft(91, 'go-другая')).toBeUndefined();
   });
 
   describe('вкладки задач (spec-13B T2)', () => {

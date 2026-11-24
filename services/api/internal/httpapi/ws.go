@@ -95,6 +95,9 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 	// Стартовое сообщение: текущая стадия.
 	// spec-18: ResendStage — та же сборка, что и в Transition (board для design).
 	s.engine.ResendStage(id)
+	if snap.Stage == models.StageLiveCode {
+		s.resendLiveCodeTasks(ctx, id)
+	}
 	s.log.Info("ws: клиент подключился", "session", id, "user", userID, "stage", snap.Stage)
 
 	vadCfg := vad.DefaultConfig()
@@ -827,6 +830,38 @@ func pickTasksFrom(grade models.Grade, pool, stretchPool []liveCodeTask, rng *ra
 		out = append(out, pool[rng.Intn(len(pool))])
 	}
 	return out
+}
+
+// resendLiveCodeTasks — повтор назначенных задач при подключении к практике.
+// ResendStage отдаёт стадию без задач (их выбирает enterLiveCode), и после
+// перезагрузки страницы кандидат оставался с пустым редактором, без условия
+// задачи и без вкладок (замерено в браузере). Задачи уже лежат в событии
+// livecode_tasks — берём оттуда, нового состояния нет. `track` не шлём:
+// клиент сохраняет мету из предыдущего stage-сообщения (useVoiceSession:212).
+func (s *Server) resendLiveCodeTasks(ctx context.Context, id int64) {
+	events, err := s.sessions.ListEventsTail(ctx, id, 200)
+	if err != nil {
+		s.log.Warn("livecode: не удалось прочитать события для повтора задач", "session", id, "err", err)
+		return
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Kind != "livecode_tasks" {
+			continue
+		}
+		var payload struct {
+			Tasks []liveCodeTask `json:"tasks"`
+		}
+		if err := json.Unmarshal(events[i].Data, &payload); err != nil || len(payload.Tasks) == 0 {
+			return // битое/пустое событие — повторяять нечего
+		}
+		s.engine.SendTo(id, map[string]any{
+			"type":  "stage",
+			"name":  models.StageLiveCode,
+			"tasks": payload.Tasks,
+			"task":  payload.Tasks[0], // совместимость: task = tasks[0]
+		})
+		return
+	}
 }
 
 // enterLiveCode — вход на стадию Live-Code (WP-5/6, spec-13B T1): случайный набор

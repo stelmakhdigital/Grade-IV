@@ -422,6 +422,26 @@ func TestEnterLiveCodeUnknownRole(t *testing.T) {
 	}
 }
 
+// readStageWithTasks — ждёт stage-сообщение с задачами (или nil).
+// Дедлайн на каждое чтение, а не на всё ожидание: в nhooyr/websocket
+// истёкший контекст Read закрывает соединение.
+func readStageWithTasks(t *testing.T, conn *websocket.Conn, max int, per time.Duration) map[string]any {
+	t.Helper()
+	for i := 0; i < max; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), per)
+		_, b, err := conn.Read(ctx)
+		cancel()
+		if err != nil {
+			return nil
+		}
+		var m map[string]any
+		if json.Unmarshal(b, &m) == nil && m["type"] == "stage" && m["tasks"] != nil {
+			return m
+		}
+	}
+	return nil
+}
+
 func idsFromMsg(list []any) []string {
 	out := make([]string, 0, len(list))
 	for _, item := range list {
@@ -429,4 +449,55 @@ func idsFromMsg(list []any) []string {
 		out = append(out, fmt.Sprint(tm["id"]))
 	}
 	return out
+}
+
+// TestResendLiveCodeTasksOnReconnect — вход на практику выдаёт задачи и шлёт
+// их в stage-сообщении; ResendStage (новое WS-соединение) их НЕ воспроизводит.
+// После перезагрузки страницы на этой стадии кандидат оставался без вкладок
+// задач и без условия — редактор с пустым шаблоном (замерено в браузере).
+// Повтор берётся из события livecode_tasks (см. resendLiveCodeTasks).
+func TestResendLiveCodeTasksOnReconnect(t *testing.T) {
+	t.Setenv("LIVECODE_TASK_SEED", "1")
+	e := newRunsEnv(t, sandboxTasksHandler(map[string][]map[string]any{
+		"go|middle": {
+			liveCodeBankTask("go-m1"), liveCodeBankTask("go-m2"), liveCodeBankTask("go-m3"),
+			liveCodeBankTask("go-m4"), liveCodeBankTask("go-m5"),
+		},
+		"go|senior": {liveCodeBankTask("go-s1")},
+	}))
+
+	first := dialWS(t, e.ts, e.token, e.session)
+	_ = wsReadTypes(t, first, 2, 3*time.Second)
+	wsWriteJSON(t, first, map[string]any{"type": "ui", "name": "stage_action",
+		"payload": map[string]string{"stage": "livecode"}})
+	if readStageWithTasks(t, first, 6, 5*time.Second) == nil {
+		t.Fatalf("задачи не выданы при входе на стадию")
+	}
+	if err := first.Close(websocket.StatusNormalClosure, ""); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// «перезагрузка страницы»: новое соединение на той же стадии
+	second := dialWS(t, e.ts, e.token, e.session)
+	defer func() { _ = second.Close(websocket.StatusNormalClosure, "") }()
+	stageMsg := readStageWithTasks(t, second, 6, 5*time.Second)
+	if stageMsg == nil {
+		t.Fatalf("после реконнекта нет stage-сообщения с задачами")
+	}
+	if fmt.Sprint(stageMsg["name"]) != "livecode" {
+		t.Fatalf("стадия в повторе: %v", stageMsg["name"])
+	}
+	tasks, _ := stageMsg["tasks"].([]any)
+	if len(tasks) != 3 {
+		t.Fatalf("tasks: %d, want 3", len(tasks))
+	}
+	task, _ := stageMsg["task"].(map[string]any)
+	first0, _ := tasks[0].(map[string]any)
+	if task == nil || task["id"] != first0["id"] {
+		t.Fatalf("task != tasks[0]: %v vs %v", task, first0)
+	}
+	// файлы задачи тоже возвращаются — иначе редактор останется на шаблоне
+	if _, ok := first0["files"].(map[string]any); !ok {
+		t.Fatalf("у задачи нет files: %v", first0)
+	}
 }

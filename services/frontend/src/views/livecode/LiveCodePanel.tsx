@@ -62,6 +62,63 @@ interface CodeCacheEntry {
 }
 const codeCache = new Map<string, CodeCacheEntry>();
 
+/**
+ * Черновик кода — ещё и в sessionStorage: F5 на практической стадии не должен
+ * съедать решение, а в памяти вкладки жил только codeCache (потеря решения
+ * проверена в браузере). Формат: grade.code.<сессия> = {"<task id|none>": файлы}.
+ */
+const DRAFT_PREFIX = 'grade.code.';
+
+type Drafts = Record<string, Record<string, string>>;
+
+function readDrafts(sessionId: number): Drafts {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_PREFIX + sessionId);
+    return raw === null ? {} : (JSON.parse(raw) as Drafts);
+  } catch {
+    return {}; // приватный режим или битое значение — работаем по codeCache
+  }
+}
+
+/**
+ * Сохранённый код задачи — только по тому же ключу, что и при записи
+ * (угадывать задачу по единственному черновику нельзя: так код одной задачи
+ * поехал бы в другую). Без taskId читаем черновик «none» — это окно до
+ * прихода stage.tasks; сами задачи после перезагрузки возвращает бэкенд
+ * (ResendStage), иначе черновик по task id не к чему привязать.
+ */
+export function restoreDraft(
+  sessionId: number,
+  taskId: string | undefined,
+): Record<string, string> | undefined {
+  return readDrafts(sessionId)[taskId ?? 'none'];
+}
+
+export function saveDraft(
+  sessionId: number,
+  taskId: string | undefined,
+  files: Record<string, string>,
+): void {
+  const drafts = readDrafts(sessionId);
+  drafts[taskId ?? 'none'] = files;
+  try {
+    sessionStorage.setItem(DRAFT_PREFIX + sessionId, JSON.stringify(drafts));
+  } catch {
+    // хранилища нет (quota/приватный режим) — черновик остаётся в codeCache
+  }
+}
+
+/** Код активной задачи: правки этой вкладки, иначе черновик прошлой сессии. */
+function cachedFiles(
+  cacheKey: string,
+  sessionId: number,
+  taskId: string | undefined,
+): Record<string, string> | undefined {
+  const hit = codeCache.get(cacheKey);
+  if (hit !== undefined && Object.keys(hit.files).length > 0) return hit.files;
+  return restoreDraft(sessionId, taskId);
+}
+
 function cacheKeyFor(
   sessionId: number,
   stack: Stack,
@@ -142,8 +199,12 @@ export function LiveCodePanel({
 
   // Файлы активной задачи: из codeCache (свои правки) или файлы задачи/шаблон.
   const [files, setFiles] = useState<Record<string, string>>(() => {
-    const cached = codeCache.get(cacheKeyFor(sessionId, stack, activeTaskId, activeTask?.files));
-    if (cached !== undefined && Object.keys(cached.files).length > 0) return cached.files;
+    const cached = cachedFiles(
+      cacheKeyFor(sessionId, stack, activeTaskId, activeTask?.files),
+      sessionId,
+      activeTaskId,
+    );
+    if (cached !== undefined) return cached;
     if (hasTaskFiles) return activeTask!.files as Record<string, string>;
     return { [MAIN_FILE[stack]]: DEFAULT_CODE[stack] };
   });
@@ -152,10 +213,10 @@ export function LiveCodePanel({
   // Переключение вкладки (или приход stage.tasks после монтирования) —
   // восстанавливаем файлы именно этой задачи.
   useEffect(() => {
-    const cached = codeCache.get(cacheKey);
-    if (cached !== undefined && Object.keys(cached.files).length > 0) {
-      setFiles(cached.files);
-      setActiveFile(solutionFile(stack, cached.files));
+    const cached = cachedFiles(cacheKey, sessionId, activeTaskId);
+    if (cached !== undefined) {
+      setFiles(cached);
+      setActiveFile(solutionFile(stack, cached));
       return;
     }
     if (hasTaskFiles) {
@@ -231,7 +292,8 @@ export function LiveCodePanel({
   // вкладок и смену стадий.
   useEffect(() => {
     codeCache.set(cacheKey, { files, result: activeResult });
-  }, [cacheKey, files, activeResult]);
+    saveDraft(sessionId, activeTaskId, files);
+  }, [cacheKey, files, activeResult, sessionId, activeTaskId]);
 
   const onRun = useCallback(async () => {
     if (running) return;

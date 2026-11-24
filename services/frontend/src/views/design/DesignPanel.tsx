@@ -50,10 +50,8 @@ export interface CanvasProps {
   initialState?: WhiteboardState | null;
 }
 
-// Сессии, для которых холст уже сохранялся в этой вкладке: восстановление схемы
-// (GET whiteboard) запрашиваем только при ВОЗВРАТЕ на стадию design (когда схема
-// была сохранена), чтобы не делать лишнего GET на первом (пустом) входе.
-const savedDesignSessions = new Set<number>();
+// Сессии, сохранённые этой вкладкой (чтобы не спорить с бэкендом при
+// возврате на стадию): холст всегда запрашивается заново — см. эффект восстановления.
 
 export function DesignPanel({
   sessionId,
@@ -78,11 +76,11 @@ export function DesignPanel({
   const [evaluating, setEvaluating] = useState(false);
   const reviewAtSaveRef = useRef('');
 
-  // Восстановление ранее сохранённой схемы (GET whiteboard → холст) при возврате
-  // на стадию. Смысл только если схема уже сохранялась в этой вкладке; иначе холст
-  // пуст (первый вход) и лишний GET не нужен. 404/ошибка — холст остаётся пустым.
+  // Восстановление сохранённой схемы (GET whiteboard → холст) при каждом входе
+  // на стадию: раньше запрос шёл только если схема сохранялась из этой вкладки,
+  // и перезагрузка страницы сбрасывала нарисованную схему в пустой холст
+  // (проверено в браузере). Лишняя цена — один 404 на первый вход.
   useEffect(() => {
-    if (!savedDesignSessions.has(sessionId)) return;
     let alive = true;
     getWhiteboard(sessionId)
       .then((wb) => {
@@ -161,7 +159,6 @@ export function DesignPanel({
     try {
       const snap = await apiRef.current.snapshot();
       await saveWhiteboard(sessionId, snap.state, { blocks: placed, links: snap.arrows }, snap.pngB64 ?? undefined);
-      savedDesignSessions.add(sessionId); // при возврате на стадию схема восстановится
       setSaved(true);
       reviewAtSaveRef.current = review;
       setEvaluating(true);

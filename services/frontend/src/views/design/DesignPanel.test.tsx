@@ -33,14 +33,18 @@ function makeMockCanvas() {
         pngB64: 'aW1hZ2U=',
       }),
   };
-  const Canvas: ComponentType<CanvasProps> = ({ apiRef }) => {
+  const Canvas: ComponentType<CanvasProps> = ({ apiRef, initialState }) => {
     useEffect(() => {
       apiRef.current = api;
       return () => {
         apiRef.current = null;
       };
     }, [apiRef, api]);
-    return <div data-testid="mock-canvas">{calls.join(',')}</div>;
+    const restored =
+      initialState !== undefined && initialState !== null && Array.isArray(initialState.elements)
+        ? `|saved:${initialState.elements.length}`
+        : '';
+    return <div data-testid="mock-canvas">{`${calls.join(',')}${restored}`}</div>;
   };
   return { api, Canvas, calls };
 }
@@ -77,6 +81,11 @@ beforeEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** Вызовы PUT: при входе на стадию панель ещё делает GET сохранённой схемы. */
+function putCalls(mock: ReturnType<typeof vi.fn>): unknown[][] {
+  return mock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'PUT');
+}
+
 describe('DesignPanel (WP-10)', () => {
   it('палитра: 12 блоков ADR-004', () => {
     renderPanel();
@@ -97,15 +106,16 @@ describe('DesignPanel (WP-10)', () => {
   });
 
   it('«Оценить» — PUT /whiteboard со state и структурой', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(json(200, { saved: true }));
+    // Response читается один раз — на каждый запрос нужен новый (GET + PUT)
+    const fetchMock = vi.fn(async () => json(200, { saved: true }));
     vi.stubGlobal('fetch', fetchMock);
     const { api } = renderPanel({ fetchMock });
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Client' }));
     await user.click(screen.getByRole('button', { name: 'Кэш' }));
     await user.click(screen.getByTestId('design-evaluate'));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const [url, init] = fetchMock.mock.calls[0];
+    await waitFor(() => expect(putCalls(fetchMock)).toHaveLength(1));
+    const [url, init] = putCalls(fetchMock)[0];
     expect(String(url)).toContain('/api/v1/sessions/7/whiteboard');
     expect((init as RequestInit).method).toBe('PUT');
     const body = JSON.parse((init as RequestInit).body as string);
@@ -118,6 +128,21 @@ describe('DesignPanel (WP-10)', () => {
       ),
     );
     void api;
+  });
+
+  it('вход на стадию — сохранённая схема возвращается на холст (переживает перезагрузку)', async () => {
+    const saved = {
+      state: { elements: [{ id: 'x', type: 'rectangle' }], appState: {} },
+      structure: { blocks: ['Кэш'], links: 1 },
+    };
+    const fetchMock = vi.fn(async (url: string) =>
+      String(url).endsWith('/whiteboard') ? json(200, saved) : json(404, {}),
+    );
+    const mock = makeMockCanvas();
+    renderPanel({ fetchMock, canvas: mock });
+    await waitFor(() => expect(screen.getByTestId('mock-canvas')).toHaveTextContent('saved:1'));
+    // счётчик блоков тоже восстанавливается, иначе «Оценить» остаётся заблокированной
+    expect(screen.getByText('Блоков на холсте: 1')).toBeInTheDocument();
   });
 
   it('кнопка «Оценить» заблокирована без блоков', () => {
