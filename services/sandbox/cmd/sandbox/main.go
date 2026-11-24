@@ -45,7 +45,7 @@ func buildMux(mode string, bank *tasks.Bank, rn *runner.Runner, adminToken strin
 	mux.HandleFunc("POST /admin/tasks", adminOnly(adminToken, handleTaskRegister(bank, rn, log)))
 	mux.HandleFunc("POST /admin/tasks/generate", adminOnly(adminToken, handleTaskGenerate(bank, rn, log)))
 	mux.HandleFunc("GET /admin/families", adminOnly(adminToken, func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"families": taskgen.Families()})
+		writeJSON(w, http.StatusOK, map[string]any{"families": taskgen.Describe()})
 	}))
 	return mux
 }

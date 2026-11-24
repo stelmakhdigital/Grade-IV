@@ -168,6 +168,38 @@ func TestAdminGeneratePersists(t *testing.T) {
 	}
 }
 
+// TestAdminFamiliesContract — контракт списка семей: объекты со стеками и
+// грейдами. Пул (api) по этим полям выбирает, что генерировать; список строк
+// ломает пополнение молча (первый же_live-прогон это и поймал).
+func TestAdminFamiliesContract(t *testing.T) {
+	ts, token := newTestServerWithBank(t, "subprocess", filepath.Join(t.TempDir(), "gen.json"))
+	req, _ := http.NewRequest("GET", ts.URL+"/admin/families", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("families: %v", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Families []struct {
+			ID     string   `json:"id"`
+			Stacks []string `json:"stacks"`
+			Grades []string `json:"grades"`
+		} `json:"families"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("разбор /admin/families: %v", err)
+	}
+	if len(out.Families) == 0 {
+		t.Fatalf("список семей пуст")
+	}
+	for _, f := range out.Families {
+		if f.ID == "" || len(f.Stacks) == 0 || len(f.Grades) == 0 {
+			t.Fatalf("семия описана неполно: %+v", f)
+		}
+	}
+}
+
 // TestAdminRegisterRejectsSilentTests — главное свойство gate: задача, тесты
 // которой пропускают любое решение, не попадает в банк.
 func TestAdminRegisterRejectsSilentTests(t *testing.T) {

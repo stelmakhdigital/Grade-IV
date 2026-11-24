@@ -60,6 +60,24 @@ func Build(id string, seed int64, grade string) (*Draft, error) {
 	return nil, fmt.Errorf("семья %s не даёт грейд %s", id, grade)
 }
 
+// FamilyInfo — описание семьи для того, кто пополняет пул (id + что она умеет).
+// Build наружу не отдаём: это не данные.
+type FamilyInfo struct {
+	ID     string   `json:"id"`
+	Stacks []string `json:"stacks"`
+	Grades []string `json:"grades"`
+}
+
+// Describe — семьи в стабильном порядке (по id).
+func Describe() []FamilyInfo {
+	out := make([]FamilyInfo, 0, len(registry))
+	for _, f := range registry {
+		out = append(out, FamilyInfo{ID: f.ID, Stacks: f.Stacks, Grades: f.Grades})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
 // StackOf — стек семьи (первый из заявленных).
 func StackOf(id string) (string, bool) {
 	f, ok := registry[id]
