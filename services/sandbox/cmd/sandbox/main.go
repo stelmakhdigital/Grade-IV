@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +20,15 @@ import (
 	"github.com/stelmakhdigital/grade-iv/services/sandbox/internal/taskgen"
 	"github.com/stelmakhdigital/grade-iv/services/sandbox/internal/tasks"
 )
+
+// pythonProbeCmd — команда проверки pytest: та же, что поставит runner, если
+// задан SANDBOX_CMD_PYTHON (иначе дефолт).
+func pythonProbeCmd() string {
+	if c := os.Getenv("SANDBOX_CMD_PYTHON"); c != "" {
+		return strings.ReplaceAll(c, "%GRADER%", ".") + " --version"
+	}
+	return "python3 -m pytest --version"
+}
 
 func getenv(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -163,6 +173,13 @@ func main() {
 			"python": getenv("SANDBOX_IMAGE_PYTHON", ""),
 			"shell":  getenv("SANDBOX_IMAGE_SHELL", ""),
 		},
+		// Dev (subprocess): у системного python3 может не быть pytest — тогда
+		// тесты банка не выполняются ни у одной python-задачи. SANDBOX_CMD_PYTHON
+		// задаёт команду целиком (с %GRADER%), например
+		// "/opt/venvs/pytest/bin/python -m pytest -q -p no:cacheprovider %GRADER%".
+		Commands: map[string]string{
+			"python": getenv("SANDBOX_CMD_PYTHON", ""),
+		},
 	})
 
 	// BUG-20261011-014: subprocess-режим честно шлёт код через `sh -c "go test ..."`/
@@ -171,6 +188,13 @@ func main() {
 	// старте и пишем ERROR, чтобы оператор сразу видел причину.
 	if mode == "subprocess" {
 		for _, tool := range []string{"go", "python3"} {
+			// python3 в PATH недостаточно: тесты банка запускает pytest, а его в
+			// базовой системе может не быть (dev). Молча проваливать каждую
+			// python-задачу — худший из вариантов.
+			if tool == "python3" && exec.Command("sh", "-c", pythonProbeCmd()).Run() != nil {
+				logger.Error("pytest недоступен — тесты банка для python-задач не выполняются",
+					"hint", "dev: SANDBOX_CMD_PYTHON=<python с pytest … %GRADER%>; prod: образ с запечённым pytest (SANDBOX_IMAGE_PYTHON)")
+			}
 			if p, err := exec.LookPath(tool); err != nil {
 				logger.Error("toolchain not in PATH (subprocess-режим: запуски кода кандидата падут на exit 127)",
 					"tool", tool,
