@@ -120,6 +120,78 @@ type BoardCase struct {
 	// Checklist — чек-лист ожидаемых элементов решения (в промпт ревью и
 	// критерий отчёта).
 	Checklist []string `json:"checklist"`
+	// Required — обязательные артефакты на доске. В отличие от checklist (это
+	// рубрика для живого разбора), они сверяются с блоками схемы детерминированно
+	// и дают числовую часть балла за стадию (spec-24). Кандидату не показываются:
+	// это проверка, а не подсказка.
+	Required []string `json:"required,omitempty"`
+}
+
+// normalizeArtifact — вид артефакта для сравнения: без регистра, скобочных
+// уточнений («Веха (milestone)» == «веха») и разделителей «/».
+func normalizeArtifact(s string) string {
+	s = strings.ToLower(s)
+	for _, cut := range []string{"(", ")", "/", "\\", "-", "«", "»", ":", ","} {
+		s = strings.ReplaceAll(s, cut, " ")
+	}
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// artifactForms — формы артефакта для сравнения. «Веха (milestone)» — это и
+// «веха milestone» целиком, и «веха», и «milestone»: кандидат подписывает блок
+// одним словом, а палитра даёт подпись с уточнением.
+func artifactForms(s string) []string {
+	full := normalizeArtifact(s)
+	if full == "" {
+		return nil
+	}
+	forms := []string{full}
+	if i := strings.IndexByte(s, '('); i > 0 {
+		if main := normalizeArtifact(s[:i]); main != "" && main != full {
+			forms = append(forms, main)
+		}
+		if j := strings.IndexByte(s, ')'); j > i {
+			if alias := normalizeArtifact(s[i+1 : j]); alias != "" {
+				forms = append(forms, alias)
+			}
+		}
+	}
+	return forms
+}
+
+// Coverage — обязательные артефакты против блоков схемы. Совпадением считается
+// равенство нормализованных строк или вхождение одной в другую: блок
+// «бэкап-хранилище вне серверного сегмента» закрывает «бэкап-хранилище».
+func (c *BoardCase) Coverage(blocks []string) (found, missing []string) {
+	if c == nil || len(c.Required) == 0 {
+		return nil, nil
+	}
+	norm := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		if n := normalizeArtifact(b); n != "" {
+			norm = append(norm, n)
+		}
+	}
+	for _, req := range c.Required {
+		hit := false
+		for _, form := range artifactForms(req) {
+			for _, b := range norm {
+				if b == form || strings.Contains(b, form) || strings.Contains(form, b) {
+					hit = true
+					break
+				}
+			}
+			if hit {
+				break
+			}
+		}
+		if hit {
+			found = append(found, req)
+		} else {
+			missing = append(missing, req)
+		}
+	}
+	return found, missing
 }
 
 // TrackCriterion — критерий отчёта роли (Ф2).

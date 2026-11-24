@@ -24,6 +24,7 @@ func TestBoardStagePayload(t *testing.T) {
 				Title:     "Кейс",
 				Statement: "Собери схему",
 				Checklist: []string{"секретный пункт рубрики"},
+				Required:  []string{"Файрвол"},
 			}},
 		},
 	}
@@ -37,6 +38,11 @@ func TestBoardStagePayload(t *testing.T) {
 	}
 	if _, has := caseAny["checklist"]; has {
 		t.Fatal("чек-лист не должен попадать кандидату")
+	}
+	// spec-24: обязательные артефакты — тоже рубрика, а не задание: выдать их
+	// значит подсказать, что рисовать.
+	if _, has := caseAny["required"]; has {
+		t.Fatal("обязательные артефакты не должны попадать кандидату")
 	}
 	// другой грейд — без кейса
 	b2 := boardStagePayload(&sysadmin, models.GradeJunior)
