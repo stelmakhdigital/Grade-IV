@@ -132,19 +132,27 @@ func New(cfg Config) *Runner {
 		}
 	}
 	cfg.Images = defaults
-	if cfg.Commands == nil {
-		// Градатор берётся из %GRADER% (отдельный от кандидата каталог —
-		// BUG-20261122-033), а не из рабочего каталога решения.
-		cfg.Commands = map[string]string{
-			// go: тесты банка подмешиваются в пакет оверлеем (go test видит их
-			// как файлы пакета, но на диске кандидата их нет).
-			"go":     "go test -count=1 -json -overlay %GRADER%/overlay.json ./...",
-			"python": "python3 -m pytest -q -p no:cacheprovider %GRADER%",
-			// spec-19: shell-задания — чек-скрипт банка (check.sh) запускает
-			// решение кандидата (solution.sh) и ассертит результат.
-			"shell": "bash %GRADER%/check.sh",
+	// Команды мерджатся как образы: переопределение одного стека не сбрасывает
+	// остальные (dev случай: SANDBOX_CMD_PYTHON указывает python с pytest, go и
+	// shell остаются на дефолтах).
+	// Градатор берётся из %GRADER% (отдельный от кандидата каталог —
+	// BUG-20261122-033), а не из рабочего каталога решения.
+	cmds := map[string]string{
+		// go: тесты банка подмешиваются в пакет оверлеем (go test видит их
+		// как файлы пакета, но на диске кандидата их нет).
+		"go": "go test -count=1 -json -overlay %GRADER%/overlay.json ./...",
+		// python: тесты банка лежат в каталоге градатора (test_*.py).
+		"python": "python3 -m pytest -q -p no:cacheprovider %GRADER%",
+		// spec-19: shell-задания — чек-скрипт банка (check.sh) запускает
+		// решение кандидата (solution.sh) и ассертит результат.
+		"shell": "bash %GRADER%/check.sh",
+	}
+	for stack, cmd := range cfg.Commands {
+		if cmd != "" {
+			cmds[stack] = cmd
 		}
 	}
+	cfg.Commands = cmds
 	maxConc := cfg.MaxConcurrent
 	if maxConc <= 0 {
 		maxConc = defaultMaxConcurrent
@@ -561,6 +569,7 @@ func (r *Runner) runDocker(ctx context.Context, stack, runDir, gradeDir, cmdLine
 	env := []string{
 		"HOME=/tmp", "TMPDIR=/tmp",
 		"GOCACHE=/work/.gocache", "GOPATH=/tmp/gopath", "GOTOOLCHAIN=local",
+		"GOWORK=off", // go.work хоста не должен включать сборку в workspace mode
 		// -p=2: при сборке std на много-ядерном хосте параллельные compile не влезают
 		// в --pids-limit/--memory (BUG-20261122-035)
 		"GOFLAGS=-mod=mod -p=2",
@@ -677,6 +686,11 @@ func cleanEnv(workdir, stack string) []string {
 			"GOCACHE="+workdir+"/.gocache",
 			"GOPATH="+workdir+"/.gopath",
 			"GOTOOLCHAIN=local",
+			// go.work родителя (дерево, откуда запущен сервис) переводит сборку в
+			// workspace mode, и GOFLAGS=-mod=mod становится ошибкой: «-mod may
+			// only be set to readonly or vendor when in workspace mode». Решение
+			// кандидата не должно зависеть от того, где лежит репозиторий.
+			"GOWORK=off",
 			"GOFLAGS=-mod=mod -p=2", // -p=2: 28 параллельных compile не влезают в RLIMIT_AS (см. BUG-20261122-035)
 			"GOPROXY=off",           // ADR-003: без сети — зависимости из банка задач
 		)

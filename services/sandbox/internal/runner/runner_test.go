@@ -143,3 +143,33 @@ func TestFilesWrittenToWorkdir(t *testing.T) {
 		t.Fatalf("result: %+v", res)
 	}
 }
+
+// TestCleanEnvGoWorkspaceMode — go-окружение обязано отключать workspace mode:
+// go.work в дереве, откуда запущен сервис, иначе конфликтует с GOFLAGS=-mod=mod
+// и падает на сборке решения кандидата (проверено в dev: SANDBOX_WORKDIR_BASE
+// внутри дерева с go.work).
+func TestCleanEnvGoWorkspaceMode(t *testing.T) {
+	goEnv := strings.Join(cleanEnv("/work", "go"), "\n")
+	if !strings.Contains(goEnv, "GOWORK=off") {
+		t.Errorf("go-окружение не отключает workspace mode: %s", goEnv)
+	}
+	if strings.Contains(strings.Join(cleanEnv("/work", "python"), "\n"), "GOWORK") {
+		t.Error("GOWORK попал в окружение другого стека")
+	}
+}
+
+// TestNewPartialCommandOverride — оверрайд команды одного стека не должен
+// сбрасывать остальные (dev-случай: SANDBOX_CMD_PYTHON с pytest, go/shell на
+// дефолтах).
+func TestNewPartialCommandOverride(t *testing.T) {
+	r := New(Config{Commands: map[string]string{"python": "/opt/venv/bin/python -m pytest %GRADER%"}})
+	for stack, want := range map[string]string{
+		"python": "/opt/venv/bin/python -m pytest %GRADER%",
+		"go":     "go test -count=1 -json -overlay %GRADER%/overlay.json ./...",
+		"shell":  "bash %GRADER%/check.sh",
+	} {
+		if got := r.cfg.Commands[stack]; got != want {
+			t.Errorf("%s: команда %q, ожидалось %q", stack, got, want)
+		}
+	}
+}
