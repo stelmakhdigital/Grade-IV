@@ -751,6 +751,13 @@ main, header, footer { position: relative; z-index: 1; }
 }
 
 /* Стек */
+/* Что реально умеет продукт сегодня (A5): не обещать автотесты на всех стеках. */
+.pick-note {
+  margin: 0 0 12px;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
 .stack-chips {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
