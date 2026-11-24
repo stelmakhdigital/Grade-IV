@@ -173,4 +173,30 @@ describe('CabinetView (WP-7)', () => {
     await screen.findByTestId('resume-indicator');
     expect(screen.getByTestId('resume-indicator')).toHaveTextContent('не заполнено');
   });
+
+  it('диалог: Escape закрывает при фокусе вне диалога, Tab не уходит в фон, фокус возвращается на кнопку', async () => {
+    renderCabinet(mockApi({ resumeGet: RESUME }));
+    await screen.findByTestId('resume-indicator');
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('resume-open'));
+    await screen.findByTestId('resume-about');
+
+    // ловушка Tab: из последнего элемента диалога — в первый, а не в фон
+    const items = () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>('[role="dialog"] button, [role="dialog"] textarea, [role="dialog"] input'),
+      );
+    items().at(-1)!.focus();
+    await user.tab();
+    expect(items()).toContain(document.activeElement);
+    items()[0].focus();
+    await user.tab({ shift: true });
+    expect(items()).toContain(document.activeElement);
+
+    // Escape работает, даже когда фокус оказался на странице за диалогом
+    (document.activeElement as HTMLElement).blur();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('resume-about')).not.toBeInTheDocument());
+    expect(document.activeElement).toBe(screen.getByTestId('resume-open'));
+  });
 });

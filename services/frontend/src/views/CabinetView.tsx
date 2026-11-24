@@ -7,7 +7,7 @@
  * Время интервью — метрика (длительность в истории), а не валюта: баланса
  * минут в кабинете больше нет.
  */
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   createSession,
   deleteResume,
@@ -28,6 +28,7 @@ import {
   type TTSVoice,
 } from '../api';
 import { useAuth } from '../auth';
+import { useDialog } from '../hooks/useDialog';
 import { apiErrorMessage } from './LoginView';
 import { humanSeconds, practiceLabel, statusLabel, stageLabel } from '../labels';
 
@@ -101,6 +102,23 @@ export function CabinetView() {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [resumeBusy, setResumeBusy] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
+  // Доступность диалогов: ловушка Tab, Escape из любой точки, возврат фокуса
+  // на открывшую кнопку (ui-review 2026-11-24).
+  const vacancyBoxRef = useRef<HTMLDivElement | null>(null);
+  const resumeBoxRef = useRef<HTMLDivElement | null>(null);
+  const dialogTriggerRef = useRef<HTMLElement | null>(null);
+  useDialog({
+    open: vacancyOpen,
+    onClose: () => setVacancyOpen(false),
+    boxRef: vacancyBoxRef,
+    returnFocusTo: dialogTriggerRef,
+  });
+  useDialog({
+    open: resumeOpen,
+    onClose: () => setResumeOpen(false),
+    boxRef: resumeBoxRef,
+    returnFocusTo: dialogTriggerRef,
+  });
 
   const load = useCallback(async () => {
     try {
@@ -220,6 +238,7 @@ export function CabinetView() {
 
   // F6 (итерация 12): модалка вакансии — открыть/сохранить/сбросить.
   const openVacancy = () => {
+    dialogTriggerRef.current = document.activeElement as HTMLElement | null;
     setVacancyDraft(vacancyText);
     setVacancyError(null);
     setVacancyOpen(true);
@@ -256,6 +275,7 @@ export function CabinetView() {
   };
 
   const openResume = () => {
+    dialogTriggerRef.current = document.activeElement as HTMLElement | null;
     setResumeAbout(resume.about ?? '');
     setResumeFile(null);
     setResumeError(null);
@@ -536,7 +556,7 @@ export function CabinetView() {
                             data-testid={`pause-warn-${s.id}`}
                             title="Пауза дольше порога (30 мин) прервёт интервью"
                           >
-                            паузы осталось {Math.ceil(left / 60000)} мин
+                            пауза: осталось {Math.ceil(left / 60000)} мин
                           </span>
                         );
                       }
@@ -570,14 +590,12 @@ export function CabinetView() {
           onClick={(e) => { if (e.target === e.currentTarget) closeResume(); }}
         >
           <div
+            ref={resumeBoxRef}
             className="modal-box"
             role="dialog"
             aria-modal="true"
             aria-labelledby="resume-title"
             aria-describedby="resume-desc"
-            onKeyDown={(e) => {
-              if (e.key === 'Escape' && !resumeBusy) closeResume();
-            }}
           >
             <div className="modal-head">
               <h3 id="resume-title">Резюме</h3>
@@ -657,14 +675,12 @@ export function CabinetView() {
           {/* spec-14/D9: клавиатурная доступность — Escape закрывает (focus
               внутри диалога после autoFocus), описание связано по id. */}
           <div
+            ref={vacancyBoxRef}
             className="modal-box"
             role="dialog"
             aria-modal="true"
             aria-labelledby="vacancy-title"
             aria-describedby="vacancy-desc"
-            onKeyDown={(e) => {
-              if (e.key === 'Escape' && !vacancyBusy) closeVacancy();
-            }}
           >
             <div className="modal-head">
               <h3 id="vacancy-title">Хочу попасть в кампанию</h3>
