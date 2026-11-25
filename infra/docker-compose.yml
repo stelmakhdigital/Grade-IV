@@ -26,9 +26,16 @@ services:
       LLM_BASE_URL: "${LLM_BASE_URL:-http://localhost:8300/v1}"
       LLM_MODEL: "${LLM_MODEL:-Qwen3-4B}"
       RESUME_DIR: "/data/resumes"
+      # Путь абсолютный: у образа рабочая директория / (бинарник в
+      # /usr/local/bin), дефолт «config/roles.json» резолвился бы в /config.
+      ROLE_TRACKS_FILE: "/app/config/roles.json"
     volumes:
       # Файлы резюме кандидатов (текст из них — в БД, оригинал — здесь).
       - resumes:/data/resumes
+      # Треки: config/roles.json вне контекста сборки api (он = services/api),
+      # в образ не попадает; правки админа пишутся туда же, поэтому монтируем
+      # каталогом на запись.
+      - ../../config:/app/config
     # O4: порядок старта по готовности, а не по запуску. Об образах: у api,
     # sandbox и voice HEALTHCHECK в Dockerfile (wget/curl на их /health*),
     # здесь остаётся дождаться postgres — иначе api стартует без БД и падает.
