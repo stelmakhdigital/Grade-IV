@@ -68,7 +68,7 @@
 
   /* ---------- Состояние ---------- */
 
-  const state = { grade: null, stack: null, submitted: false };
+  const state = { grade: null, stack: null };
 
   /* ---------- Элементы ---------- */
 
@@ -130,11 +130,7 @@
     }
 
     /* Кнопка */
-    if (state.submitted) {
-      ctaBtn.textContent = "✓ Заявка создана — ждите письма";
-      ctaBtn.disabled = true;
-      ctaBtn.classList.add("done");
-    } else {
+    {
       ctaBtn.classList.remove("done");
       if (g && s) {
         ctaBtn.disabled = false;
@@ -151,7 +147,7 @@
       }
     }
 
-    summary.classList.toggle("ready", Boolean(g && s) || state.submitted);
+    summary.classList.toggle("ready", Boolean(g && s));
   }
 
   /* ---------- Выбор ---------- */
@@ -165,7 +161,6 @@
 
   gradeCards.forEach((card) => {
     card.addEventListener("click", () => {
-      if (state.submitted) return;
       const id = card.dataset.grade;
       state.grade = state.grade === id ? null : id;
       selectFrom(gradeCards, "grade", state.grade);
@@ -175,7 +170,6 @@
 
   stackChips.forEach((chip) => {
     chip.addEventListener("click", () => {
-      if (state.submitted) return;
       const id = chip.dataset.stack;
       state.stack = state.stack === id ? null : id;
       selectFrom(stackChips, "stack", state.stack);
@@ -192,47 +186,17 @@
     toastTimer.id = setTimeout(() => toast.classList.remove("show"), 5200);
   }
 
-  function confetti(originX, originY) {
-    const colors = ["#22d3ee", "#a78bfa", "#34d399", "#fb923c", "#FFD43B", "#f87171"];
-    for (let i = 0; i < 40; i++) {
-      const p = document.createElement("i");
-      p.className = "confetti";
-      p.style.left = originX + "px";
-      p.style.top = originY + "px";
-      p.style.background = colors[i % colors.length];
-      document.body.appendChild(p);
 
-      const angle = Math.random() * Math.PI * 2;
-      const dist = 110 + Math.random() * 230;
-      const dx = Math.cos(angle) * dist;
-      const dy = Math.sin(angle) * dist - 150;
-      const rot = 360 + Math.random() * 540;
 
-      const anim = p.animate(
-        [
-          { transform: "translate(0, 0) rotate(0deg)", opacity: 1 },
-          { transform: `translate(${dx}px, ${dy + 340}px) rotate(${rot}deg)`, opacity: 0 },
-        ],
-        { duration: 950 + Math.random() * 650, easing: "cubic-bezier(.2,.7,.3,1)" }
-      );
-      anim.onfinish = () => p.remove();
-    }
-  }
-
+  /* CTA ведёт в продукт. Выбор масти и стека остаётся объяснением программы:
+     лендинг nowhere не отправляет — «заявки» и письма тут нет, и обещать её
+     было нечестно (ui-review 2026-11-24). В прод-сборке SPA живёт на «/»
+     (infra/caddy/Caddyfile → nginx services/frontend/nginx.conf). */
   ctaBtn.addEventListener("click", () => {
     const g = GRADES[state.grade];
     const s = STACKS[state.stack];
-    if (!g || !s || state.submitted) return;
-
-    state.submitted = true;
-    render();
-
-    const rect = ctaBtn.getBoundingClientRect();
-    confetti(rect.left + rect.width / 2, rect.top + rect.height / 2);
-
-    showToast(
-      `<strong>Заявка создана!</strong> Инженер по стеку <b>${s.name}</b> (трек <b>${g.name}</b>) напишет вам в течение 24 часов, чтобы назначить удобное время. Это демо — письмо не отправлялось 😉`
-    );
+    if (!g || !s) return;
+    window.location.assign("/");
   });
 
   /* ---------- Reveal при скролле ---------- */
