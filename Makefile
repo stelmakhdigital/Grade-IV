@@ -37,6 +37,8 @@ install:
 
 test:
 	@set -e; for m in $(GO_MODULES); do echo "=== go test $$m ==="; (cd $$m && go vet ./... && go test ./...); done
+	@echo "=== токены лендинга и приложения ==="
+	@node scripts/check-tokens.mjs
 	@echo "=== vitest (frontend) ==="
 	@cd services/frontend && pnpm -s test
 	@echo "=== pytest (voice) ==="
