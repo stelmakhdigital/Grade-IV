@@ -68,17 +68,21 @@ run-voice:
 run-frontend:
 	@(cd services/frontend && pnpm dev)
 
+# Комpose берёт переменные из env-файла в каталоге проекта (infra/), а наш .env
+# лежит в корне репо — передаём явно. Без JWT_SECRET профиль prod не поднимается.
+COMPOSE_ENV = $(if $(wildcard .env),--env-file .env,)
+
 up:
-	@docker compose -f infra/docker-compose.yml --profile prod up --build
+	@docker compose -f infra/docker-compose.yml $(COMPOSE_ENV) --profile prod up --build
 
 models:
 	@bash scripts/download-models.sh
 
 down:
-	@docker compose -f infra/docker-compose.yml --profile prod down
+	@docker compose -f infra/docker-compose.yml $(COMPOSE_ENV) --profile prod down
 
 up-gpu:
-	@docker compose -f infra/docker-compose.yml --profile prod --profile gpu up --build
+	@docker compose -f infra/docker-compose.yml $(COMPOSE_ENV) --profile prod --profile gpu up --build
 
 smoke:
 	@bash scripts/smoke.sh

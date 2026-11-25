@@ -12,6 +12,20 @@ import (
 // В prod-режиме (APP_ENV=prod) использование этого секрета запрещено (Load вернёт ошибку).
 const DevInsecureSecret = "dev-insecure-secret"
 
+// ProdSecretPlaceholders — значения, которые выглядят как «поменю потом» и
+// кочуют по шаблонам деплоя (compose-плейсхолдер, пример из README).
+var ProdSecretPlaceholders = []string{DevInsecureSecret, "change-me-in-production", "change-me", "secret", "changeme"}
+
+// InsecureProdSecret — истинно для секретов, с которыми в prod выходить нельзя.
+func InsecureProdSecret(secret string) bool {
+	for _, bad := range ProdSecretPlaceholders {
+		if secret == bad {
+			return true
+		}
+	}
+	return false
+}
+
 // Config — параметры сервиса api.
 type Config struct {
 	Addr           string // адрес прослушивания (ADDR, ":8000")
@@ -142,10 +156,12 @@ func Load() (*Config, error) {
 	if c.JWTExpiryHours <= 0 {
 		return nil, fmt.Errorf("JWT_EXPIRY_HOURS должен быть > 0 (получено %d)", c.JWTExpiryHours)
 	}
-	// B5: prod-гард — в prod dev-секрет JWT не допускается (отказ при старте).
-	if isProdEnv(c.Env) && c.JWTSecret == DevInsecureSecret {
-		return nil, fmt.Errorf("APP_ENV=%s: JWT_SECRET не может быть dev-секретом (%q) — задайте реальный JWT_SECRET",
-			c.Env, DevInsecureSecret)
+	// B5: prod-гард — в prod секрет JWT не должен быть дефолтом или
+	// «change-me»: подписанный таким ключом токен подделывается кем угодно,
+	// а по интерфейсу это неотличимо от рабочего стенда.
+	if isProdEnv(c.Env) && InsecureProdSecret(c.JWTSecret) {
+		return nil, fmt.Errorf("APP_ENV=%s: JWT_SECRET=%q — это шаблонное значение, задайте свой длинный случайный JWT_SECRET",
+			c.Env, c.JWTSecret)
 	}
 	// LLM-мок в prod озвучивает кандидату заготовленную фразу вместо ответов
 	// модели: собеседование выглядит живым, а по факту пустое. Не должно

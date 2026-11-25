@@ -56,6 +56,10 @@ class SileroTTS:
         self._model = None
         self._lock = threading.Lock()
 
+    def expected_files(self):
+        """Файл весов, без которого синтез молчит (проверка на старте)."""
+        return [self._model_path]
+
     # ------------------------------------------------------------------ lazy
     def _download_model(self) -> None:
         self._model_path.parent.mkdir(parents=True, exist_ok=True)

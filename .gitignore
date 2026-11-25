@@ -32,8 +32,10 @@ services/*/bin/
 # Python (тесты)
 .pytest_cache/
 
-# ML-модели voice (скачиваются лениво; ~145 МБ + HF-cache)
+# ML-модели voice (скачиваются download-models.sh; в compose монтируются
+# из ./models в /models). В git весят гигабайты.
 services/voice/models/
+/models/
 
 # Данные (SQLite)
 data/

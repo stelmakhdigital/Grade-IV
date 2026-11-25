@@ -17,7 +17,10 @@
 # Нужны: curl, python3 (для huggingface_hub; voice-venv используется если есть).
 set -euo pipefail
 
-MODELS_DIR="${MODELS_DIR:-/mnt/models}"
+# По умолчанию каталог <репо>/models — его prod-compose монтирует в voice как
+# /models (GIGAAM_DOWNLOAD_ROOT=/models/stt-gigaam, TTS_MODEL_DIR=/models/tts),
+# так что скачанное сразу видно контейнеру без переносов и симлинков.
+MODELS_DIR="${MODELS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]})/.." && pwd)/models}"
 STT_MODEL="${STT_MODEL:-small}"
 TTS_MODEL_FILE="silero-tts-v5_ru.pt"
 TTS_URL="https://models.silero.ai/models/tts/ru/v5_ru.pt"

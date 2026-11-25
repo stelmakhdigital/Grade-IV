@@ -22,7 +22,10 @@ services:
       APP_ENV: "${APP_ENV:-prod}"
       ADDR: ":8000"
       DATABASE_URL: "postgres://grade:grade@postgres:5432/grade"
-      JWT_SECRET: "${JWT_SECRET:-change-me-in-production}"
+      # Без секрета профиль prod не поднимается: подпись JWT известным
+      # значением = подделка токена любого пользователя. Плейсхолдер
+      # отсекает и прод-гард в config.Load.
+      JWT_SECRET: "${JWT_SECRET:?prod: задайте JWT_SECRET в .env}"
       VOICE_URL: "http://voice:8100"
       SANDBOX_URL: "http://sandbox:8200"
       # spec-24: фоновое пополнение пула задач (пусто — выключено)
@@ -34,16 +37,22 @@ services:
       LLM_API_KEY: "${LLM_API_KEY:-}"
       LLM_MOCK: "${LLM_MOCK:-}"
       RESUME_DIR: "/data/resumes"
-      # Путь абсолютный: у образа рабочая директория / (бинарник в
-      # /usr/local/bin), дефолт «config/roles.json» резолвился бы в /config.
+      # Пути абсолютные: у образа рабочая директория / (бинарник в
+      # /usr/local/bin), дефолт «config/…json» резолвился бы в /config, а
+      # json-дефолты в образ не попадают — берём из смонтированного config/.
       ROLE_TRACKS_FILE: "/app/config/roles.json"
+      TTS_VOICES_FILE: "/app/config/tts-voices.json"
+      INTRO_OPENINGS_FILE: "/app/config/openings.json"
     volumes:
       # Файлы резюме кандидатов (текст из них — в БД, оригинал — здесь).
       - resumes:/data/resumes
-      # Треки: config/roles.json вне контекста сборки api (он = services/api),
-      # в образ не попадает; правки админа пишутся туда же, поэтому монтируем
-      # каталогом на запись.
-      - ../../config:/app/config
+      # Конфигурация: roles.json / tts-voices.json / openings.json. В образ api
+      # не попадают (контекст сборки = services/api), правки админа пишутся
+      # туда же, поэтому монтируем каталогом на запись. Относительные пути в
+      # compose считаются от каталога файла (infra/), то есть ../config =
+      # <репо>/config: «../../config» уезжал на уровень выше репо, и docker
+      # молча поднимал там пустой каталог — реестр голосов был пустой.
+      - ../config:/app/config
     # O4: порядок старта по готовности, а не по запуску. Об образах: у api,
     # sandbox и voice HEALTHCHECK в Dockerfile (wget/curl на их /health*),
     # здесь остаётся дождаться postgres — иначе api стартует без БД и падает.
@@ -97,6 +106,10 @@ services:
     build:
       context: ../services/voice
       dockerfile: ../../infra/docker/voice.Dockerfile
+      # Где брать pip-пакеты: по умолчанию pypi.org. На сети без доступа к нему
+      # собирать явно: docker compose build --build-arg PIP_INDEX_URL=<зеркало>
+      # (в build.args специально не прописано — зеркало не должно становиться
+      # дефолтом прод-сборки).
     image: grade/voice:dev
     ports:
       - "8100:8100"
@@ -113,7 +126,10 @@ services:
       STT_MODEL: "${STT_MODEL:-small}"
       STT_DOWNLOAD_ROOT: /models/stt
       TTS_MODEL_DIR: /models/tts
-      TTS_SPEAKER: "${TTS_SPEAKER:-ru_01}"
+      # Спикер по умолчанию (когда у пользователя голос не выбран). Должен
+      # быть среди реальных спикеров v5_ru: «ru_01» таковым не был и Silero
+      # подставлял xenia с WARN на каждую реплику.
+      TTS_SPEAKER: "${TTS_SPEAKER:-xenia}"
     volumes:
       - ../models:/models:ro
     restart: unless-stopped

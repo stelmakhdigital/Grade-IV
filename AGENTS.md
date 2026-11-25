@@ -21,8 +21,11 @@ STT-провайдер по умолчанию (dev и прод) — **GigaAM v3
   CPU-индекса (`make install`, CI-джоба voice) — иначе pip тянет nvidia-*.
 - Модель обязательна: без `models/stt-gigaam/v3_e2e_rnnt.ckpt` STT молчит
   (контракт — `text=""`, не 500), `GET /api/v1/health` при этом показывает
-  `stt.provider=gigaam, loaded=false`. Скачивание:
-  `MODELS_DIR=$PWD/services/voice/models bash scripts/download-models.sh`.
+  `stt.provider=gigaam, loaded=false`, а на старте voice — ERROR с точным
+  путём. Канон каталога — `<репо>/models` (его монтирует prod-compose в
+  `/models`); в dev `run-all.sh` сам указывает `MODELS_DIR=$PWD/services/voice/models`
+  и `GIGAAM_DOWNLOAD_ROOT` туда же. Скачивание: `bash scripts/download-models.sh`
+  (по умолчанию качает в `<репо>/models`).
 - Качать надо заранее: у Sber-CDN сертификат просрочен (notAfter 2026-11-04),
   curl ещё проходит, а urllib внутри `gigaam.load_model` — нет
   (`CERTIFICATE_VERIFY_FAILED`), то есть автоскачивание модели в рантайме

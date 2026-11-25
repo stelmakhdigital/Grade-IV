@@ -26,6 +26,8 @@ func TestLoadProdRejectsDevSecret(t *testing.T) {
 	}{
 		{"prod: JWT_SECRET не задан (дефолт = dev-секрет)", "prod", ""},
 		{"prod: JWT_SECRET явный dev-секрет", "prod", DevInsecureSecret},
+		{"prod: плейсхолдер из compose-шаблона", "prod", "change-me-in-production"},
+		{"prod: «secret» из примера в README", "prod", "secret"},
 		{"production: dev-секрет", "production", ""},
 	}
 	for _, tc := range cases {

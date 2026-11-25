@@ -55,8 +55,10 @@ bash scripts/run-all.sh status       # состояние; stop / restart — п
 LLM_BASE_URL=http://YOUR-LLM:8000/v1 LLM_MODEL=qwen3.8-27b-fp8 bash scripts/run-all.sh start
 ```
 
-Нет LLM-узла? — `LLM_MOCK=1` (детерминированный эхо-интервьюер, удобно для разработки
-голосового контура и UI).
+Нет LLM-узла? — `LLM_MOCK=1` (интервьюер отвечает заготовленными репликами по
+кругу; удобно для разработки голосового контура и UI). В prod (`APP_ENV=prod`)
+этот режим запрещён: api не стартует — мок озвучивает кандидату нейтральную
+фразу, и отличить его от рабочей модели по интерфейсу нельзя.
 
 ### Основные переменные (есть дефолты)
 
@@ -91,13 +93,47 @@ make smoke    # REST e2e-смоук на живом api
 services/
   api/        Go: http API + WS + LLM-интервьюер (internal/{httpapi,interviewer,session,db,…})
   sandbox/    Go: запуск кода/тестов кандидатов (subprocess + rlimit, банк задач 34 шт.)
-  voice/      Python: FastAPI — /api/v1/stt, /tts, WS /stt/stream, /vad/stream
+  voice/      Python: FastAPI — /api/v1/stt, /tts, WS /stt/stream, /vad/stream;
+              в dev веса лежат в voice/models/ (gitignore), dev-стек сам туда указывает
   frontend/   React+TS: кабинет, сессия (voice/livecode/design/отчёт)
-  models/     (gitignore) веса STT/TTS после download-models.sh
+config/       roles.json, tts-voices.json, openings.json (в prod — единственный
+              видимый api каталог конфигурации, монтируется в /app/config)
+models/       (gitignore) веса для prod-контейнеров (монтируются в /models)
 infra/        docker compose, caddy (prod-обёртка), monitoring (prometheus/grafana)
 scripts/      run-all.sh (dev-стек), download-models.sh (модели)
 FOR_RUN/      (gitignore) dev-БД, логи, PID
 ```
+
+## Прод (docker compose)
+
+```bash
+cp .env.example .env            # обязательные значения помечены в файле
+bash scripts/download-models.sh # веса STT/TTS в ./models — их монтирует voice-контейнер
+docker compose -f infra/docker-compose.yml --env-file .env --profile prod up -d   # или make up
+```
+
+Наружу торчит только nginx фронтенда (:80/:443 через caddy): api, sandbox,
+voice, postgres и grafana в прод-профиле портов не публикуют. Что важно знать,
+чтобы стенд не молчал молча:
+
+- `JWT_SECRET` — без него профиль prod не поднимается (ни `up`, ни `build`).
+  Шаблонные `change-me*`, `secret`, `dev-insecure-secret` отвергает и api на
+  старте: подпись JWT известным ключом = подделка токена любого пользователя.
+- `APP_ENV=prod` стоит в compose; с ним же запрещён `LLM_MOCK=1`.
+- Конфигурация — каталог `config/` репо, он примонтирован в `/app/config`
+  (roles.json, tts-voices.json, openings.json). Относительные пути compose
+  считаются от `infra/`, поэтому там `../config`.
+- Модели — каталог `models/` репо → `/models:ro` в voice. Если весов нет,
+  voice поднимется и будет молчать (контракт STT — `text=""`, не 500),
+  поэтому на старте он пишет ERROR с точным путём; `/api/v1/health` показывает
+  `loaded=false`.
+- Голос по умолчанию (`TTS_SPEAKER`) обязан быть среди реальных спикеров
+  `v5_ru` (aidar, eugene, baya, kseniya, xenia) — иначе Silero подставляет
+  своего и шумит в лог на каждую реплику.
+- На сети без pypi.org: `docker compose build --build-arg PIP_INDEX_URL=<зеркало> voice`
+  (и ставьте torch с CPU-индекса — см. `infra/docker/voice.Dockerfile`).
+- Профили: `prod` (api, postgres, sandbox, voice, frontend, caddy),
+  `gpu` (voice на CUDA), `monitoring` (prometheus + grafana).
 
 ## Шаблонизация и промпты (A6)
 

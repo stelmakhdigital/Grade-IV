@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -61,10 +62,31 @@ def _build_tts():
     if name == "fake":
         return FakeTTS()
     if name in ("", "silero"):
-        from .silero import SileroTTS
+        from .silero import DEFAULT_MODEL_SPEAKER, SileroTTS
 
-        return SileroTTS(default_speaker=os.getenv("TTS_SPEAKER", "ru_01"))
+        # «ru_01» среди спикеров v5_ru нет — Silero каждый раз подставлял
+        # дефолт модели с WARN; берём его же, но без подмены и шума в логе.
+        return SileroTTS(default_speaker=os.getenv("TTS_SPEAKER", DEFAULT_MODEL_SPEAKER))
     raise ValueError(f"Неизвестный VOICE_TTS_PROVIDER: {name!r}")
+
+
+def _warn_missing_models(*providers) -> None:
+    """ERROR на старте, если весов нет на диске.
+
+    Иначе отказ тихий: сервис поднимается, /health отвечает 200 с loaded=false,
+    STT по контракту отдаёт text="" (не 500), TTS молчит — на стенде это
+    выглядит как «интервьюер не отвечает», а не как «не скачали модель».
+    Пути берём у самих провайдеров, чтобы не разъезжались с их загрузкой.
+    """
+    for p in providers:
+        for f in getattr(p, "expected_files", lambda: [])():
+            if not Path(f).exists():
+                logger.error(
+                    "%s: нет %s — провайдер будет молчать. Скачивание: "
+                    "MODELS_DIR=<репо>/models bash scripts/download-models.sh",
+                    type(p).__name__,
+                    f,
+                )
 
 
 def build_app(stt=None, tts=None, vad=None, max_speech_s: float | None = None) -> FastAPI:
@@ -85,6 +107,7 @@ def build_app(stt=None, tts=None, vad=None, max_speech_s: float | None = None) -
     app.state.stt = stt
     app.state.tts = tts
     app.state.vad = vad
+    _warn_missing_models(stt, tts)
 
     @app.get("/api/v1/health")
     def health() -> dict:

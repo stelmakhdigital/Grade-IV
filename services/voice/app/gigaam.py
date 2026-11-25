@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from pathlib import Path
 
 import numpy as np
 
@@ -105,6 +106,15 @@ class GigaAMSTT:
     @property
     def loaded(self) -> bool:
         return self._model is not None
+
+    def expected_files(self):
+        """Веса и токенизатор: без них загрузка не состоится.
+
+        Автоскачивание в рантайме мертво (у Sber-CDN просрочен сертификат,
+        urllib внутри gigaam.load_model отказывается), поэтому ждём файлы на диске.
+        """
+        root = Path(self._download_root) if self._download_root else Path.home() / ".cache" / "gigaam"
+        return [root / f"{self._model_name}.ckpt", root / "tokenizer"]
 
     # --------------------------------------------------------------- contract
     def transcribe(self, audio: bytes, sample_rate: int = SAMPLE_RATE) -> STTResult:
