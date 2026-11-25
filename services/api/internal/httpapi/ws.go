@@ -36,6 +36,15 @@ type wsMessage struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
+// wsAcceptOptions — проверка origin выключена осознанно. Прод идёт через
+// reverse-proxy (Caddy → nginx → api), а nginx отдаёт Host без порта
+// (proxy_set_header Host $host): браузерный Origin «http://host:8081» не
+// совпадал с «host», апгрейд отваливался с 403 — голосовая стадия не
+// начиналась, в логе не было ни строки. Без проверки безопасно: апгрейд
+// авторизуется одноразовым тикетом или JWT из query (wsAuthUser), cookie api
+// не раздаёт, поэтому межсайтовой запрос чужую сессию не подхватит.
+var wsAcceptOptions = &websocket.AcceptOptions{InsecureSkipVerify: true}
+
 // wsAuthUser — аутентификация WS-upgrade: одноразовый тикет (spec-14/#12,
 // приоритет — JWT в query попадает в логи прокси) либо JWT из query/заголовка.
 func (s *Server) wsAuthUser(r *http.Request) (int64, error) {
@@ -81,8 +90,9 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	conn, err := websocket.Accept(w, r, nil)
+	conn, err := websocket.Accept(w, r, wsAcceptOptions)
 	if err != nil {
+		s.log.Warn("ws: апгрейд отклонён", "session", id, "err", err)
 		return
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
