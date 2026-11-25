@@ -370,12 +370,17 @@ func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 func (s *Server) withLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		rec := &statusRecorder{ResponseWriter: w}
 		next.ServeHTTP(rec, r)
+		status := rec.status
+		if status == 0 {
+			// Статус не записан: WS-апгрейд пишет 101 прямо в hijack-коннект.
+			status = http.StatusOK
+		}
 		s.log.Info("http",
 			"method", r.Method,
 			"path", r.URL.Path,
-			"status", rec.status,
+			"status", status,
 			"dur_ms", time.Since(start).Milliseconds(),
 		)
 	})

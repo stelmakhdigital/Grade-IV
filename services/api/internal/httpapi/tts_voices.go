@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -58,6 +59,14 @@ func (r *ttsVoiceRegistry) Get() (ttsVoiceRegistryData, error) {
 		return r.value, r.err
 	}
 	raw, err := os.ReadFile(r.path)
+	if errors.Is(err, os.ErrNotExist) {
+		// Файла ещё нет — это не ошибка: пустой реестр, admin создаёт его
+		// PUT /api/v1/admin/tts-voices. Без этой ветки GET /api/v1/tts-voices на
+		// свежем стенде отвечал 500 и логоил ERROR на каждый запрос.
+		// Файл, положенный руками в рантайме, подхватится после Reload/рестарта.
+		r.value, r.loaded, r.err = ttsVoiceRegistryData{}, true, nil
+		return r.value, nil
+	}
 	if err != nil {
 		r.err = err
 		return ttsVoiceRegistryData{}, err
