@@ -1,6 +1,4 @@
-:root {
-  color-scheme: dark;
-}
+@import './tokens.css';
 
 * {
   box-sizing: border-box;
@@ -8,73 +6,136 @@
 
 body {
   margin: 0;
-  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
-  background: #0b0e14;
-  color: #d6dbe5;
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  line-height: var(--lh-ui);
+  background: var(--ink-0);
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Моноширинный — только там, где что-то измеряется или исполняется: метрики,
+   таймеры, подписи стадий, код. Текст интерфейса — sans, от 15px. */
+code,
+pre,
+kbd,
+samp,
+.mono {
+  font-family: var(--font-mono);
+  line-height: var(--lh-mono);
+}
+
+/* Цифры в столбцах не должны «плясать» по ширине. */
+.timer,
+.rail-time-value,
+.score-chip,
+.criterion-score,
+.report-stage-score,
+.trend-chip,
+.sessions-table td,
+.progress-table td {
+  font-variant-numeric: tabular-nums;
 }
 
 .app {
-  max-width: 860px;
+  max-width: var(--page-max);
   margin: 0 auto;
-  padding: 40px 24px;
+  padding: var(--s-7) var(--s-5);
+}
+
+/* Ширина строки: прибор прибором, а читать должно быть удобно. */
+p,
+li,
+dd {
+  max-width: 74ch;
 }
 
 h1 {
-  color: #7aa2f7;
-  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: clamp(19px, 0.6vw + 17px, var(--fs-h1));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-1);
+  margin: 0 0 var(--s-2);
+  text-wrap: balance;
 }
 
+/* h2 — приборная подпись секции, а не заголовок для чтения. */
 h2 {
-  color: #9aa4b8;
-  font-size: 15px;
-  margin: 0 0 12px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--text-3);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-label);
+  margin: 0 0 var(--s-4);
+}
+
+h3 {
+  font-size: var(--fs-lede);
+  line-height: 1.35;
+  margin: 0 0 var(--s-2);
+  text-wrap: balance;
 }
 
 p {
-  color: #9aa4b8;
+  color: var(--text-2);
+  margin: 0 0 var(--s-3);
+  text-wrap: pretty;
 }
 
 .muted {
-  color: #8f9bb0; /* было #6b7688 — 4.01:1 на карточке, не проходило AA */
+  color: var(--text-3);
 }
 
 .small {
-  font-size: 13px;
+  font-size: var(--fs-meta);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ---------------------------------------------------------------- карточки */
 
 .card {
-  background: #10141d;
-  border: 1px solid #232a3a;
-  border-radius: 10px;
-  padding: 20px;
-  margin-top: 20px;
+  background: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  padding: var(--s-5);
+  margin-top: var(--s-5);
 }
 
 .notice {
-  border-color: #3a3320;
+  border-color: var(--line-warn);
+  background: var(--surface-warn);
 }
 
 /* ----------------------------------------------------------------- кнопки */
 
 .btn {
   display: inline-block;
-  border: 1px solid #2a3140;
-  border-radius: 8px;
-  background: #161c28;
-  color: #d6dbe5;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-ctl);
+  background: var(--ink-3);
+  color: var(--text-1);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-body);
   padding: 8px 16px;
   cursor: pointer;
   text-decoration: none;
 }
 
 .btn:hover {
-  border-color: #3a465c;
+  border-color: var(--line-3);
 }
 
 /* Отклик на нажатие: на тач-устройствах :hover не срабатывает, и без
@@ -84,9 +145,9 @@ p {
 }
 
 .btn.primary {
-  background: #7aa2f7;
-  border-color: #7aa2f7;
-  color: #0b0e14;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ink-0);
   font-weight: 600;
 }
 
@@ -100,8 +161,8 @@ p {
 }
 
 .btn.small {
-  padding: 4px 10px;
-  font-size: 13px;
+  padding: 5px 11px;
+  font-size: 14px;
 }
 
 /* ------------------------------------------------- модальное окно (F6: вакансия) */
@@ -120,29 +181,29 @@ p {
   padding: 0;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
-  color: #7aa2f7;
+  font-size: var(--fs-meta);
+  color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 .vacancy-link:hover {
-  color: #9cc0ff;
+  color: var(--accent-hi);
 }
 
 .vacancy-indicator {
-  font-size: 12px;
-  color: #98c379;
+  font-size: var(--fs-label);
+  color: var(--ok);
 }
 
 /* Загрузка файла резюме в модалке. */
 .resume-file input[type='file'] {
   padding: 8px;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-meta);
   color: inherit;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
+  border-radius: var(--r-ctl);
 }
 
 .modal-overlay {
@@ -157,9 +218,9 @@ p {
 }
 
 .modal-box {
-  background: #10141d;
-  border: 1px solid #2a3140;
-  border-radius: 12px;
+  background: var(--ink-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
   padding: 24px;
   width: 100%;
   max-width: 640px;
@@ -176,13 +237,13 @@ p {
 }
 .modal-head h3 {
   margin: 0;
-  color: #d6dbe5;
-  font-size: 18px;
+  color: var(--text-1);
+  font-size: var(--fs-lede);
 }
 
 .modal-desc {
-  color: #9aa4b8;
-  font-size: 14px;
+  color: var(--text-2);
+  font-size: var(--fs-body);
   margin: 0 0 16px;
 }
 
@@ -190,16 +251,16 @@ p {
   width: 100%;
   min-height: 240px;
   resize: vertical;
-  background: #0b0e14;
-  border: 1px solid #2a3140;
-  border-radius: 8px;
-  color: #d6dbe5;
+  background: var(--ink-0);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-ctl);
+  color: var(--text-1);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-body);
   padding: 12px;
 }
 .modal-textarea:focus {
-  border-color: #7aa2f7;
+  border-color: var(--accent);
 }
 
 .modal-actions {
@@ -221,8 +282,8 @@ p {
 
 .field span {
   display: block;
-  font-size: 12px;
-  color: #8f9bb0; /* было #6b7688 — 4.01:1 на карточке, не проходило AA */
+  font-size: var(--fs-label);
+  color: var(--text-3);
   margin-bottom: 4px;
 }
 
@@ -230,10 +291,10 @@ p {
 .field select {
   width: 100%;
   font: inherit;
-  color: #d6dbe5;
-  background: #0b0e14;
-  border: 1px solid #2a3140;
-  border-radius: 8px;
+  color: var(--text-1);
+  background: var(--ink-0);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-ctl);
   padding: 9px 12px;
 }
 
@@ -241,24 +302,24 @@ p {
 .field select:focus {
   /* outline не снимаем: :focus-visible ниже даёт рамку обвода, а specificity у
      этого правила выше — с outline:none клавиатурный фокус в полях пропал. */
-  border-color: #7aa2f7;
+  border-color: var(--accent);
 }
 
 .form-error {
-  color: #e06c75;
-  font-size: 13px;
+  color: var(--bad);
+  font-size: var(--fs-meta);
   margin: 8px 0;
 }
 
 /* Ссылка на диагностику микрофона внутри строки ошибки/мьюта. */
 .debug-link {
-  color: #7aa2f7;
+  color: var(--accent);
   text-decoration: underline;
 }
 
 .form-warn {
-  color: #e5c07b;
-  font-size: 13px;
+  color: var(--warn);
+  font-size: var(--fs-meta);
   margin: 8px 0;
 }
 
@@ -299,15 +360,15 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #2a3349;
-  border-radius: 5px;
-  font-size: 12px;
-  color: #7aa2f7;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-tag);
+  font-size: var(--fs-label);
+  color: var(--accent);
 }
 
 .hero-note {
   margin: 16px 0 0;
-  font-size: 13px;
+  font-size: var(--fs-meta);
 }
 
 .auth-card {
@@ -326,19 +387,19 @@ p {
 .tab {
   flex: 1;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-body);
   padding: 8px;
-  border: 1px solid #2a3140;
-  border-radius: 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-ctl);
   background: transparent;
-  color: #9aa4b8;
+  color: var(--text-2);
   cursor: pointer;
 }
 
 .tab.active {
-  background: #161c28;
-  color: #d6dbe5;
-  border-color: #7aa2f7;
+  background: var(--ink-3);
+  color: var(--text-1);
+  border-color: var(--accent);
 }
 
 /* ------------------------------------------------------------- кабинет */
@@ -390,19 +451,19 @@ p {
 }
 
 .history-filter .chip {
-  border: 1px solid #2a3140;
+  border: 1px solid var(--line-2);
   background: transparent;
-  color: #9aa4b2;
+  color: var(--text-2);
   border-radius: 999px;
   padding: 3px 12px;
-  font-size: 13px;
+  font-size: var(--fs-meta);
   cursor: pointer;
 }
 
 .history-filter .chip-active {
-  background: #7aa2f7;
-  border-color: #7aa2f7;
-  color: #0b0e14;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ink-0);
   font-weight: 600;
 }
 
@@ -440,20 +501,20 @@ p {
 .sessions-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--fs-meta);
 }
 
 .sessions-table th {
   text-align: left;
-  color: #8f9bb0; /* было #6b7688 — 4.01:1 на карточке, не проходило AA */
+  color: var(--text-3);
   font-weight: normal;
   padding: 6px 8px;
-  border-bottom: 1px solid #232a3a;
+  border-bottom: 1px solid var(--line);
 }
 
 .sessions-table td {
   padding: 8px;
-  border-bottom: 1px solid #1a202d;
+  border-bottom: 1px solid var(--ink-3);
 }
 
 .sessions-table tr:last-child td {
@@ -463,29 +524,29 @@ p {
 .status {
   display: inline-block;
   padding: 2px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  border: 1px solid #2a3140;
+  border-radius: var(--r-ctl);
+  font-size: var(--fs-label);
+  border: 1px solid var(--line-2);
 }
 
 .status.active {
-  color: #73daca;
-  border-color: #2b4a43;
+  color: var(--live);
+  border-color: var(--line-ok);
 }
 
 .status.paused {
-  color: #e5c07b;
-  border-color: #4a3f2b;
+  color: var(--warn);
+  border-color: var(--line-warn);
 }
 
 .status.finished {
-  color: #9aa4b8;
-  border-color: #2a3140;
+  color: var(--text-2);
+  border-color: var(--line-2);
 }
 
 .status.aborted {
-  color: #e06c75;
-  border-color: #4a2b2e;
+  color: var(--bad);
+  border-color: var(--line-bad);
 }
 
 /* ------------------------------------------------------------- транскрипт */
@@ -494,10 +555,10 @@ p {
 .rec-window {
   margin: 12px 0;
   padding: 10px 14px;
-  border: 1px solid #3a2b1a;
-  border-left: 3px solid #e5a15d;
-  border-radius: 8px;
-  background: #171310;
+  border: 1px solid var(--line-warn);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--r-ctl);
+  background: var(--surface-warn);
 }
 
 .rec-head {
@@ -508,14 +569,14 @@ p {
 }
 
 .rec-status {
-  color: #e5a15d;
+  color: var(--warn);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
 .rec-text {
   margin: 8px 0;
-  color: #d8dee9;
+  color: var(--text-1);
   white-space: pre-wrap;
   max-height: 160px;
   overflow-y: auto;
@@ -533,7 +594,7 @@ p {
 
 .event {
   padding: 10px 0;
-  border-bottom: 1px solid #1a202d;
+  border-bottom: 1px solid var(--ink-3);
 }
 
 .event:last-child {
@@ -544,26 +605,26 @@ p {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font-size: 12px;
-  color: #8f9bb0; /* было #6b7688 — 4.01:1 на карточке, не проходило AA */
+  font-size: var(--fs-label);
+  color: var(--text-3);
 }
 
 .event-kind {
-  color: #9aa4b8;
+  color: var(--text-2);
 }
 
 .event.user_utterance .event-kind {
-  color: #7aa2f7;
+  color: var(--accent);
 }
 
 .event.ai_utterance .event-kind,
 .event.ai_nudge .event-kind {
-  color: #73daca;
+  color: var(--live);
 }
 
 .event-text {
   margin-top: 6px;
-  color: #d6dbe5;
+  color: var(--text-1);
   white-space: pre-wrap;
 }
 
@@ -573,20 +634,20 @@ p {
   display: inline-block;
   margin-top: 16px;
   padding: 4px 12px;
-  border: 1px solid #2a3140;
-  border-radius: 8px;
-  font-size: 13px;
-  color: #9aa4b8;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-ctl);
+  font-size: var(--fs-meta);
+  color: var(--text-2);
 }
 
 .badge.ok {
-  color: #73daca;
-  border-color: #2b4a43;
+  color: var(--live);
+  border-color: var(--line-ok);
 }
 
 .badge.err {
-  color: #e06c75;
-  border-color: #4a2b2e;
+  color: var(--bad);
+  border-color: var(--line-bad);
 }
 
 /* ------------------------------------------------- голосовая сессия (WP-8) */
@@ -611,44 +672,44 @@ p {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
-  font-size: 13px;
+  font-size: var(--fs-meta);
   margin-bottom: 10px;
 }
 
 .conn {
-  color: #8f9bb0; /* было #6b7688 — 4.01:1 на карточке, не проходило AA */
+  color: var(--text-3);
 }
 
 .conn.open {
-  color: #73daca;
+  color: var(--live);
 }
 
 .conn.error {
-  color: #e06c75;
+  color: var(--bad);
 }
 
 /* Остаток лимита времени сессии (серверский timer/remaining_s). */
 .timer {
   font-variant-numeric: tabular-nums;
-  color: #9aa4b8;
+  color: var(--text-2);
 }
 .timer.warn {
-  color: #e5c07b;
+  color: var(--warn);
 }
 
 .saying {
-  color: #e5c07b;
+  color: var(--warn);
 }
 
 .listening {
-  color: #7aa2f7;
+  color: var(--accent);
 }
 
 /* Живая диагностика захвата (dev): путь/чанки/шаг/rms/ctx. */
 .mic-dbg {
-  color: #8b949e;
-  font-family: ui-monospace, monospace;
-  font-size: 11px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
 }
 
 /* Эквалайзер микрофона (MicVisualizer): live — бирюза, muted — янтарь
@@ -659,31 +720,31 @@ p {
   gap: 2px;
   height: 36px;
   padding: 4px 7px;
-  border: 1px solid #232a3a;
-  border-radius: 6px;
-  background: #0d1119;
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--ink-1);
 }
 .mic-eq-bar {
   display: block;
   width: 3px;
   height: 2px;
   border-radius: 2px;
-  background: #73daca;
+  background: var(--live);
 }
 .mic-eq.muted .mic-eq-bar {
-  background: #e5c07b;
+  background: var(--warn);
 }
 .mic-eq.idle .mic-eq-bar {
-  background: #3a4150;
+  background: var(--line-3);
   opacity: 0.55;
 }
 
 .task-box {
-  border: 1px solid #232a3a;
-  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
   padding: 12px;
   margin: 10px 0;
-  background: #0d1119;
+  background: var(--ink-1);
 }
 
 .task-box p {
@@ -691,11 +752,11 @@ p {
 }
 
 .ai-say {
-  border-left: 3px solid #73daca;
+  border-left: 3px solid var(--live);
   padding: 8px 12px;
   margin: 10px 0;
-  color: #d6dbe5;
-  background: #0d1119;
+  color: var(--text-1);
+  background: var(--ink-1);
   border-radius: 0 8px 8px 0;
 }
 
@@ -720,15 +781,15 @@ p {
   flex: 1 1 auto;
   min-width: 0;
   /* высота как у кнопок рядом: тот же кегль и те же вертикальные отступы */
-  font-size: 14px;
+  font-size: var(--fs-body);
   padding: 8px 10px;
-  border: 1px solid #2a3140;
-  border-radius: 8px;
-  background: #0b0e14;
-  color: #d6dbe5;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-ctl);
+  background: var(--ink-0);
+  color: var(--text-1);
 }
 .text-answer::placeholder {
-  color: #6b7280;
+  color: var(--text-3);
 }
 
 /* Навигация между стадиями (кнопки перехода) в панелях livecode/design. */
@@ -749,20 +810,20 @@ p {
   flex-wrap: wrap;
   margin-top: 10px;
   padding: 8px 10px;
-  border: 1px dashed #3a465c;
-  border-radius: 8px;
+  border: 1px dashed var(--line-3);
+  border-radius: var(--r-ctl);
 }
 
 .btn.danger {
-  background: #e06c75;
-  border-color: #e06c75;
-  color: #0b0e14;
+  background: var(--bad);
+  border-color: var(--bad);
+  color: var(--ink-0);
   font-weight: 600;
 }
 
 .line {
   padding: 8px 0;
-  border-bottom: 1px solid #1a202d;
+  border-bottom: 1px solid var(--ink-3);
 }
 
 .line:last-child {
@@ -770,32 +831,32 @@ p {
 }
 
 .line-who {
-  font-size: 12px;
-  color: #8f9bb0; /* было #6b7688 — 4.01:1 на карточке, не проходило AA */
+  font-size: var(--fs-label);
+  color: var(--text-3);
 }
 
 .line.user .line-who {
-  color: #7aa2f7;
+  color: var(--accent);
 }
 
 .line.ai .line-who {
-  color: #73daca;
+  color: var(--live);
 }
 
 .line-text {
   margin-top: 4px;
-  color: #d6dbe5;
+  color: var(--text-1);
   white-space: pre-wrap;
 }
 
 /* Интеримный (stt_partial) текст кандидата: приглушён, точки — «распознаётся». */
 .line.interim .line-text {
-  color: #8b93a5;
+  color: var(--text-2);
   font-style: italic;
 }
 
 .interim-dots {
-  color: #565f73;
+  color: var(--line-3);
 }
 
 /* ----------------------------------------------------- Live-Code (WP-9) */
@@ -804,24 +865,25 @@ p {
   margin-top: 4px;
 }
 
-/* Скелетон/спиннер при ленивой загрузке Monaco (CDN). */
+/* Скелетон/спиннер при загрузке Monaco — ту же высоту, что у редактора
+   (clamp в CodeEditor.tsx), чтобы layout не прыгал при появлении Monaco. */
 .code-loading {
-  height: 320px;
+  height: clamp(320px, 44vh, 620px);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: #8b95a7;
-  font-size: 14px;
-  background: #0d1119;
-  border-radius: 8px;
+  color: var(--text-3);
+  font-size: var(--fs-body);
+  background: var(--ink-1);
+  border-radius: var(--r-ctl);
 }
 .code-loading-spinner {
   width: 16px;
   height: 16px;
   flex: none;
-  border: 2px solid #2a3140;
-  border-top-color: #7aa2f7;
+  border: 2px solid var(--line-2);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: code-loading-spin 0.8s linear infinite;
 }
@@ -830,8 +892,8 @@ p {
 }
 
 .task-title {
-  color: #e5c07b;
-  font-size: 14px;
+  color: var(--warn);
+  font-size: var(--fs-body);
   margin: 0 0 8px;
 }
 
@@ -847,34 +909,34 @@ p {
   align-items: center;
   gap: 6px;
   padding: 5px 10px;
-  border: 1px solid #2a3140;
-  border-radius: 8px;
-  background: #151a24;
-  color: #a9b1c2;
-  font-size: 13px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-ctl);
+  background: var(--ink-2);
+  color: var(--text-1);
+  font-size: var(--fs-meta);
   cursor: pointer;
 }
 .task-tab.active {
-  border-color: #7aa2f7;
-  color: #e5e9f0;
-  background: #1b2230;
+  border-color: var(--accent);
+  color: var(--text-1);
+  background: var(--ink-3);
 }
 .task-dot {
   width: 8px;
   height: 8px;
   flex: none;
   border-radius: 50%;
-  background: #4b5568; /* серая — нет сдач */
+  background: var(--dot-idle); /* серая — нет сдач */
 }
 .task-dot.ok {
-  background: #4ade80; /* зелёная — последний run passed */
+  background: var(--ok); /* зелёная — последний run passed */
 }
 .task-dot.fail {
-  background: #f87171; /* красная — failed */
+  background: var(--bad); /* красная — failed */
 }
 .submitted-counter {
-  color: #8b95a7;
-  font-size: 13px;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
   margin: 0 0 8px;
 }
 
@@ -888,8 +950,8 @@ p {
   gap: 8px;
 }
 .report-stage {
-  border: 1px solid #232a3a;
-  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
   padding: 8px 10px;
 }
 .report-stage-title {
@@ -900,28 +962,28 @@ p {
   font-variant-numeric: tabular-nums;
 }
 .report-stage-score.good {
-  color: #3fb950;
+  color: var(--ok);
 }
 .report-stage-score.mid {
-  color: #d29922;
+  color: var(--warn);
 }
 .report-stage-score.bad {
-  color: #f85149;
+  color: var(--bad);
 }
 .report-stage-basis,
 .report-stage-missing {
   margin: 4px 0 0;
-  font-size: 13px;
-  color: #9aa7bd;
+  font-size: var(--fs-meta);
+  color: var(--text-2);
 }
 .report-stage-missing {
-  color: #d29922;
+  color: var(--warn);
 }
 .report-stage-evidence {
   margin: 4px 0 0;
   padding-left: 18px;
-  font-size: 13px;
-  color: #9aa7bd;
+  font-size: var(--fs-meta);
+  color: var(--text-2);
 }
 
 .livecode-tasks {
@@ -935,30 +997,30 @@ p {
   align-items: center;
   gap: 12px;
   padding: 6px 10px;
-  border: 1px solid #232a3a;
-  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
   margin-bottom: 6px;
-  font-size: 14px;
+  font-size: var(--fs-body);
 }
 .livecode-task-status {
-  font-size: 13px;
+  font-size: var(--fs-meta);
   white-space: nowrap;
 }
 .livecode-task-status.passed {
-  color: #4ade80;
+  color: var(--ok);
 }
 .livecode-task-status.failed {
-  color: #f87171;
+  color: var(--bad);
 }
 .livecode-task-status.no_submission {
-  color: #8b95a7;
+  color: var(--text-3);
 }
 
 .run-output {
   margin-top: 12px;
-  border: 1px solid #232a3a;
-  border-radius: 8px;
-  background: #0d1119;
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--ink-1);
   padding: 10px 12px;
   overflow: auto;
 }
@@ -967,7 +1029,7 @@ p {
   list-style: none;
   margin: 0 0 8px;
   padding: 0;
-  font-size: 13px;
+  font-size: var(--fs-meta);
 }
 
 .test-list li {
@@ -975,36 +1037,36 @@ p {
 }
 
 .test-pass {
-  color: #73daca;
+  color: var(--live);
 }
 
 .test-fail {
-  color: #e06c75;
+  color: var(--bad);
 }
 
 .test-output {
   margin: 4px 0 0 18px;
-  font-size: 12px;
-  color: #9aa4b8;
+  font-size: var(--fs-label);
+  color: var(--text-2);
   white-space: pre-wrap;
 }
 
 .run-stdout {
   margin: 0;
-  font-size: 12px;
-  color: #9aa4b8;
+  font-size: var(--fs-label);
+  color: var(--text-2);
   white-space: pre-wrap;
 }
 
 /* spec-15: сырой вывод go test под спойлером (дайджест — основной блок) */
 .run-raw {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--fs-label);
 }
 
 .run-raw summary {
   cursor: pointer;
-  color: #5c6c85;
+  color: var(--line-3);
   user-select: none;
 }
 
@@ -1012,38 +1074,38 @@ p {
   margin: 6px 0 0;
   max-height: 220px;
   overflow: auto;
-  color: #8b96ac;
+  color: var(--text-3);
   white-space: pre-wrap;
 }
 
 .run-ok {
-  color: #73daca;
-  font-size: 13px;
+  color: var(--live);
+  font-size: var(--fs-meta);
 }
 
 .run-fail {
-  color: #e06c75;
-  font-size: 13px;
+  color: var(--bad);
+  font-size: var(--fs-meta);
 }
 
 .ai-review {
   margin-top: 12px;
-  border-left: 3px solid #e5c07b;
-  background: #0d1119;
+  border-left: 3px solid var(--warn);
+  background: var(--ink-1);
   border-radius: 0 8px 8px 0;
   padding: 10px 12px;
 }
 
 .ai-review strong {
-  color: #e5c07b;
-  font-size: 12px;
+  color: var(--warn);
+  font-size: var(--fs-label);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .ai-review p {
   margin: 6px 0 0;
-  color: #d6dbe5;
+  color: var(--text-1);
 }
 
 /* вкладки файлов Live-Code (WP-9) */
@@ -1062,9 +1124,9 @@ p {
 }
 .design-hint {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--fs-meta);
   line-height: 1.5;
-  color: var(--muted, #9aa4b2);
+  color: var(--muted, var(--text-2));
 }
 /* Палитра: 3 группы (трафик/сервисы/данные) + цветные метки блоков.
    Цвет метки = цвет блока на холсте (детерминированно, designColors.ts). */
@@ -1082,25 +1144,25 @@ p {
 .palette-group__title {
   flex: none;
   min-width: 148px;
-  font-size: 11px;
+  font-size: var(--fs-label);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--muted, #9aa4b2);
+  color: var(--muted, var(--text-2));
 }
 .palette-item {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border, #333);
-  background: var(--panel, #1c1e22);
+  border-radius: var(--r-ctl);
+  border: 1px solid var(--line);
+  background: var(--panel, var(--ink-1));
   color: inherit;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--fs-meta);
 }
 .palette-item:hover {
-  border-color: #58a6ff;
+  border-color: var(--accent);
 }
 /* spec-19: превью палитры в админ-редакторе трека — как на доске кандидата. */
 .palette-preview {
@@ -1108,8 +1170,8 @@ p {
   flex-direction: column;
   gap: 6px;
   padding: 10px;
-  border: 1px dashed var(--border, #333);
-  border-radius: 8px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-ctl);
   min-height: 44px;
 }
 .palette-preview-group {
@@ -1121,10 +1183,10 @@ p {
 .palette-preview-title {
   flex: none;
   min-width: 148px;
-  font-size: 11px;
+  font-size: var(--fs-label);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--muted, #9aa4b2);
+  color: var(--muted, var(--text-2));
 }
 .palette-preview-chips {
   display: inline-flex;
@@ -1137,14 +1199,14 @@ p {
   gap: 5px;
   padding: 2px 8px;
   border-radius: 999px;
-  border: 1px solid var(--border, #333);
-  background: var(--panel, #1c1e22);
-  font-size: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel, var(--ink-1));
+  font-size: var(--fs-label);
 }
 .palette-preview-chip i {
   width: 8px;
   height: 8px;
-  border-radius: 3px;
+  border-radius: var(--r-tag);
   display: inline-block;
 }
 /* spec-20: drag-n-drop палитры — курсор ручки, подсветка цели сброса. */
@@ -1152,8 +1214,8 @@ p {
   flex: none;
   width: 18px;
   cursor: grab;
-  color: var(--muted, #9aa4b2);
-  font-size: 15px;
+  color: var(--muted, var(--text-2));
+  font-size: var(--fs-body);
   line-height: 1;
   user-select: none;
 }
@@ -1161,24 +1223,24 @@ p {
   cursor: grabbing;
 }
 .start-form.drag-over {
-  outline: 2px dashed #58a6ff;
+  outline: 2px dashed var(--accent);
   outline-offset: 2px;
-  border-radius: 6px;
+  border-radius: var(--r-ctl);
 }
 .palette-preview-group.drag-over {
-  outline: 2px dashed #58a6ff;
+  outline: 2px dashed var(--accent);
   outline-offset: 2px;
-  border-radius: 6px;
+  border-radius: var(--r-ctl);
 }
 .palette-item__dot {
   flex: none;
   width: 10px;
   height: 10px;
-  border-radius: 3px;
+  border-radius: var(--r-tag);
 }
 .design-canvas {
-  border: 1px solid var(--border, #333);
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
   overflow: hidden;
   /* 640 px — весь вертикальный тулбар Excalidraw (~750 px контента) + холст;
      при 540 нижние инструменты обрезались. */
@@ -1200,55 +1262,56 @@ p {
 }
 /* Счётчик блоков и статус оценки ИИ (рядом с «Оценить схему»). */
 .design-count {
-  font-size: 13px;
-  color: var(--muted, #9aa4b2);
+  font-size: var(--fs-meta);
+  color: var(--muted, var(--text-2));
 }
 .design-evaluating {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
-  color: #58a6ff;
+  font-size: var(--fs-meta);
+  color: var(--accent);
 }
 .design-evaluating__spinner {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  border: 2px solid rgba(88, 166, 255, 0.25);
-  border-top-color: #58a6ff;
+  border: 2px solid rgba(122, 162, 247, 0.25);
+  border-top-color: var(--accent);
   animation: panel-spin 0.8s linear infinite;
 }
 
 /* Отчёт (WP-11) */
 .report h2 { margin: 0 0 4px; }
-.report-grade { margin: 0 0 16px; font-size: 15px; }
+.report-grade { margin: 0 0 16px; font-size: var(--fs-body); }
 
 /* F1-export (spec-16): публичная ссылка на отчёт */
 .report-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .report-share { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-width: 200px; }
 .report-share-link {
-  width: 100%; max-width: 320px; font-size: 11px; color: #8b96ac;
-  background: #1a1f2b; border: 1px solid #2b3345; border-radius: 6px; padding: 6px 8px;
+  width: 100%; max-width: 320px; font-size: var(--fs-meta); color: var(--text-1);
+  font-family: var(--font-mono);
+  background: var(--ink-2); border: 1px solid var(--line-3); border-radius: var(--r-ctl); padding: 6px 8px;
   font-family: inherit;
 }
-.report-share .btn { font-size: 12px; }
-.report h3 { margin: 18px 0 8px; font-size: 15px; }
+.report-share .btn { font-size: var(--fs-meta); }
+.report h3 { margin: 18px 0 8px; font-size: var(--fs-body); }
 .criteria { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
 .criterion-top { display: flex; justify-content: space-between; gap: 12px; }
-.criterion-score.good { color: #3fb950; }
-.criterion-score.mid { color: #d29922; }
-.criterion-score.bad { color: #f85149; }
+.criterion-score.good { color: var(--ok); }
+.criterion-score.mid { color: var(--warn); }
+.criterion-score.bad { color: var(--bad); }
 .criterion-bar {
   height: 6px;
-  border-radius: 3px;
+  border-radius: var(--r-tag);
   background: rgba(255, 255, 255, 0.08);
   overflow: hidden;
   margin: 6px 0;
 }
-.criterion-fill { height: 100%; border-radius: 3px; }
-.criterion-fill.good { background: #3fb950; }
-.criterion-fill.mid { background: #d29922; }
-.criterion-fill.bad { background: #f85149; }
+.criterion-fill { height: 100%; border-radius: var(--r-tag); }
+.criterion-fill.good { background: var(--ok); }
+.criterion-fill.mid { background: var(--warn); }
+.criterion-fill.bad { background: var(--bad); }
 .report-columns {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -1260,25 +1323,25 @@ p {
 .report-verdict {
   margin: 8px 0 0;
   padding: 10px 14px;
-  border-left: 3px solid #58a6ff;
-  background: rgba(88, 166, 255, 0.08);
-  border-radius: 4px;
-  font-size: 14px;
+  border-left: 3px solid var(--accent);
+  background: rgba(122, 162, 247, 0.10);
+  border-radius: var(--r-tag);
+  font-size: var(--fs-body);
 }
 .criterion-evidence, .criterion-study {
   margin-top: 8px;
-  font-size: 13px;
+  font-size: var(--fs-meta);
 }
 .criterion-evidence ul, .criterion-study ul { margin: 4px 0 0; padding-left: 18px; }
-.criterion-gap { margin: 6px 0 0; font-size: 13px; color: #d29922; }
-.report-grade-gap p, .report-study-2w ol { font-size: 14px; }
-.progress-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.criterion-gap { margin: 6px 0 0; font-size: var(--fs-meta); color: var(--warn); }
+.report-grade-gap p, .report-study-2w ol { font-size: var(--fs-body); }
+.progress-table { width: 100%; border-collapse: collapse; font-size: var(--fs-meta); }
 .progress-table th, .progress-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
-.progress-table tr.same-stack { background: rgba(88, 166, 255, 0.10); }
+.progress-table tr.same-stack { background: rgba(122, 162, 247, 0.10); }
 .progress-table .delta { display: inline-block; margin: 1px 4px 1px 0; }
-.progress-table .delta.up { color: #3fb950; }
-.progress-table .delta.down { color: #f85149; }
-.progress-table .delta.flat { color: #8b949e; }
+.progress-table .delta.up { color: var(--ok); }
+.progress-table .delta.down { color: var(--bad); }
+.progress-table .delta.flat { color: var(--text-3); }
 
 /* B2: skeleton/spinner на время загрузки ленивого чанка панели (Live-Code /
    System Design / отчёт) — показывает Suspense, пока скачивается чанк. */
@@ -1295,7 +1358,7 @@ p {
   height: 22px;
   border-radius: 50%;
   border: 3px solid rgba(255, 255, 255, 0.15);
-  border-top-color: #58a6ff;
+  border-top-color: var(--accent);
   animation: panel-spin 0.8s linear infinite;
 }
 @keyframes panel-spin {
@@ -1311,14 +1374,14 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 a:focus-visible {
-  outline: 2px solid #7aa2f7;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 /* spec-14/D13: тренд прогресса по итогам интервью (F2). */
 .trend-card .trend-delta {
-  font-size: 14px;
-  color: #9aa4b8;
+  font-size: var(--fs-body);
+  color: var(--text-2);
 }
 .trend-row {
   display: flex;
@@ -1330,73 +1393,70 @@ a:focus-visible {
   display: inline-block;
   min-width: 34px;
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: var(--r-ctl);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  font-size: 13px;
+  font-size: var(--fs-meta);
   text-align: center;
 }
 .trend-chip.good {
-  color: #3fb950;
+  color: var(--ok);
   border-color: rgba(63, 185, 152, 0.45);
 }
 .trend-chip.mid {
-  color: #d29922;
+  color: var(--warn);
   border-color: rgba(210, 153, 34, 0.45);
 }
 .trend-chip.bad {
-  color: #f85149;
+  color: var(--bad);
   border-color: rgba(248, 81, 73, 0.45);
 }
 .score-chip {
   margin-left: 6px;
   padding: 1px 6px;
-  border-radius: 5px;
+  border-radius: var(--r-tag);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  font-size: 12px;
+  font-size: var(--fs-label);
 }
 .score-chip.good {
-  color: #3fb950;
+  color: var(--ok);
 }
 .score-chip.mid {
-  color: #d29922;
+  color: var(--warn);
 }
 .score-chip.bad {
-  color: #f85149;
+  color: var(--bad);
 }
 
 /* spec-14/D12: предупреждение о паузе дольше порога (pause_timeout). */
 .paused-warn {
   display: block;
   margin-top: 3px;
-  font-size: 12px;
-  color: #d29922;
+  font-size: var(--fs-label);
+  color: var(--warn);
 }
 .paused-warn.danger {
-  color: #f85149;
+  color: var(--bad);
 }
 
 /* spec-14/D15: живой прогресс минимума речи в окне записи. */
 .rec-speech-hint {
   display: inline-block;
   margin: 4px 8px 0 0;
-  font-size: 12px;
-  color: #8f9bb0; /* было #6b7688 — 4.01:1 на карточке, не проходило AA */
+  font-size: var(--fs-label);
+  color: var(--text-3);
 }
 
 /* spec-14/D16: мобильная раскладка (раньше ни одного @media — таблицы и
    сетки переполняли вьюпорт). */
 @media (max-width: 720px) {
   .app {
-    padding: 20px 12px;
+    padding: var(--s-6) var(--s-4);
   }
   /* На узком экране заголовку нужнее ширина: ряд кнопок сессии не держим
      минимальными 190 px (десктопное правило выше). */
   .session-head .head-actions {
     min-width: 0;
     max-width: none;
-  }
-  .app h1 {
-    font-size: 24px;
   }
   .table-wrap,
   .sessions-table,
@@ -1450,5 +1510,270 @@ a:focus-visible {
   }
   .vacancy-link {
     padding: 10px 12px 10px 0;
+  }
+}
+
+/* ============================== экран интервью: прибор, а не одна колонка
+   Три зоны: рейка стадии (228), работа, ход интервью (340). Ниже 1180 ход
+   интервью уходит под работу, ниже 900 рейка становится горизонтальной
+   полосой над работой. */
+
+.session-page {
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--aside-w);
+  grid-template-areas:
+    "head head head"
+    "rail work aside";
+  gap: var(--s-5);
+  align-items: start;
+}
+
+.session-head {
+  grid-area: head;
+}
+
+.session-page > .notice,
+.session-page > .voice-panel {
+  grid-area: work;
+  min-width: 0;
+}
+
+.session-page > .transcript {
+  grid-area: aside;
+  min-width: 0;
+  position: sticky;
+  top: var(--s-5);
+  max-height: calc(100vh - var(--s-7) - var(--s-7));
+  display: flex;
+  flex-direction: column;
+}
+
+.session-page > .transcript .transcript-list {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+.session-rail {
+  grid-area: rail;
+  position: sticky;
+  top: var(--s-5);
+  align-self: start;
+  display: grid;
+  gap: var(--s-4);
+  padding: var(--s-4);
+  background: var(--ink-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+}
+
+/* Рейка стадий. Нумерация осмысленна: программа роли идёт шаг за шагом,
+   левая черта — линия отсчёта, текущий шаг отмечен точкой. */
+.ladder {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.ladder-step {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: 9px 0 9px var(--s-3);
+  border-left: 2px solid var(--line);
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+}
+
+.ladder-idx {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+}
+
+.ladder-step.done {
+  border-left-color: var(--accent);
+  color: var(--text-2);
+}
+
+.ladder-step.current {
+  border-left-color: var(--accent);
+  color: var(--text-1);
+  font-weight: 600;
+  position: relative;
+}
+
+.ladder-step.current::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.ladder-step.current .ladder-idx {
+  color: var(--accent);
+}
+
+/* Остаток лимита — крупнейшая цифра экрана: это то, за чем следят. */
+.rail-time {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+
+.rail-time-label,
+.rail-meta dt {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  text-transform: uppercase;
+  letter-spacing: var(--track-label);
+  color: var(--text-3);
+}
+
+.rail-time-value {
+  font-family: var(--font-mono);
+  font-size: 30px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--text-1);
+}
+
+.rail-time.warn .rail-time-value {
+  color: var(--warn);
+}
+
+.rail-meta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 10px;
+  align-items: baseline;
+  margin: 0;
+  font-size: var(--fs-meta);
+}
+
+.rail-meta dd {
+  margin: 0;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+/* Кабинет: слева то, что делают (старт интервью), справа то, что копят
+   (прогресс), история — на всю ширину: это таблица, ей нужно место. */
+@media (min-width: 1040px) {
+  .cabinet {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 380px);
+    gap: var(--s-5) var(--s-6);
+    align-items: start;
+  }
+
+  .cabinet > .header {
+    grid-column: 1 / -1;
+  }
+
+  .cabinet > section.card {
+    margin-top: 0;
+  }
+
+  .cabinet > section.card:nth-of-type(1) {
+    grid-column: 1;
+  }
+
+  .cabinet > .trend-card {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .cabinet > section.card:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+.start-form {
+  max-width: 620px;
+}
+
+/* Отчёт — длинное чтение: колонка уже, чем экран, строка не распадается. */
+.report {
+  max-width: 1000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (max-width: 1180px) {
+  .session-page {
+    grid-template-columns: var(--rail-w) minmax(0, 1fr);
+    grid-template-areas:
+      "head head"
+      "rail work"
+      "aside aside";
+  }
+
+  .session-page > .transcript {
+    position: static;
+    max-height: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .session-page {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "head"
+      "rail"
+      "work"
+      "aside";
+  }
+
+  .session-rail {
+    position: static;
+    grid-template-columns: auto auto;
+    grid-template-areas:
+      "ladder time"
+      "meta meta";
+    align-items: center;
+  }
+
+  .ladder {
+    grid-area: ladder;
+  }
+
+  .rail-time {
+    grid-area: time;
+    justify-items: end;
+  }
+
+  .rail-meta {
+    grid-area: meta;
+    border-top: 1px solid var(--line);
+    padding-top: var(--s-3);
+  }
+}
+
+/* Движение: только на действие пользователя, и оно исчезает при
+   prefers-reduced-motion. Автоматически не оживает ничего, кроме таймера. */
+.btn,
+.tab,
+.task-tab,
+.palette-item,
+.chip {
+  transition: background-color var(--motion) linear, border-color var(--motion) linear,
+    color var(--motion) linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }

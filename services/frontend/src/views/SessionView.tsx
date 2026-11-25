@@ -202,6 +202,61 @@ export function SessionView({ id }: { id: number }) {
         </div>
       </header>
 
+      {/* Рейка стадий (дизайн 2026-11-25): программа роли, текущая стадия,
+          остаток лимита и параметры интервью — то, к чему возвращаются
+          посреди работы. Раньше это было размазано по подзаголовку
+          и строке статуса голосовой панели. */}
+      <aside className="session-rail" aria-label="Программа интервью">
+        <ol className="ladder" data-testid="stage-ladder">
+          {(() => {
+            const program = (trackMeta?.stages ?? ['voice', 'livecode', 'design']).filter((s) => s !== 'report');
+            const at = program.indexOf(stage);
+            return program.map((s, i) => (
+              <li
+                key={s}
+                className={`ladder-step${s === stage ? ' current' : at >= 0 && i < at ? ' done' : ''}`}
+              >
+                <span className="ladder-idx" aria-hidden="true">{i + 1}</span>
+                <span className="ladder-name">{stageLabel(s)}</span>
+                {s === stage && <span className="sr-only"> — текущая стадия</span>}
+              </li>
+            ));
+          })()}
+        </ol>
+
+        {/* Лимит времени сессии: сервер шлёт timer/remaining_s. Цифра — в рейке
+            (крупно, моно); на узких экранах рейка становится горизонтальной
+            полосой, элемент тот же. */}
+        {live && remainingS !== null && remainingS > 0 && (
+          <p
+            className={`rail-time${remainingS < 300 ? ' warn' : ''}`}
+            role="timer"
+            aria-label={`Осталось ${formatClock(remainingS)}`}
+            data-testid="session-timer"
+          >
+            <span className="rail-time-label">до конца</span>
+            <span className="rail-time-value">{formatClock(remainingS)}</span>
+          </p>
+        )}
+
+        <dl className="rail-meta">
+          <dt>Роль</dt>
+          <dd>{trackMeta?.title ?? session.grade}</dd>
+          {session.stack && (
+            <>
+              <dt>Стек</dt>
+              <dd>{session.stack}</dd>
+            </>
+          )}
+          {session.base_grade && (
+            <>
+              <dt>Цель</dt>
+              <dd>{session.base_grade}</dd>
+            </>
+          )}
+        </dl>
+      </aside>
+
       {live && paused && (
         <div className="card notice" role="status" data-testid="paused-banner">
           <strong>Сессия на паузе</strong> — время не тарифицируется.
@@ -219,19 +274,6 @@ export function SessionView({ id }: { id: number }) {
                 : wsState === 'error' ? 'ошибка соединения'
                 : 'соединение закрыто'}
             </span>
-            {/* Лимит времени сессии есть (грейд → duration_limit_s), а увидеть
-               его было негде: сервер шлёт timer/remaining_s, UI его молча
-               терял (ui-review 2026-11-24). Без лимита (remaining = 0) не показываем. */}
-            {remainingS !== null && remainingS > 0 && (
-              <span
-                className={`timer${remainingS < 300 ? ' warn' : ''}`}
-                role="timer"
-                aria-label={`Осталось ${formatClock(remainingS)}`}
-                data-testid="session-timer"
-              >
-                осталось {formatClock(remainingS)}
-              </span>
-            )}
             {(wsState === 'closed' || wsState === 'error') && (
               <button
                 type="button"

@@ -27,7 +27,7 @@ export function CodeEditor({ language, value, onChange, onReady }: CodeEditorPro
   return (
     <Editor
       key={label}
-      height="320px"
+      height="clamp(320px, 44vh, 620px)"
       language={language}
       value={value}
       // Тема — через ПРОП theme (не options): обёртка после create явно
