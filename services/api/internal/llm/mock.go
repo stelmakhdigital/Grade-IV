@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -46,7 +45,14 @@ func (m *MockProvider) StreamEnd() time.Time {
 	return m.streamEnd
 }
 
-// NewMockProvider — провайдер по умолчанию (эхо-ответ).
+// MockReply — единственный ответ мока. Реплика интервьюера, а не эхо запроса:
+// последней репликой сюда всегда идёт директива модели («Кандидат перешёл на
+// эту стадию. Заведи её…»), и эхо-мок зачитывал её кандидату вслух (видно
+// было и в dev, и на LLM_MOCK в prod-профиле). Что ушло в модель — смотрят в
+// Calls()/LastSystem(), а не в ответе.
+const MockReply = "Расскажи, над чем ты сейчас работаешь. Какая часть задачи была самой сложной и почему?"
+
+// NewMockProvider — провайдер по умолчанию (MockReply, детерминированный).
 func NewMockProvider() *MockProvider {
 	return &MockProvider{}
 }
@@ -63,24 +69,18 @@ func (m *MockProvider) Calls() []Request {
 	return out
 }
 
-// Chat — эхо-ответ (детерминированный, без сети).
+// Chat — MockReply (детерминированный, без сети); SetResponder перебивает.
 func (m *MockProvider) Chat(_ context.Context, req Request) (Response, error) {
 	m.mu.Lock()
 	m.calls = append(m.calls, req)
+	respond := m.respond
 	m.mu.Unlock()
 
-	if m.respond != nil {
-		text, err := m.respond(req)
+	if respond != nil {
+		text, err := respond(req)
 		return Response{Content: text}, err
 	}
-	last := ""
-	if n := len(req.Messages); n > 0 {
-		last = req.Messages[n-1].Content
-	}
-	if len(last) > 120 {
-		last = last[:120] + "…"
-	}
-	return Response{Content: fmt.Sprintf("[mock-интервьюер] принял реплику: %s", last)}, nil
+	return Response{Content: MockReply}, nil
 }
 
 // ChatStream — стриминг поверх Chat: весь ответ одной фразой в канал

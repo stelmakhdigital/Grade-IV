@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"sync"
 
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/voicesvc"
 	"testing"
 	"time"
@@ -336,8 +337,8 @@ func TestWSVoicePipeline(t *testing.T) {
 		writePCM(silencePCM(250))
 	}
 
-	// 4) Ожидаем transcript(user) + transcript(ai) + ai_text (mock-ответ).
-	wantReply := "[mock-интервьюер] принял реплику: Здравствуйте, расскажите о себе"
+	// 4) Ожидаем transcript(user) + transcript(ai) + ai_text (ответ мока).
+	wantReply := llm.MockReply
 	var sawUser, sawAI, sawAIText bool
 	for i := 0; i < 12 && !(sawUser && sawAI && sawAIText); i++ {
 		got := wsReadMixed(t, conn, 1, 2*time.Second)

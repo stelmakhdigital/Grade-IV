@@ -340,13 +340,15 @@ func TestBargeIn_ShortUtteranceDoesNotInterrupt(t *testing.T) {
 	}
 
 	// Стрим ИИ доигрывается до конца: end-флаг на последнем кадре потока.
-	// Клиуза-диспетчизация (T-20261008185701) дробит мок-ответ (71 байт ≥ 48)
-	// на клиузы («…принял реплику:» / «Привет») — число кадров = число частей × 12
-	// (96000 байт = 12 pacing-кадров на часть); tts_stop не наблюдался.
-	mockReply := "[mock-интервьюер] принял реплику: Привет"
-	wantEnd := firstSeq + len(splitForTTS(mockReply))*12
-	if len(splitForTTS(mockReply)) != 2 {
-		t.Fatalf("сценарий: части мок-ответа = %d, want 2 (тест построен на этом)", len(splitForTTS(mockReply)))
+	// Клиуза-диспетчизация (T-20261008185701) дробит ответ на клиузы — кадров
+	// ровно «частей × 12» (96000 байт = 12 pacing-кадров на часть); tts_stop не
+	// наблюдался. Считаем кадры, а не ждём конкретный seq: нумерация зависит от
+	// того, сколько кадров ушло до этого места, и на неё заваливать тест нельзя.
+	mockReply := llm.MockReply
+	parts := len(splitForTTS(mockReply))
+	wantFrames := parts * 12
+	if parts < 2 {
+		t.Fatalf("сценарий: частей ответа = %d, нужно ≥2 (тест построен на этом)", parts)
 	}
 	sawTTSStop := false
 	endSeq := -1
@@ -370,8 +372,12 @@ func TestBargeIn_ShortUtteranceDoesNotInterrupt(t *testing.T) {
 	if sawTTSStop {
 		t.Fatal("короткий burst (< 500 мс) вызвал tts_stop — barge-in сработал ложно")
 	}
-	if endSeq != wantEnd {
-		t.Fatalf("end-кадр на seq=%d (want %d — стрим доигран полностью), seqs=%v", endSeq, wantEnd, seqs)
+	if endSeq < 0 {
+		t.Fatalf("end-флаг не пришёл — стрим не доигран (кадров %d, want %d), seqs=%v", len(seqs), wantFrames, seqs)
+	}
+	if len(seqs) != wantFrames {
+		t.Fatalf("кадров %d, want %d (частей %d × 12) — стрим оборван или длиннее ответа, seqs=%v",
+			len(seqs), wantFrames, parts, seqs)
 	}
 	// Новый ход не был запущен: нет transcript(user) в ближайших сообщениях.
 	deadline = time.Now().Add(2 * time.Second)

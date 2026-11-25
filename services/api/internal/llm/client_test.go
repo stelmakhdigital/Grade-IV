@@ -263,7 +263,7 @@ func TestMockProviderChatStream(t *testing.T) {
 		t.Fatalf("mock chatstream: %v", err)
 	}
 	got := collect(t, ch)
-	if !strings.Contains(got, "привет") {
-		t.Fatalf("mock-ответ: %q", got)
+	if got != MockReply {
+		t.Fatalf("mock-ответ: %q, want MockReply", got)
 	}
 }
