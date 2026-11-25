@@ -235,6 +235,8 @@ describe('SessionView (WP-8)', () => {
     // ai_text — подписи ИИ
     fake.deliver(JSON.stringify({ type: 'ai_text', text: 'Подпись' }));
     expect(await screen.findByTestId('ai-say')).toHaveTextContent('Подпись');
+    // реплики приходят, пока кандидат занят задачей — объявлять их скринридеру
+    expect(screen.getByTestId('ai-say')).toHaveAttribute('aria-live', 'polite');
 
     // ui-review 2026-11-24: серверный остаток лимита показан в шапке, при 0 — скрыт
     fake.deliver(JSON.stringify({ type: 'timer', remaining_s: 125 }));

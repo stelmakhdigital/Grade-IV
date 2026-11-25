@@ -307,9 +307,10 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
     // выбрать трек в селекте → открывается редактор
     await user.selectOptions(screen.getByTestId('admin-track-select'), 'backend');
     expect(await screen.findByTestId('admin-track-delete')).toBeInTheDocument();
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    // ui-review 2026-11-25: вместо window.confirm — модалка проекта (её
+    // до сих пор порезал бы iframe с sandbox, и в тестах она недоступна)
     await user.click(screen.getByTestId('admin-track-delete'));
-    expect(confirmSpy).toHaveBeenCalled();
+    await user.click(await screen.findByTestId('confirm-yes'));
 
     expect(await screen.findByText(/используется сессиями/)).toBeInTheDocument();
     const del = fetchMock.mock.calls.find((c) => c[1]?.method === 'DELETE' && String(c[0]).includes('/admin/tracks/backend'));

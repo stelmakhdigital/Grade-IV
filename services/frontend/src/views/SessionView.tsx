@@ -406,7 +406,10 @@ export function SessionView({ id }: { id: number }) {
           )}
 
           {lastAiText !== '' && (
-            <p className="ai-say" data-testid="ai-say">
+            // Реплики интервьюера приходят во время работы над задачей: без
+            // aria-live скринридер о них не узнает, а для голосового
+            // интервью это основной контент.
+            <p className="ai-say" data-testid="ai-say" role="status" aria-live="polite">
               {lastAiText}
             </p>
           )}

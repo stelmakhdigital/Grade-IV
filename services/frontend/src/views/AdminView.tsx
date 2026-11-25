@@ -30,6 +30,7 @@ import {
 } from '../api';
 import { useAuth } from '../auth';
 import { practiceLabel } from '../labels';
+import { ConfirmDialog, type AskConfirm } from '../confirm';
 
 const GRADES: Grade[] = ['junior', 'middle', 'senior', 'staff'];
 const GRADE_LABEL: Record<string, string> = {
@@ -142,6 +143,7 @@ function TemplatesTab() {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<TemplateForm | null>(null);
   const [saving, setSaving] = useState(false);
+  const [ask, setAsk] = useState<AskConfirm | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -192,7 +194,6 @@ function TemplatesTab() {
   };
 
   const del = async (t: AdminTemplate) => {
-    if (!window.confirm(`Удалить шаблон «${t.name}»?`)) return;
     setError(null);
     try {
       await adminDeleteTemplate(t.id);
@@ -237,7 +238,13 @@ function TemplatesTab() {
                 <td>{t.blocks.length}</td>
                 <td>
                   <button type="button" className="btn ghost small" onClick={() => startEdit(t)}>Изменить</button>{' '}
-                  <button type="button" className="btn ghost small" onClick={() => void del(t)}>Удалить</button>
+                  <button
+                    type="button"
+                    className="btn ghost small"
+                    onClick={() => setAsk({ question: `Удалить шаблон «${t.name}»?`, run: () => void del(t) })}
+                  >
+                    Удалить
+                  </button>
                 </td>
               </tr>
             ))}
@@ -332,6 +339,8 @@ function TemplatesTab() {
           </div>
         </div>
       )}
+
+      {ask !== null && <ConfirmDialog ask={ask} onCancel={() => setAsk(null)} />}
     </section>
   );
 }
@@ -718,6 +727,7 @@ function TracksTab() {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiHidden, setAiHidden] = useState(false);
+  const [ask, setAsk] = useState<AskConfirm | null>(null);
 
   // spec-20: drag-n-drop палитры — порядок групп (ручка строки) и перенос
   // блоков между группами (чипы превью). Данные драга — в ref: в jsdom
@@ -820,7 +830,6 @@ function TracksTab() {
   };
 
   const del = async (id: string, label: string) => {
-    if (!window.confirm(`Удалить трек «${label}»?`)) return;
     setError(null);
     try {
       await adminDeleteTrack(id);
@@ -1380,7 +1389,7 @@ function TracksTab() {
                 className="btn danger"
                 data-testid="admin-track-delete"
                 disabled={saving}
-                onClick={() => void del(form.id, form.title)}
+                onClick={() => setAsk({ question: `Удалить трек «${form.title}»?`, run: () => void del(form.id, form.title) })}
               >
                 Удалить
               </button>
@@ -1391,6 +1400,8 @@ function TracksTab() {
           </div>
         </div>
       )}
+
+      {ask !== null && <ConfirmDialog ask={ask} onCancel={() => setAsk(null)} />}
     </section>
   );
 }

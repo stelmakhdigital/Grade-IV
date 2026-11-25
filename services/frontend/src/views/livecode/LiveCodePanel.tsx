@@ -373,7 +373,7 @@ export function LiveCodePanel({
         </p>
       )}
 
-      <div className="file-tabs" role="tablist">
+      <div className="file-tabs" role="tablist" aria-label="Файлы">
         {Object.keys(files).map((name) => (
           <button
             key={name}
