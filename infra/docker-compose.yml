@@ -25,6 +25,10 @@ services:
       SANDBOX_ADMIN_TOKEN: "${SANDBOX_ADMIN_TOKEN:-}"
       LLM_BASE_URL: "${LLM_BASE_URL:-http://localhost:8300/v1}"
       LLM_MODEL: "${LLM_MODEL:-Qwen3-4B}"
+      # Ключ LLM-узла без него прод не авторизуется; LLM_MOCK=1 — детерминированный
+      # мок вместо узла (локальная проверка prod-профиля, CI).
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_MOCK: "${LLM_MOCK:-}"
       RESUME_DIR: "/data/resumes"
       # Путь абсолютный: у образа рабочая директория / (бинарник в
       # /usr/local/bin), дефолт «config/roles.json» резолвился бы в /config.
