@@ -67,19 +67,17 @@ func (s *SessionStore) Create(ctx context.Context, m models.Session) (models.Ses
 	if m.ProfileID != 0 {
 		profileID = m.ProfileID
 	}
-	res, err := s.db.ExecContext(ctx, s.d.q(`
+	// RETURNING id понимают обе СУБД (sqlite с 3.35), LastInsertId в lib/pq нет.
+	var id int64
+	err := s.db.QueryRowContext(ctx, s.d.q(`
 		INSERT INTO sessions (user_id, grade, stack, stage, status, duration_limit_s,
 			active_seconds, started_at, template_id, program, profile_id, tts_speaker, track_id, base_grade, stages)
-		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`),
 		m.UserID, m.Grade, m.Stack, m.Stage, m.Status, m.DurationLimitS,
 		m.StartedAt.UTC().Format(time.RFC3339), templateID, m.Program, profileID, m.TTSSpeaker, m.TrackID, m.BaseGrade,
-		joinStages(m.Stages))
+		joinStages(m.Stages)).Scan(&id)
 	if err != nil {
 		return models.Session{}, fmt.Errorf("create session: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return models.Session{}, fmt.Errorf("last insert id: %w", err)
 	}
 	return s.Get(ctx, id)
 }

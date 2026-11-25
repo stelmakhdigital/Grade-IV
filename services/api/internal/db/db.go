@@ -219,6 +219,11 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 				continue
 			}
 		}
+		if d == DialectPostgres && strings.HasPrefix(s, "CREATE TABLE") {
+			// Файл написан под sqlite: AUTOINCREMENT в postgres нет, id — IDENTITY.
+			s = strings.Replace(s, "INTEGER PRIMARY KEY AUTOINCREMENT",
+				"BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY", 1)
+		}
 		if _, err := dbx.ExecContext(ctx, s); err != nil {
 			return fmt.Errorf("migrate interview_templates: %w", err)
 		}

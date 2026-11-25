@@ -71,14 +71,14 @@ const templateCols = `id, name, grade, stack, track, duration_s, blocks, is_defa
 func (s *TemplateStore) scan(row interface{ Scan(...any) error }) (Template, error) {
 	var t Template
 	var blocksJSON string
-	var isDefault int
+	var isDefault bool
 	var created, updated string
 	err := row.Scan(&t.ID, &t.Name, &t.Grade, &t.Stack, &t.Track, &t.DurationS,
 		&blocksJSON, &isDefault, &created, &updated)
 	if err != nil {
 		return t, err
 	}
-	t.IsDefault = isDefault != 0
+	t.IsDefault = isDefault
 	t.CreatedAt, _ = time.Parse(time.RFC3339, created)
 	t.UpdatedAt, _ = time.Parse(time.RFC3339, updated)
 	if err := json.Unmarshal([]byte(blocksJSON), &t.Blocks); err != nil {
@@ -132,7 +132,7 @@ func (s *TemplateStore) Default(ctx context.Context, grade models.Grade, stack, 
 	}
 	row := s.db.QueryRowContext(ctx, s.d.q(
 		"SELECT "+templateCols+" FROM interview_templates "+
-			"WHERE grade = ? AND (stack = ? OR stack = '*') AND is_default = 1 "+
+			"WHERE grade = ? AND (stack = ? OR stack = '*') AND is_default "+
 			"AND (track = ? OR track = 'backend') "+
 			"ORDER BY (CASE WHEN track = ? THEN 0 ELSE 1 END) ASC, id ASC LIMIT 1"),
 		grade, stack, track, track)
@@ -159,10 +159,6 @@ func (s *TemplateStore) EnsureDefaults(ctx context.Context, defs []Template) err
 			return err
 		}
 		now := time.Now().UTC().Format(time.RFC3339)
-		isDefault := 0
-		if def.IsDefault {
-			isDefault = 1
-		}
 		// spec-18: идемпотентность в scope (grade, track) — дефолты разных
 		// треков сидируются независимо. Сравнение по контенту (spec-19):
 		// имя дефолт-шаблона детерминировано (name+grade+track) — правим
@@ -178,7 +174,7 @@ func (s *TemplateStore) EnsureDefaults(ctx context.Context, defs []Template) err
 			if _, err := s.db.ExecContext(ctx, s.d.q(
 				"INSERT INTO interview_templates (name, grade, stack, track, duration_s, blocks, is_default, created_at, updated_at) "+
 					"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
-				def.Name, def.Grade, def.Stack, trackOf(def.Track), def.DurationS, string(blocksJSON), isDefault, now, now); err != nil {
+				def.Name, def.Grade, def.Stack, trackOf(def.Track), def.DurationS, string(blocksJSON), def.IsDefault, now, now); err != nil {
 				return err
 			}
 		case err != nil:
@@ -204,32 +200,29 @@ func (s *TemplateStore) Create(ctx context.Context, t *Template) error {
 		return err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	isDefault := 0
-	if t.IsDefault {
-		isDefault = 1
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if isDefault == 1 {
+	if t.IsDefault {
 		// spec-18: сброс дефолта в scope трека (шаблоны разных треков живут рядом).
 		if _, err := tx.ExecContext(ctx, s.d.q(
-			"UPDATE interview_templates SET is_default = 0, updated_at = ? "+
+			"UPDATE interview_templates SET is_default = FALSE, updated_at = ? "+
 				"WHERE grade = ? AND (stack = ? OR stack = '*') AND track = ?"),
 			now, t.Grade, t.Stack, trackOf(t.Track)); err != nil {
 			return err
 		}
 	}
-	res, err := tx.ExecContext(ctx, s.d.q(
+	// RETURNING id понимают обе СУБД (sqlite с 3.35), LastInsertId в lib/pq нет.
+	var id int64
+	err = tx.QueryRowContext(ctx, s.d.q(
 		"INSERT INTO interview_templates (name, grade, stack, track, duration_s, blocks, is_default, created_at, updated_at) "+
-			"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"),
-		t.Name, t.Grade, t.Stack, trackOf(t.Track), t.DurationS, string(blocksJSON), isDefault, now, now)
+			"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id"),
+		t.Name, t.Grade, t.Stack, trackOf(t.Track), t.DurationS, string(blocksJSON), t.IsDefault, now, now).Scan(&id)
 	if err != nil {
 		return err
 	}
-	id, _ := res.LastInsertId()
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -267,19 +260,15 @@ func (s *TemplateStore) Update(ctx context.Context, t *Template) error {
 		return err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	isDefault := 0
-	if t.IsDefault {
-		isDefault = 1
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if isDefault == 1 {
+	if t.IsDefault {
 		// spec-18: сброс дефолта в scope трека.
 		if _, err := tx.ExecContext(ctx, s.d.q(
-			"UPDATE interview_templates SET is_default = 0, updated_at = ? "+
+			"UPDATE interview_templates SET is_default = FALSE, updated_at = ? "+
 				"WHERE grade = ? AND (stack = ? OR stack = '*') AND track = ? AND id != ?"),
 			now, t.Grade, t.Stack, trackOf(t.Track), t.ID); err != nil {
 			return err
@@ -288,7 +277,7 @@ func (s *TemplateStore) Update(ctx context.Context, t *Template) error {
 	if _, err := tx.ExecContext(ctx, s.d.q(
 		"UPDATE interview_templates SET name = ?, grade = ?, stack = ?, track = ?, duration_s = ?, "+
 			"blocks = ?, is_default = ?, updated_at = ? WHERE id = ?"),
-		t.Name, t.Grade, t.Stack, trackOf(t.Track), t.DurationS, string(blocksJSON), isDefault, now, t.ID); err != nil {
+		t.Name, t.Grade, t.Stack, trackOf(t.Track), t.DurationS, string(blocksJSON), t.IsDefault, now, t.ID); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -312,7 +301,7 @@ func (s *TemplateStore) Delete(ctx context.Context, id int64) error {
 func (s *TemplateStore) CountDefaults(ctx context.Context, grade models.Grade) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, s.d.q(
-		"SELECT COUNT(*) FROM interview_templates WHERE grade = ? AND is_default = 1"),
+		"SELECT COUNT(*) FROM interview_templates WHERE grade = ? AND is_default"),
 		grade).Scan(&n)
 	return n, err
 }

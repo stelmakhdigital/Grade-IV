@@ -44,18 +44,16 @@ func (s *UserStore) CreateUser(ctx context.Context, email, passwordHash string) 
 		return models.User{}, fmt.Errorf("count users: %w", err)
 	}
 	isAdmin := n == 0 // первый в свежей БД — admin
-	res, err := s.db.ExecContext(ctx,
-		s.d.q(`INSERT INTO users (email, password_hash, created_at, is_admin) VALUES (?, ?, ?, ?)`),
-		email, passwordHash, nowRFC3339(), isAdmin)
+	// RETURNING id понимают обе СУБД (sqlite с 3.35), LastInsertId в lib/pq нет.
+	var id int64
+	err := s.db.QueryRowContext(ctx,
+		s.d.q(`INSERT INTO users (email, password_hash, created_at, is_admin) VALUES (?, ?, ?, ?) RETURNING id`),
+		email, passwordHash, nowRFC3339(), isAdmin).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return models.User{}, &ErrEmailExists{Email: email}
 		}
 		return models.User{}, fmt.Errorf("create user: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return models.User{}, fmt.Errorf("last insert id: %w", err)
 	}
 	return s.GetUserByID(ctx, id)
 }

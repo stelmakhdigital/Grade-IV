@@ -128,16 +128,14 @@ func (s *ProfileStore) Create(ctx context.Context, p Profile) (Profile, error) {
 	if !validProfileValue(p.Difficulty, "difficulty") {
 		return Profile{}, fmt.Errorf("недопустимая difficulty: %q", p.Difficulty)
 	}
-	res, err := s.db.ExecContext(ctx, s.d.q(`
+	// RETURNING id понимают обе СУБД (sqlite с 3.35), LastInsertId в lib/pq нет.
+	var id int64
+	err := s.db.QueryRowContext(ctx, s.d.q(`
 		INSERT INTO interviewer_profiles (name, tone, difficulty, is_preset, description, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`),
-		p.Name, p.Tone, p.Difficulty, p.IsPreset, p.Description, nowRFC3339())
+		VALUES (?, ?, ?, ?, ?, ?) RETURNING id`),
+		p.Name, p.Tone, p.Difficulty, p.IsPreset, p.Description, nowRFC3339()).Scan(&id)
 	if err != nil {
 		return Profile{}, fmt.Errorf("create profile: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return Profile{}, fmt.Errorf("last insert id: %w", err)
 	}
 	return s.Get(ctx, id)
 }

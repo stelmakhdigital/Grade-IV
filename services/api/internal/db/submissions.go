@@ -23,18 +23,16 @@ func NewSubmissionStore(dbx *sql.DB, d Dialect) *SubmissionStore {
 
 // Save сохраняет сдачу с результатом запуска.
 func (s *SubmissionStore) Save(ctx context.Context, m models.Submission) (models.Submission, error) {
-	res, err := s.db.ExecContext(ctx, s.d.q(`
+	// RETURNING id понимают обе СУБД (sqlite с 3.35), LastInsertId в lib/pq нет.
+	var id int64
+	err := s.db.QueryRowContext(ctx, s.d.q(`
 		INSERT INTO submissions (session_id, task_id, files, action, exit_code, stdout, stderr,
 			duration_ms, tests, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`),
 		m.SessionID, m.TaskID, m.Files, m.Action, m.ExitCode, m.Stdout, m.Stderr,
-		m.DurationMS, m.Tests, nowRFC3339())
+		m.DurationMS, m.Tests, nowRFC3339()).Scan(&id)
 	if err != nil {
 		return models.Submission{}, fmt.Errorf("save submission: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return models.Submission{}, fmt.Errorf("last insert id: %w", err)
 	}
 	var createdAt string
 	err = s.db.QueryRowContext(ctx,
