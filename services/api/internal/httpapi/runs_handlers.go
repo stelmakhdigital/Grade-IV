@@ -122,7 +122,8 @@ func (s *Server) handleSessionRuns(w http.ResponseWriter, r *http.Request) {
 	reqURL := s.cfg.SandboxURL + "/api/v1/sessions/" + fmt.Sprint(id) + "/runs"
 	req, err := http.NewRequestWithContext(proxyCtx, http.MethodPost, reqURL, bytes.NewReader(reqBody))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "запрос к sandbox: "+err.Error())
+		s.log.Error("sandbox: не собран запрос", "session", id, "err", err)
+		writeError(w, http.StatusInternalServerError, "internal", "внутренняя ошибка")
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")

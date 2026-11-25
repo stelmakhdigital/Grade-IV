@@ -30,7 +30,7 @@ func (s *Server) handleGetVacancy(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePutVacancy(w http.ResponseWriter, r *http.Request) {
 	var req vacancyReq
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "некорректный JSON: "+err.Error())
+		writeError(w, http.StatusBadRequest, "bad_request", "ожидается JSON вида {\"vacancy_text\": \"...\"}")
 		return
 	}
 	if n := len([]rune(req.VacancyText)); n > maxVacancyLen {

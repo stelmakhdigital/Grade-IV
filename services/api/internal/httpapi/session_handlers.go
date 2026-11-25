@@ -316,21 +316,39 @@ func parseSessionID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return id, true
 }
 
-// writeSessionEngineError — маппинг ошибок движка на коды HTTP.
-func (s *Server) writeSessionEngineError(w http.ResponseWriter, err error) {
+// clientError — единый маппинг ошибки на (код, сообщение) для клиента. Наружу
+// идут только наши sentinel-тексты: transport-ошибки, пути и SQL в ответе —
+// это утечка внутреннего устройства и непонятный кандидату текст. Подробное
+// «почему» читается в логе (вызывающий обязан залоировать default-ветку).
+func clientError(err error) (code, msg string) {
 	switch {
 	case errors.Is(err, db.ErrSessionNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "сессия не найдена")
-	case errors.Is(err, session.ErrSessionEnded),
-		errors.Is(err, session.ErrIllegalStage),
+		return "not_found", "сессия не найдена"
+	case errors.Is(err, session.ErrSessionEnded):
+		return "session_ended", err.Error()
+	case errors.Is(err, session.ErrIllegalStage),
 		errors.Is(err, session.ErrIllegalStatus),
 		errors.Is(err, session.ErrNotAttached),
 		errors.Is(err, session.ErrStageNotInScope):
-		writeError(w, http.StatusConflict, "invalid_state", err.Error())
+		return "invalid_state", err.Error()
+	default:
+		return "internal", "внутренняя ошибка"
+	}
+}
+
+// writeSessionEngineError — маппинг ошибок движка на коды HTTP.
+func (s *Server) writeSessionEngineError(w http.ResponseWriter, err error) {
+	code, msg := clientError(err)
+	status := http.StatusInternalServerError
+	switch code {
+	case "not_found":
+		status = http.StatusNotFound
+	case "session_ended", "invalid_state":
+		status = http.StatusConflict
 	default:
 		s.log.Error("session engine", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal", "внутренняя ошибка")
 	}
+	writeError(w, status, code, msg)
 }
 
 // handleWhiteboardPut — PUT /api/v1/sessions/{id}/whiteboard (ADR-004, WP-10).

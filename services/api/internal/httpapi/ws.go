@@ -22,7 +22,6 @@ import (
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/interviewer"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/session"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/vad"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/voicesvc"
 	"nhooyr.io/websocket"
@@ -498,18 +497,12 @@ func (s *Server) speak(ctx context.Context, id int64, ws *wsSession, text string
 	}
 }
 
-// wsSendError — сообщение error по протоколу (с кодом по ошибке).
+// wsSendError — сообщение error по протоколу. Наружу уходит код и человекочитаемое
+// сообщение из clientError; внутренности ошибки (transport, пути, SQL) — в лог.
 func (s *Server) wsSendError(id int64, conn *websocket.Conn, err error) {
-	code := "internal"
-	switch {
-	case errors.Is(err, db.ErrSessionNotFound):
-		code = "not_found"
-	case errors.Is(err, session.ErrSessionEnded):
-		code = "session_ended"
-	default:
-		code = "invalid_state"
-	}
-	raw, _ := json.Marshal(map[string]any{"type": "error", "code": code, "msg": err.Error()})
+	code, msg := clientError(err)
+	s.log.Warn("ws: ошибка сессии", "session", id, "code", code, "err", err)
+	raw, _ := json.Marshal(map[string]any{"type": "error", "code": code, "msg": msg})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_ = conn.Write(ctx, websocket.MessageText, raw)
@@ -574,7 +567,9 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage, ws *wsSession) {
 		}
 		// Сообщение stage (и timer/stage report при финализации) отправляет движок.
 		if _, err := s.engine.Transition(id, p.Stage); err != nil {
-			s.engine.SendTo(id, wsErr("invalid_state", err.Error()))
+			code, msg := clientError(err)
+			s.log.Warn("ws: переход отклонён", "session", id, "err", err)
+			s.engine.SendTo(id, wsErr(code, msg))
 			return
 		}
 		// Вход на стадии — первая реплика ИИ (WP-5): текст + озвучка (TTS).
@@ -589,7 +584,9 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage, ws *wsSession) {
 
 	case "finish":
 		if _, err := s.engine.Finish(id); err != nil {
-			s.engine.SendTo(id, wsErr("invalid_state", err.Error()))
+			code, msg := clientError(err)
+			s.log.Warn("ws: finish отклонён", "session", id, "err", err)
+			s.engine.SendTo(id, wsErr(code, msg))
 		} else {
 			s.startReportGeneration(id) // WP-11: отчёт после завершения
 		}
