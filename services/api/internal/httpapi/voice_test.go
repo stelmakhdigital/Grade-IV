@@ -338,19 +338,28 @@ func TestWSVoicePipeline(t *testing.T) {
 	}
 
 	// 4) Ожидаем transcript(user) + transcript(ai) + ai_text (ответ мока).
-	wantReply := llm.MockReply
+	// Ответ на реплику — следующий ход мока (приветствие ушло на коннекте),
+	// поэтому сверяем с любой репликой из круга, а не с одной строкой.
+	isReply := func(frame, kind string) bool {
+		for _, r := range llm.MockReplies {
+			if frame == kind+r {
+				return true
+			}
+		}
+		return false
+	}
 	var sawUser, sawAI, sawAIText bool
 	for i := 0; i < 12 && !(sawUser && sawAI && sawAIText); i++ {
 		got := wsReadMixed(t, conn, 1, 2*time.Second)
 		if len(got) == 0 {
 			continue
 		}
-		switch got[0] {
-		case "text:transcript/user/Здравствуйте, расскажите о себе":
+		switch {
+		case got[0] == "text:transcript/user/Здравствуйте, расскажите о себе":
 			sawUser = true
-		case "text:transcript/ai/" + wantReply:
+		case isReply(got[0], "text:transcript/ai/"):
 			sawAI = true
-		case "text:ai_text/<nil>/" + wantReply:
+		case isReply(got[0], "text:ai_text/<nil>/"):
 			sawAIText = true
 		}
 	}

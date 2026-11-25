@@ -63,6 +63,9 @@ type Server struct {
 func New(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *slog.Logger) *Server {
 	var provider llm.Provider
 	if cfg.LLMMock {
+		// Мок даёт осмысленные реплики, но это не модель: без строки в логе
+		// «собеседование не то, что кажется» отличимо только по качеству ответов.
+		log.Warn("LLM_MOCK=1: собеседование ведёт мок, ответы заготовлены")
 		provider = newMockProvider(cfg)
 	} else {
 		provider = llm.NewClient(cfg.LLMBaseURL, cfg.LLMModel, cfg.LLMAPIKey).

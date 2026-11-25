@@ -45,14 +45,27 @@ func (m *MockProvider) StreamEnd() time.Time {
 	return m.streamEnd
 }
 
-// MockReply — единственный ответ мока. Реплика интервьюера, а не эхо запроса:
-// последней репликой сюда всегда идёт директива модели («Кандидат перешёл на
-// эту стадию. Заведи её…»), и эхо-мок зачитывал её кандидату вслух (видно
-// было и в dev, и на LLM_MOCK в prod-профиле). Что ушло в модель — смотрят в
-// Calls()/LastSystem(), а не в ответе.
+// MockReplies — реплики по кругу. Две причины у такой формы:
+//
+//  1. эхо-мок зачитывал кандидату последнюю реплику запроса, а это директива
+//     модели («Кандидат перешёл на эту стадию. Заведи её…»); что ушло в модель
+//     — смотрят в Calls()/LastSystem(), а не в ответе;
+//  2. одна константа на все ходы превращала dev-стенд без LLM-узла в
+//     собеседование, где интервьюер вечно повторяет одну и ту же фразу, —
+//     это выглядело как поломка, а не как мок.
+//
+// Первый ответ — MockReplies[0]: на нём держатся тесты (MockReply).
+var MockReplies = []string{
+	MockReply,
+	"Почему выбрал именно такое решение и какие были альтернативы?",
+	"Как это защищено от регрессий и что упадёт первым при росте нагрузки?",
+	"Что бы ты переделал, если бы срок сжали вдвое?",
+}
+
+// MockReply — первая реплика мока (стартовая: знакомство и первый вопрос).
 const MockReply = "Расскажи, над чем ты сейчас работаешь. Какая часть задачи была самой сложной и почему?"
 
-// NewMockProvider — провайдер по умолчанию (MockReply, детерминированный).
+// NewMockProvider — провайдер по умолчанию (MockReplies по кругу, без сети).
 func NewMockProvider() *MockProvider {
 	return &MockProvider{}
 }
@@ -69,10 +82,12 @@ func (m *MockProvider) Calls() []Request {
 	return out
 }
 
-// Chat — MockReply (детерминированный, без сети); SetResponder перебивает.
+// Chat — реплика интервьюера из MockReplies по кругу (детерминированно:
+// порядок зависит только от номера хода этого провайдера); SetResponder перебивает.
 func (m *MockProvider) Chat(_ context.Context, req Request) (Response, error) {
 	m.mu.Lock()
 	m.calls = append(m.calls, req)
+	turn := len(m.calls) - 1
 	respond := m.respond
 	m.mu.Unlock()
 
@@ -80,7 +95,7 @@ func (m *MockProvider) Chat(_ context.Context, req Request) (Response, error) {
 		text, err := respond(req)
 		return Response{Content: text}, err
 	}
-	return Response{Content: MockReply}, nil
+	return Response{Content: MockReplies[turn%len(MockReplies)]}, nil
 }
 
 // ChatStream — стриминг поверх Chat: весь ответ одной фразой в канал

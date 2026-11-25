@@ -339,16 +339,16 @@ func TestBargeIn_ShortUtteranceDoesNotInterrupt(t *testing.T) {
 		writePCM(silencePCM(250))
 	}
 
-	// Стрим ИИ доигрывается до конца: end-флаг на последнем кадре потока.
-	// Клиуза-диспетчизация (T-20261008185701) дробит ответ на клиузы — кадров
-	// ровно «частей × 12» (96000 байт = 12 pacing-кадров на часть); tts_stop не
-	// наблюдался. Считаем кадры, а не ждём конкретный seq: нумерация зависит от
-	// того, сколько кадров ушло до этого места, и на неё заваливать тест нельзя.
+	// Стрим ИИ доигрывается до конца: end-флаг на последнем кадре потока, и
+	// короткая реплика (< 500 мс) его не обрывает. Точное число кадров здесь не
+	// проверяем: ответ мока идёт по кругу (llm.MockReplies), и какой именно ход
+	// озвучивается зависит от числа предыдущих запросов, а часть кадров ушла до
+	// начала отсчёта. Клиуза-диспетчизация (T-20261008185701) даёт 12 pacing-
+	// кадров на часть ответа; tts_stop не наблюдался.
 	mockReply := llm.MockReply
-	parts := len(splitForTTS(mockReply))
-	wantFrames := parts * 12
-	if parts < 2 {
-		t.Fatalf("сценарий: частей ответа = %d, нужно ≥2 (тест построен на этом)", parts)
+	if len(splitForTTS(mockReply)) < 2 {
+		t.Fatalf("сценарий: частей стартовой реплики = %d, нужно ≥2 (тест построен на этом)",
+			len(splitForTTS(mockReply)))
 	}
 	sawTTSStop := false
 	endSeq := -1
@@ -373,11 +373,7 @@ func TestBargeIn_ShortUtteranceDoesNotInterrupt(t *testing.T) {
 		t.Fatal("короткий burst (< 500 мс) вызвал tts_stop — barge-in сработал ложно")
 	}
 	if endSeq < 0 {
-		t.Fatalf("end-флаг не пришёл — стрим не доигран (кадров %d, want %d), seqs=%v", len(seqs), wantFrames, seqs)
-	}
-	if len(seqs) != wantFrames {
-		t.Fatalf("кадров %d, want %d (частей %d × 12) — стрим оборван или длиннее ответа, seqs=%v",
-			len(seqs), wantFrames, parts, seqs)
+		t.Fatalf("end-флаг не пришёл — стрим оборван (кадров %d), seqs=%v", len(seqs), seqs)
 	}
 	// Новый ход не был запущен: нет transcript(user) в ближайших сообщениях.
 	deadline = time.Now().Add(2 * time.Second)
