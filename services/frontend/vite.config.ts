@@ -11,7 +11,14 @@ import { fileURLToPath } from 'node:url';
 // (src/vendor, тело без изменений) — в dev и prod.
 const es6PromisePoolShim = fileURLToPath(new URL('./src/vendor/es6-promise-pool.mjs', import.meta.url));
 
-// Dev-прокси: /api, /healthz и /ws -> grade-api (:8000). В prod — nginx (nginx.conf).
+// Dev-прокси: /api, /healthz, /debug и /ws -> grade-api. В prod — nginx (nginx.conf).
+//
+// GRADE_API_URL — адрес api, когда он не :8000. На этой машине :8000 занят
+// другим контейнером (vLLM: несуществующий путь отвечает 404 {"detail":"Not
+// Found"}), и вход/регистрация выглядели как «404 от продукта», хотя запрос до
+// api не доходил вовсе. Запуск с другим портом: GRADE_API_URL=http://localhost:8010.
+const API = process.env.GRADE_API_URL ?? 'http://localhost:8000';
+const WS = API.replace(/^http/, 'ws');
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -22,12 +29,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': { target: 'http://localhost:8000' },
-      '/healthz': { target: 'http://localhost:8000' },
-      '/ws': { target: 'ws://localhost:8000', ws: true },
+      '/api': { target: API },
+      '/healthz': { target: API },
+      '/ws': { target: WS, ws: true },
       // spec-14/D11: dev-диагностика микрофона — same-origin через прокси
       // (раньше debug-reporter ломался за прокси/HTTPS).
-      '/debug': { target: 'http://localhost:8000' },
+      '/debug': { target: API },
     },
   },
   build: {
