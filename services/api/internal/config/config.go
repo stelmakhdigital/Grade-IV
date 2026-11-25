@@ -147,6 +147,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("APP_ENV=%s: JWT_SECRET не может быть dev-секретом (%q) — задайте реальный JWT_SECRET",
 			c.Env, DevInsecureSecret)
 	}
+	// LLM-мок в prod озвучивает кандидату заготовленную фразу вместо ответов
+	// модели: собеседование выглядит живым, а по факту пустое. Не должно
+	// случаться из-за «забыли выключить LLM_MOCK».
+	if isProdEnv(c.Env) && c.LLMMock {
+		return nil, fmt.Errorf("APP_ENV=%s: LLM_MOCK=1 запрещён — собеседование ведёт мок, а не модель", c.Env)
+	}
 	return c, nil
 }
 

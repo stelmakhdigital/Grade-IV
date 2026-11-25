@@ -98,3 +98,21 @@ func TestIsProdEnv(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadProdRejectsLLMMock — с LLM_MOCK в prod собеседование ведёт заготовленная
+// фраза, а не модель: по интерфейсу это неотличимо от работающего интервью,
+// поэтому запрещаем на старте. В dev/CI мок — штатный режим (ADR-005).
+func TestLoadProdRejectsLLMMock(t *testing.T) {
+	setEnv(t, "prod", "real-secret")
+	t.Setenv("LLM_MOCK", "1")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "LLM_MOCK") {
+		t.Fatalf("ожидалась ошибка про LLM_MOCK в prod, получили: %v", err)
+	}
+
+	setEnv(t, "dev", "")
+	t.Setenv("LLM_MOCK", "1")
+	c, err := Load()
+	if err != nil || !c.LLMMock {
+		t.Fatalf("в dev LLM_MOCK должен быть разрешён: cfg=%+v err=%v", c, err)
+	}
+}

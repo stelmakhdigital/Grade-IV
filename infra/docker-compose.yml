@@ -13,9 +13,13 @@ services:
       context: ../services/api
       dockerfile: ../../infra/docker/api.Dockerfile
     image: grade/api:dev
-    ports:
-      - "8000:8000"
+    # Наружу не публикуется: вход через caddy → frontend(nginx), который
+    # проксирует /api/, /healthz и /ws. Публикация 8000 наружу заодно
+    # открывала бы /metrics любому, кто достучался до хоста.
     environment:
+      # Профиль prod = prod-среда: без этого молчат prod-гарды (dev-секрет
+      # JWT, LLM_MOCK).
+      APP_ENV: "${APP_ENV:-prod}"
       ADDR: ":8000"
       DATABASE_URL: "postgres://grade:grade@postgres:5432/grade"
       JWT_SECRET: "${JWT_SECRET:-change-me-in-production}"
