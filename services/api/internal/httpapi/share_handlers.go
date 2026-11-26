@@ -7,7 +7,6 @@ package httpapi
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -124,19 +123,7 @@ func (s *Server) handlePublicReport(w http.ResponseWriter, r *http.Request) {
 	if m.FinishedAt != nil {
 		meta["finished_at"] = m.FinishedAt.UTC().Format("2006-01-02")
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"meta":                 meta,
-		"overall":              overall,
-		"grade_recommendation": gradeRec,
-		"criteria":             json.RawMessage(criteria),
-		"strengths":            json.RawMessage(strengths),
-		"weaknesses":           json.RawMessage(weaknesses),
-		"recommendations":      json.RawMessage(recommendations),
-		"verdict":              extra.Verdict,
-		"grade_gap":            extra.GradeGap,
-		"question_trail":       extra.QuestionTrail,
-		"study_plan_2weeks":    json.RawMessage(orJSONArray(extra.StudyPlan2Weeks)),
-		"progress_vs_previous": json.RawMessage(orJSONArray(extra.ProgressVsPrevious)),
-		"livecode_tasks":       json.RawMessage(orJSONArray(extra.LiveCodeTasks)),
-	})
+	body := reportPayload(overall, gradeRec, criteria, strengths, weaknesses, recommendations, extra)
+	body["meta"] = meta
+	writeJSON(w, http.StatusOK, body)
 }

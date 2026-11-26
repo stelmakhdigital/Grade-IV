@@ -267,5 +267,49 @@ func TestReportErrors(t *testing.T) {
 	if code != http.StatusNotFound {
 		t.Fatalf("чужая: %d", code)
 	}
-	var _ *db.ReportStore
+}
+
+// TestReportPayloadSameForPrivateAndPublic — приватный и публичный отчёт
+// собираются одним конструктором. Раньше наборы ключей писались дважды и
+// разъехались: пустые поля приватного пути отдавались null, публичного — [].
+// Для фронта это не косметика: ReportView зовёт .map на этих полях.
+func TestReportPayloadSameForPrivateAndPublic(t *testing.T) {
+	e := newInterviewEnv(t)
+	e.finishSession(t)
+
+	// Строка старого прогона: массивы пустые, дополнений нет.
+	if err := e.srv.reports.Save(context.Background(), e.session, 3.5, "middle",
+		[]byte(""), []byte(""), []byte(""), []byte(""), db.ReportExtra{}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	code, priv := getReport(t, e)
+	if code != http.StatusOK {
+		t.Fatalf("приватный отчёт: %d", code)
+	}
+	for _, k := range []string{"criteria", "strengths", "weaknesses", "recommendations",
+		"study_plan_2weeks", "progress_vs_previous", "livecode_tasks"} {
+		if _, ok := priv[k].([]any); !ok {
+			t.Errorf("приватный %s: ждали массив, получили %#v", k, priv[k])
+		}
+	}
+
+	_, sh := doJSON(t, "POST",
+		fmt.Sprintf("%s/api/v1/sessions/%d/share", e.ts.URL, e.session), nil, authHeader(e.token))
+	tok, _ := sh["token"].(string)
+	if tok == "" {
+		t.Fatalf("токен публичной ссылки не выдан: %#v", sh)
+	}
+	code, pub := doJSON(t, "GET", e.ts.URL+"/api/v1/public/reports/"+tok, nil, nil)
+	if code != http.StatusOK {
+		t.Fatalf("публичный отчёт: %d", code)
+	}
+	for k := range priv {
+		if _, ok := pub[k]; !ok {
+			t.Errorf("в публичном отчёте нет ключа %s — наборы ключей снова разъехались", k)
+		}
+	}
+	if _, ok := pub["meta"].(map[string]any); !ok {
+		t.Error("в публичном отчёте нет meta")
+	}
 }

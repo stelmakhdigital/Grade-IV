@@ -535,32 +535,8 @@ func (s *Server) handleReportGet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "ошибка получения отчёта")
 		return
 	}
-	// json.RawMessage — встроить JSON-массивы как есть (а не base64-строку).
-	writeJSON(w, http.StatusOK, map[string]any{
-		"overall":              overall,
-		"grade_recommendation": gradeRec,
-		"criteria":             json.RawMessage(criteria),
-		"strengths":            json.RawMessage(strengths),
-		"weaknesses":           json.RawMessage(weaknesses),
-		"recommendations":      json.RawMessage(recommendations),
-		// Подробный отчёт (Итерация B).
-		"verdict":   extra.Verdict,
-		"grade_gap": extra.GradeGap,
-		// Путь по уровням вопросов (собеседовали на шаг выше резюме).
-		"question_trail":       extra.QuestionTrail,
-		"study_plan_2weeks":    json.RawMessage(extra.StudyPlan2Weeks),
-		"progress_vs_previous": json.RawMessage(extra.ProgressVsPrevious),
-		// Per-task Live-Code (spec-13B T3); старые строки — пусто → [].
-		"livecode_tasks": json.RawMessage(orJSONArray(extra.LiveCodeTasks)),
-	})
-}
-
-// orJSONArray — пустой/отсутствующий JSON-массив → "[]" (старые строки отчёта).
-func orJSONArray(raw string) string {
-	if raw == "" {
-		return "[]"
-	}
-	return raw
+	writeJSON(w, http.StatusOK, reportPayload(overall, gradeRec, criteria, strengths,
+		weaknesses, recommendations, extra))
 }
 
 // startReportGeneration — fire-and-forget генерация отчёта (WP-11):
