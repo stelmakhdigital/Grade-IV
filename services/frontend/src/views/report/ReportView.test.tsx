@@ -49,6 +49,9 @@ describe('ReportView (WP-11)', () => {
       }),
     );
     render(<ReportView sessionId={9} pollMs={10} maxPolls={5} />);
+    // Пока отчёт генерируется, состояние озвучивается скринридеру: блок
+    // сменится сам, человек не должен опрашивать страницу руками.
+    expect(screen.getByRole('status')).toHaveTextContent('Считаем результаты');
     // опросы каждые 10 мс: 202, 202, 200
     await waitFor(
       () => expect(screen.getByTestId('report')).toBeInTheDocument(),
