@@ -22,9 +22,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
+          # sandbox — без go.sum: внешних зависимостей нет, а на
+          # services/sandbox/go.sum setup-go ругался «Restore cache failed»
           cache-dependency-path: |
             services/api/go.sum
-            services/sandbox/go.sum
+            services/sandbox/go.mod
       - name: gofmt (api + sandbox) — регресс форматирования (T4)
         run: |
           set -e
@@ -68,7 +70,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-          cache-dependency-path: services/sandbox/go.sum
+          cache-dependency-path: services/sandbox/go.mod
       # Прогрев образов явным шагом: на общих runner'ах анонимный Hub-пулл
       # ловит rate-limit (toomanyrequests) — отдельный шаг с ретраями даёт
       # внятный лог причины вместо падения теста на первом docker run.
