@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
@@ -20,6 +21,11 @@ type createParams struct {
 	profileID  int64
 	ttsspeaker string
 	baseGrade  models.Grade
+	// resumeTitle/resumeStacks — что ИИ вычитал из резюме (должность и языки).
+	// Title идёт в заголовок интервью, stacks — в выбор кодовой стадии и в
+	// директиву («спрашивать по всем заявленным»).
+	resumeTitle  string
+	resumeStacks []models.Stack
 }
 
 // WithProfile — профиль интервьюера (tone × difficulty, итерация B);
@@ -48,6 +54,18 @@ func WithTTSSpeaker(speaker string) CreateOption {
 // Grade сессии при этом — цель: на шаг выше базы.
 func WithBaseGrade(g models.Grade) CreateOption {
 	return func(p *createParams) { p.baseGrade = g }
+}
+
+// WithResumeProfile — что ИИ вычитал из резюме: должность («Python-разработчик»,
+// «Fullstack», «Системный администратор») и заявленные языки по убыванию веса.
+// По первому из языков, который роль умеет, берётся кодовая стадия; остальные
+// попадают в директиву интервьюера. Заголовок — должность из резюме, а не
+// название роли: иначе Python-кандидат сидит в «Backend-разработчик» с go-задачами.
+func WithResumeProfile(title string, stacks []models.Stack) CreateOption {
+	return func(p *createParams) {
+		p.resumeTitle = strings.TrimSpace(title)
+		p.resumeStacks = stacks
+	}
 }
 
 // Create создаёт сессию: вставка, старт в статусе active.
@@ -86,9 +104,23 @@ func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, s
 		if !track.HasGrade(grade) {
 			return models.Session{}, fmt.Errorf("%w: грейд %q не входит в трек %q", ErrInvalidParams, grade, trackID)
 		}
-		// spec-22: стек практики — часть роли (practice.runtime). Клиентский
-		// stack не используется: сессия наследует рантайм роли ("" — без практики).
+		// spec-22: стек практики — часть роли, клиентский stack не властен
+		// ("" — без практики). Но роль умеет несколько языков (backend — go и
+		// python), и внутри этого набора выбор обязан быть по резюме: пока роль
+		// отдавала practice.runtime, Python-кандидат получал go-задачи только
+		// потому, что в роли первым списан go (замер 2026-11-26: резюме на
+		// FastAPI/asyncio, сессия — backend/go, отсюда и весь шум в оценках).
 		stack = track.Runtime()
+		if picked := pickResumeStack(cp.resumeStacks, track); picked != "" && picked != stack {
+			e.log.Info("кодовая стадия — по резюме", "track", trackID,
+				"resume_stacks", joinStacksForLog(cp.resumeStacks),
+				"stack", picked, "стек_по_роли", string(stack))
+			stack = picked
+		} else if len(cp.resumeStacks) > 0 && picked == "" {
+			e.log.Info("в резюме нет языка, который умеет роль — кодовая стадия по роли",
+				"track", trackID, "resume_stacks", joinStacksForLog(cp.resumeStacks),
+				"stack", string(stack))
+		}
 	}
 	if !grade.Valid() {
 		return models.Session{}, fmt.Errorf("%w: грейд %q", ErrInvalidParams, grade)
@@ -154,6 +186,8 @@ func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, s
 		TTSSpeaker:     cp.ttsspeaker,
 		TrackID:        trackID,
 		BaseGrade:      cp.baseGrade,
+		ResumeTitle:    cp.resumeTitle,
+		ResumeStacks:   cp.resumeStacks,
 	})
 	if err != nil {
 		return models.Session{}, err
@@ -174,8 +208,32 @@ func (e *Engine) create(ctx context.Context, userID int64, grade models.Grade, s
 	e.mu.Unlock()
 	_, _ = e.addEvent(ctx, m.ID, "session_created", map[string]any{
 		"grade": grade, "stack": stack, "duration_limit_s": m.DurationLimitS,
+		"resume_title": cp.resumeTitle, "resume_stacks": cp.resumeStacks,
 	})
 	return m, nil
+}
+
+// pickResumeStack — первый заявленный по резюме язык, который роль умеет.
+// Пустой ответ — ни один не подходит (кодовая стадия остаётся на рантайме роли).
+func pickResumeStack(resume []models.Stack, track *models.Track) models.Stack {
+	if track == nil {
+		return ""
+	}
+	for _, s := range resume {
+		if s.Valid() && track.HasStack(s) {
+			return s
+		}
+	}
+	return ""
+}
+
+// joinStacksForLog — стек в одну строку для лога.
+func joinStacksForLog(st []models.Stack) string {
+	names := make([]string, len(st))
+	for i, s := range st {
+		names[i] = string(s)
+	}
+	return strings.Join(names, ",")
 }
 
 // resolveTrack — роль (трек) сессии по track_id из БД. Резолвер отдаёт

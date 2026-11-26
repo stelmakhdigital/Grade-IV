@@ -44,6 +44,10 @@ type sessionDTO struct {
 	PausedAt       *time.Time `json:"paused_at,omitempty"`
 	ProfileID      int64      `json:"profile_id"`
 	TTSSpeaker     string     `json:"tts_speaker"` // F1: выбранный голос интервьюера
+	// ResumeTitle/ResumeStacks — должность и языки по резюме. Заголовок
+	// интервью и кодовая стадия обязаны им соответствовать.
+	ResumeTitle  string         `json:"resume_title,omitempty"`
+	ResumeStacks []models.Stack `json:"resume_stacks,omitempty"`
 }
 
 func toDTO(m models.Session, snap *session.Snapshot) sessionDTO {
@@ -53,6 +57,8 @@ func toDTO(m models.Session, snap *session.Snapshot) sessionDTO {
 		Stack:          string(m.Stack),
 		TrackID:        m.TrackID,
 		BaseGrade:      string(m.BaseGrade),
+		ResumeTitle:    m.ResumeTitle,
+		ResumeStacks:   m.ResumeStacks,
 		Stage:          string(m.Stage),
 		Status:         string(m.Status),
 		DurationLimitS: m.DurationLimitS,
@@ -96,8 +102,8 @@ func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
 		opts = append(opts, session.WithTrack(strings.TrimSpace(body.TrackID)))
 	}
 	if grade == "" {
-		trackID, base := s.inferRole(r.Context(), uid)
-		t, err := s.tracks.GetOrDefault(trackID)
+		profile := s.inferRole(r.Context(), uid)
+		t, err := s.tracks.GetOrDefault(profile.TrackID)
 		if err != nil || t == nil {
 			t, _ = s.tracks.GetOrDefault(models.DefaultTrackID)
 		}
@@ -105,8 +111,10 @@ func (s *Server) handleSessionsCreate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "internal", "роли собеседования не загружены")
 			return
 		}
-		opts = append(opts, session.WithTrack(t.ID), session.WithBaseGrade(base))
-		grade = targetGrade(base, t.Grades)
+		opts = append(opts, session.WithTrack(t.ID), session.WithBaseGrade(profile.Base),
+			session.WithResumeProfile(profile.Title, profile.Stacks))
+		grade = targetGrade(profile.Base, t.Grades)
+		// Стек выбирает движок: внутри стеков роли — по резюме, иначе рантайм роли.
 		body.Stack = t.Runtime()
 	}
 	if body.TemplateID > 0 {

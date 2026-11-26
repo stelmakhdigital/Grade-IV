@@ -75,6 +75,10 @@ export interface Session {
   grade: Grade;
   /** Грейд по резюме (ИИ): цель grade — на шаг выше. Пусто — старт с явным грейдем. */
   base_grade?: Grade;
+  /** Должность из резюме — по ней заголовок интервью, а не по названию роли. */
+  resume_title?: string;
+  /** Языки, заявленные в резюме; первый — кодовая стадия (stack). */
+  resume_stacks?: Stack[];
   stack: Stack;
   track_id?: string;
   stage: Stage;

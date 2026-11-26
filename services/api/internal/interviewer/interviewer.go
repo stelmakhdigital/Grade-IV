@@ -447,6 +447,12 @@ func (i *Interviewer) buildMessages(sess models.Session, userMsg string, images 
 	if i.resumeResolver != nil {
 		resume = clampRunes(i.resumeResolver(context.Background(), sess.UserID), resumePromptRunes)
 	}
+	// Заявленные языки — отдельной строкой НАД резюме (после обрезки, чтобы её
+	// не отрезало). Без неё модель читает резюме и спрашивает по одному языку:
+	// кандидату с go+python доставался только один (замер 2026-11-26).
+	if line := declaredStacksLine(sess.ResumeStacks); line != "" {
+		resume = line + "\n" + resume
+	}
 	// Программа — из сессии (шаблон, итерация A); пустая — дефолтная gradeProgram.
 	// spec-18: контекст трека (роль, доска) в промптах стадии.
 	sys := SystemPromptWithProfileProgram(sess.Grade, string(sess.Stack), sess.Stage,
@@ -459,6 +465,20 @@ func (i *Interviewer) buildMessages(sess models.Session, userMsg string, images 
 	}
 	msgs = append(msgs, msg)
 	return msgs
+}
+
+// declaredStacksLine — строка директивы о языках, заявленных в резюме.
+// Пусто — строки нет (интервью не по резюме).
+func declaredStacksLine(st []models.Stack) string {
+	if len(st) == 0 {
+		return ""
+	}
+	names := make([]string, len(st))
+	for i, s := range st {
+		names[i] = string(s)
+	}
+	return "Языки кандидата по резюме: " + strings.Join(names, ", ") +
+		". Ставь вопросы по каждому заявленному, а не только по первому."
 }
 
 // transcript — последние реплики (user_utterance/ai_utterance/ai_nudge) в хронологии.

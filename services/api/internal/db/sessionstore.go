@@ -54,6 +54,30 @@ func splitStages(s string) []models.Stage {
 	return out
 }
 
+// joinStacks/splitStacks — заявленные по резюме языки сессии (колонка
+// sessions.resume_stacks). Порядок значим: первый — основной, по нему
+// кодовая стадия.
+func joinStacks(st []models.Stack) string {
+	names := make([]string, len(st))
+	for i, x := range st {
+		names[i] = string(x)
+	}
+	return strings.Join(names, ",")
+}
+
+func splitStacks(s string) []models.Stack {
+	if s == "" {
+		return nil
+	}
+	out := make([]models.Stack, 0, 2)
+	for _, p := range strings.Split(s, ",") {
+		if p != "" {
+			out = append(out, models.Stack(p))
+		}
+	}
+	return out
+}
+
 // Create вставляет новую сессию (stage/status/длительность заданы вызывающим).
 // TemplateID=0 → NULL (дефолтный шаблон грейда, итерация A). Program — программа
 // шаблона (записывается на создание — сессия не меняется при правке шаблона).
@@ -71,11 +95,11 @@ func (s *SessionStore) Create(ctx context.Context, m models.Session) (models.Ses
 	var id int64
 	err := s.db.QueryRowContext(ctx, s.d.q(`
 		INSERT INTO sessions (user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, started_at, template_id, program, profile_id, tts_speaker, track_id, base_grade, stages)
-		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`),
+			active_seconds, started_at, template_id, program, profile_id, tts_speaker, track_id, base_grade, stages, resume_title, resume_stacks)
+		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`),
 		m.UserID, m.Grade, m.Stack, m.Stage, m.Status, m.DurationLimitS,
 		m.StartedAt.UTC().Format(time.RFC3339), templateID, m.Program, profileID, m.TTSSpeaker, m.TrackID, m.BaseGrade,
-		joinStages(m.Stages)).Scan(&id)
+		joinStages(m.Stages), m.ResumeTitle, joinStacks(m.ResumeStacks)).Scan(&id)
 	if err != nil {
 		return models.Session{}, fmt.Errorf("create session: %w", err)
 	}
@@ -86,7 +110,7 @@ func (s *SessionStore) Create(ctx context.Context, m models.Session) (models.Ses
 func (s *SessionStore) Get(ctx context.Context, id int64) (models.Session, error) {
 	return s.scanSession(s.db.QueryRowContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages, resume_title, resume_stacks
 			FROM sessions WHERE id = ?`), id))
 }
 
@@ -94,7 +118,7 @@ func (s *SessionStore) Get(ctx context.Context, id int64) (models.Session, error
 func (s *SessionStore) GetOwned(ctx context.Context, id, userID int64) (models.Session, error) {
 	m, err := s.scanSession(s.db.QueryRowContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages, resume_title, resume_stacks
 			FROM sessions WHERE id = ? AND user_id = ?`), id, userID))
 	if errors.Is(err, ErrSessionNotFound) {
 		return m, err
@@ -106,7 +130,7 @@ func (s *SessionStore) GetOwned(ctx context.Context, id, userID int64) (models.S
 func (s *SessionStore) ListByUser(ctx context.Context, userID int64) ([]models.Session, error) {
 	rows, err := s.db.QueryContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages, resume_title, resume_stacks
 			FROM sessions WHERE user_id = ? ORDER BY id DESC`), userID)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
@@ -176,7 +200,7 @@ func (s *SessionStore) Finalize(ctx context.Context, id int64, status models.Sta
 func (s *SessionStore) ListByStatus(ctx context.Context, status models.Status) ([]models.Session, error) {
 	rows, err := s.db.QueryContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages, resume_title, resume_stacks
 			FROM sessions WHERE status = ?`), status)
 	if err != nil {
 		return nil, fmt.Errorf("list by status: %w", err)
@@ -343,8 +367,10 @@ func (s *SessionStore) scanSession(row rowScanner) (models.Session, error) {
 	var trackID string
 	var baseGrade string
 	var stagesRaw string
+	var resumeTitle, resumeStacks string
 	err := row.Scan(&m.ID, &m.UserID, &grade, &stack, &stage, &status,
-		&m.DurationLimitS, &m.ActiveSeconds, &pausedAt, &startedAt, &finishedAt, &templateID, &program, &profileID, &ttsSpeaker, &shareToken, &trackID, &baseGrade, &stagesRaw)
+		&m.DurationLimitS, &m.ActiveSeconds, &pausedAt, &startedAt, &finishedAt, &templateID, &program, &profileID, &ttsSpeaker, &shareToken, &trackID, &baseGrade, &stagesRaw,
+		&resumeTitle, &resumeStacks)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.Session{}, ErrSessionNotFound
 	}
@@ -353,6 +379,8 @@ func (s *SessionStore) scanSession(row rowScanner) (models.Session, error) {
 	}
 	m.Grade, m.Stack, m.Stage, m.Status = models.Grade(grade), models.Stack(stack), models.Stage(stage), models.Status(status)
 	m.BaseGrade = models.Grade(baseGrade) // '' — грейд по резюме не определялся (ручной старт/легаси)
+	m.ResumeTitle = resumeTitle
+	m.ResumeStacks = splitStacks(resumeStacks)
 	m.StartedAt, err = parseTS(startedAt)
 	if err != nil {
 		return models.Session{}, fmt.Errorf("parse started_at: %w", err)
@@ -398,7 +426,7 @@ func (s *SessionStore) SetShareToken(ctx context.Context, id, userID int64, toke
 func (s *SessionStore) GetByShareToken(ctx context.Context, token string) (models.Session, error) {
 	return s.scanSession(s.db.QueryRowContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
-			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages
+			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages, resume_title, resume_stacks
 			FROM sessions WHERE share_token = ?`), token))
 }
 

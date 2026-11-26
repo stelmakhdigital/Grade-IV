@@ -136,13 +136,23 @@ export function SessionView({ id }: { id: number }) {
     );
   }
 
+  // Заголовок — должность из резюме, а не название роли: кандидат на Python,
+  // приведший к роли backend, не должен сидеть в «Интервью: Backend-разработчик».
+  const interviewTitle = session.resume_title?.trim() || trackMeta?.title || session.grade;
+  // Язык практики — язык сессии: роль умеет несколько, а по резюме выбран один
+  // (у роли по умолчанию может стоять go, а кандидат пишет python).
+  const practiceRuntime = session.stack || trackMeta?.practice?.runtime;
+  // Языки, заявленные в резюме кроме кодового: по ним ставим вопросы, код — по stack.
+  const otherStacks = (session.resume_stacks ?? []).filter((s) => s !== session.stack);
+
   return (
     <main className="app session-page">
       <header className="header session-head">
         <div>
           <h1>
-            {/* spec-20: имя трека понятнее сырого грейда; стек — только у кодовых. */}
-            Интервью: {trackMeta?.title ?? session.grade}
+            {/* spec-20: имя роли понятно, но должностью из резюме не пренебрегаем;
+                стек — только у кодовых ролей. */}
+            Интервью: {interviewTitle}
             {session.stack ? ` / ${session.stack}` : ''}
           </h1>
           <p className="muted small">
@@ -150,8 +160,8 @@ export function SessionView({ id }: { id: number }) {
             {live && (
               <span>
                 {' · '}
-                {stage === 'livecode' && practiceLabel(trackMeta?.practice?.runtime) !== null
-                  ? `Практика (${practiceLabel(trackMeta?.practice?.runtime)})`
+                {stage === 'livecode' && practiceLabel(practiceRuntime) !== null
+                  ? `Практика (${practiceLabel(practiceRuntime)})`
                   : stageLabel(stage)}
               </span>
             )}
@@ -241,19 +251,29 @@ export function SessionView({ id }: { id: number }) {
 
         <dl className="rail-meta">
           <dt>Роль</dt>
-          <dd>{trackMeta?.title ?? session.grade}</dd>
+          <dd>{interviewTitle}</dd>
           {session.stack && (
             <>
               <dt>Стек</dt>
               <dd>{session.stack}</dd>
             </>
           )}
+          {otherStacks.length > 0 && (
+            <>
+              <dt>Ещё языки</dt>
+              <dd>{otherStacks.join(', ')}</dd>
+            </>
+          )}
           {session.base_grade && (
             <>
-              <dt>Цель</dt>
+              {/* «Цель» показывала базу по резюме: в резюме middle, интервью на
+                  senior, а в рельсе читалось «цель middle». */}
+              <dt>База по резюме</dt>
               <dd>{session.base_grade}</dd>
             </>
           )}
+          <dt>Цель</dt>
+          <dd>{session.grade}</dd>
         </dl>
       </aside>
 
@@ -532,10 +552,10 @@ export function SessionView({ id }: { id: number }) {
                 К Live-Code
               </button>
             )}
-            {/* spec-22: роль с практикой — из голосовой на практику (runtime роли). */}
+            {/* spec-22: роль с практикой — из голосовой на практику (язык сессии). */}
             {stage === 'voice' && trackMeta != null && trackMeta.practice != null && (
               <button type="button" className="btn ghost" onClick={() => onStageAction('livecode')} data-testid="go-livecode-voice">
-                К практике ({practiceLabel(trackMeta.practice.runtime)})
+                К практике ({practiceLabel(practiceRuntime)})
               </button>
             )}
             {/* Роль без практики — из голосовой сразу на доску. */}

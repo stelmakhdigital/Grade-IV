@@ -139,6 +139,10 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 			"ALTER TABLE reports ADD COLUMN question_trail TEXT NOT NULL DEFAULT ''",
 			// issue #7: программа стадий, закреплённая на создание сессии.
 			"ALTER TABLE sessions ADD COLUMN stages TEXT NOT NULL DEFAULT ''",
+			// Интервью по резюме: должность из резюме и заявленные языки.
+			// Заголовок и стек обязаны отражать резюме, а не первую строку роли.
+			"ALTER TABLE sessions ADD COLUMN resume_title TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE sessions ADD COLUMN resume_stacks TEXT NOT NULL DEFAULT ''",
 		}
 	case DialectPostgres:
 		raw = schemaPostgres + "\n" + schemaPostgresProfiles
@@ -165,6 +169,9 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS question_trail TEXT NOT NULL DEFAULT ''",
 			// issue #7: программа стадий, закреплённая на создание сессии.
 			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS stages TEXT NOT NULL DEFAULT ''",
+			// Интервью по резюме: должность из резюме и заявленные языки.
+			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS resume_title TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS resume_stacks TEXT NOT NULL DEFAULT ''",
 		}
 	default:
 		return fmt.Errorf("неподдерживаемый диалект: %q", d)

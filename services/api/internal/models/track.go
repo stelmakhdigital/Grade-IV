@@ -45,6 +45,10 @@ type Track struct {
 	// GradeConfirm — порог подтверждения грейда (опциональный override
 	// глобального 4.2). 0 — глобальный.
 	GradeConfirm float64 `json:"grade_confirm,omitempty"`
+	// PracticeStacks — языки, которые роль готова принимать на кодовой стадии.
+	// Practice.Runtime — только тот, что выбран по умолчанию: роль умеет и
+	// python, когда дефолт go. Пусто — только Runtime (роли в старой форме).
+	PracticeStacks []Stack `json:"practice_stacks,omitempty"`
 }
 
 // Practice — практическая стадия роли (spec-22).
@@ -276,6 +280,23 @@ func (t *Track) Validate() error {
 func (t *Track) HasGrade(g Grade) bool {
 	for _, x := range t.Grades {
 		if x == g {
+			return true
+		}
+	}
+	return false
+}
+
+// HasStack — роль принимает этот стек на кодовой стадии: либо он в списке
+// practice_stacks, либо это её дефолтный рантайм.
+func (t *Track) HasStack(s Stack) bool {
+	if s == "" {
+		return false
+	}
+	if t.Practice != nil && t.Practice.Runtime == s {
+		return true
+	}
+	for _, x := range t.PracticeStacks {
+		if x == s {
 			return true
 		}
 	}

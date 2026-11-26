@@ -902,3 +902,31 @@ describe('Voice UX: история новые-сверху + режим запи
     expect(await screen.findByTestId('rec-note')).toHaveTextContent('Недостаточно речи');
   }, 15000);
 });
+
+// Интервью строится по резюме, а не по роли из конфига. Пока заголовок и стек
+// брались из названия роли, кандидат на Python сидел в «Интервью:
+// Backend-разработчик / go» и получал go-задачи (замер 2026-11-26).
+describe('SessionView: интервью по резюме', () => {
+  const S_RESUME = {
+    ...S_ACTIVE,
+    track_id: 'backend',
+    stack: 'python',
+    base_grade: 'middle',
+    resume_title: 'Python-разработчик',
+    resume_stacks: ['python', 'go'],
+  };
+
+  it('заголовок — должность из резюме, а не название роли', async () => {
+    renderSession(mockApi({ session: S_RESUME }));
+    expect(
+      await screen.findByRole('heading', { name: 'Интервью: Python-разработчик / python' }),
+    ).toBeInTheDocument();
+  });
+
+  it('в рельсе: роль по резюме, код — по первому языку, остальные — на вопросы', async () => {
+    renderSession(mockApi({ session: S_RESUME }));
+    expect(await screen.findByText('Python-разработчик')).toBeInTheDocument();
+    expect(screen.getByText('Ещё языки')).toBeInTheDocument();
+    expect(screen.getByText('go')).toBeInTheDocument();
+  });
+});

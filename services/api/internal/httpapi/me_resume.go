@@ -186,10 +186,12 @@ func sanitizeFileName(name string) string {
 
 // roleGuess — ответ ИИ на подбор роли и грейда по резюме.
 type roleGuess struct {
-	TrackID string        `json:"track_id"`
-	Grade   string        `json:"grade"`
-	Reason  string        `json:"reason"`
-	NewRole *models.Track `json:"new_track,omitempty"`
+	TrackID string         `json:"track_id"`
+	Grade   string         `json:"grade"`
+	Reason  string         `json:"reason"`
+	Title   string         `json:"title"`
+	Stacks  []models.Stack `json:"stacks"`
+	NewRole *models.Track  `json:"new_track,omitempty"`
 }
 
 // roleFitPrompt — системный промпт подбора: список настроенных ролей + правила
@@ -212,7 +214,7 @@ board.cases — 1-2 кейса для middle; criteria — 4-6 критерие�
 один из них «Коммуникация (ясность, структура)» с весом 0.10-0.15; тексты на русском.
 
 Ответь СТРОГО JSON без пояснений:
-{"track_id":"…","grade":"junior|middle|senior|staff","reason":"1 предложение","new_track":{…}|null
+{"track_id":"…","grade":"junior|middle|senior|staff","reason":"1 предложение","title":"…","stacks":["python","go"],"new_track":{…}|null
 
 Правила выбора:
 1) track_id — id роли из списка, если она подходит по сути задач (не по названию).
@@ -220,17 +222,33 @@ board.cases — 1-2 кейса для middle; criteria — 4-6 критерие�
    new_track — полный конфиг, описанный выше.
 3) grade — грейд, который резюме подтверждает фактами (опыт, проекты, глубина). Не завышай:
    2 года CRUD-а — middle, а не senior. Резюме пустое или нечитаемое — middle.
-4) reason — выбор по фактам резюме.`)
+4) reason — выбор по фактам резюме.
+5) title — должность так, как её видно из резюме, на русском: «Python-разработчик»,
+   «Fullstack-разработчик» (если тянет и на фронт, и на бэк), «Системный администратор».
+   Роль из списка — только про формат интервью; названием интервью она быть не обязана.
+6) stacks — языки, по которым кандидат реально писал код в опыте (не «знаком»),
+   по убыванию веса. Разрешены: go, python, shell. Спрашивать будем по каждому
+   из них, а кодить — по первому. Роль без кода — [].`)
 	return b.String()
 }
 
-// inferRole — роль и базовый грейд по резюме кандидата (ИИ). Пустой base —
-// определять было нечего (резюме нет) или ИИ не помог: тогда грейд берётся
-// дефолтный, а «шаг выше» не выдумывается.
-func (s *Server) inferRole(ctx context.Context, userID int64) (string, models.Grade) {
+// resumeProfile — что ИИ вычитал из резюме: роль, базовый грейд, должность и
+// заявленные языки. Всё, кроме TrackID, может быть пустым (нет резюме, ИИ
+// не ответил, ответ не разобрался).
+type resumeProfile struct {
+	TrackID string
+	Base    models.Grade
+	Title   string
+	Stacks  []models.Stack
+}
+
+// inferRole — роль, базовый грейд, должность и языки по резюме кандидата (ИИ).
+// Пустой Base — определять было нечего (резюме нет) или ИИ не помог: тогда
+// грейд берётся дефолтный, а «шаг выше» не выдумывается.
+func (s *Server) inferRole(ctx context.Context, userID int64) resumeProfile {
 	res, err := s.users.GetResume(ctx, userID)
 	if err != nil || res.Empty() || s.interviewer == nil {
-		return models.DefaultTrackID, ""
+		return resumeProfile{TrackID: models.DefaultTrackID}
 	}
 	list := s.tracks.List()
 	resp, err := s.interviewer.Provider().Chat(ctx, llm.Request{
@@ -243,24 +261,30 @@ func (s *Server) inferRole(ctx context.Context, userID int64) (string, models.Gr
 	})
 	if err != nil {
 		s.log.Warn("resume: ИИ не ответил — роль backend, грейд по умолчанию", "err", err)
-		return models.DefaultTrackID, ""
+		return resumeProfile{TrackID: models.DefaultTrackID}
 	}
 	var g roleGuess
 	if err := json.Unmarshal([]byte(extractJSONObject(resp.Content)), &g); err != nil {
 		s.log.Warn("resume: ответ ИИ не разобран — роль backend, грейд по умолчанию", "err", err)
-		return models.DefaultTrackID, ""
+		return resumeProfile{TrackID: models.DefaultTrackID}
 	}
 	base := models.Grade(strings.ToLower(strings.TrimSpace(g.Grade)))
 	if !base.Valid() {
 		base = ""
 	}
+	stacks := cleanStacks(g.Stacks)
+	title := strings.TrimSpace(g.Title)
 	id := strings.ToLower(strings.TrimSpace(g.TrackID))
 	if id == "" {
-		return models.DefaultTrackID, base
+		return resumeProfile{TrackID: models.DefaultTrackID, Base: base, Title: title, Stacks: stacks}
 	}
 	if t, _ := s.tracks.Get(id); t != nil {
-		s.log.Info("resume: роль по резюме", "track", id, "grade", base, "reason", g.Reason)
-		return id, base
+		if title == "" {
+			title = t.Title // должностью из резюме пренебрегать нечем
+		}
+		s.log.Info("resume: роль по резюме", "track", id, "grade", base,
+			"title", title, "stacks", joinStacks(stacks), "reason", g.Reason)
+		return resumeProfile{TrackID: id, Base: base, Title: title, Stacks: stacks}
 	}
 	if g.NewRole != nil {
 		t := *g.NewRole
@@ -268,14 +292,44 @@ func (s *Server) inferRole(ctx context.Context, userID int64) (string, models.Gr
 			t.ID = id
 		}
 		if err := s.tracks.Upsert(t); err == nil {
-			s.log.Info("resume: роль создана по резюме", "id", t.ID, "title", t.Title, "grade", base)
-			return t.ID, base
+			s.log.Info("resume: роль создана по резюме", "id", t.ID, "title", t.Title, "grade", base,
+				"stacks", joinStacks(stacks))
+			if title == "" {
+				title = t.Title
+			}
+			return resumeProfile{TrackID: t.ID, Base: base, Title: title, Stacks: stacks}
 		} else {
 			s.log.Warn("resume: сгенерированная роль не провалидировалась — backend", "id", t.ID, "err", err)
 		}
 	}
 	s.log.Info("resume: роль не определена — backend", "track_id", id)
-	return models.DefaultTrackID, base
+	return resumeProfile{TrackID: models.DefaultTrackID, Base: base, Title: title, Stacks: stacks}
+}
+
+// cleanStacks — языки из ответа ИИ в рабочий вид: нижний регистр, только
+// поддерживаемые стек-значения (go|python|shell), без повторов. Порядок ИИ
+// значим: первый — основной, по нему кодовая стадия.
+func cleanStacks(in []models.Stack) []models.Stack {
+	out := make([]models.Stack, 0, len(in))
+	seen := map[models.Stack]bool{}
+	for _, raw := range in {
+		s := models.Stack(strings.ToLower(strings.TrimSpace(string(raw))))
+		if !s.Valid() || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+// joinStacks — список языков в одну строку (логи).
+func joinStacks(st []models.Stack) string {
+	names := make([]string, len(st))
+	for i, s := range st {
+		names[i] = string(s)
+	}
+	return strings.Join(names, ",")
 }
 
 // targetGrade — цель собеседования: на шаг выше базового грейда по резюме,
