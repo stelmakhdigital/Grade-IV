@@ -277,6 +277,10 @@ export function SessionView({ id }: { id: number }) {
         </dl>
       </aside>
 
+      {/* Всё, что происходит справа от рейки, — одной колонкой: баннер паузы,
+          пульт, отчёт, диалог. См. .session-work в index.css. */}
+      <div className="session-work">
+
       {live && paused && (
         <div className="card notice" role="status" data-testid="paused-banner">
           <strong>Сессия на паузе</strong> — время не тарифицируется.
@@ -607,6 +611,7 @@ export function SessionView({ id }: { id: number }) {
           ))}
         </ol>
       </section>
+      </div>
     </main>
   );
 }

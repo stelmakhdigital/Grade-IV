@@ -427,6 +427,11 @@ describe('SessionView (WP-8)', () => {
     // paused-состояние: баннер, «Продолжить», статуса «пауза» в шапке
     const banner = await screen.findByTestId('paused-banner');
     expect(banner).toHaveTextContent('время не тарифицируется');
+    // Баннер и пульт обязаны стоять в одном потоке (.session-work): пока оба
+    // объявлялись областью work в сетке страницы, баннер рисовался поверх
+    // пульта микрофона — в jsdom геометрии нет, но структуру это сторожит.
+    expect(banner.closest('.session-work')).not.toBeNull();
+    expect(document.querySelector('.voice-panel')?.closest('.session-work')).not.toBeNull();
     expect(await screen.findByRole('button', { name: 'Продолжить' })).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Пауза' })).toBeNull());
     expect(await screen.findByText('пауза')).toBeInTheDocument();

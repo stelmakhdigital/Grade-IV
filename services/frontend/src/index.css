@@ -1523,15 +1523,13 @@ a:focus-visible {
 
 /* Диалог — под пультом микрофона, в той же колонке (фидбек 2026-11-26):
    реплики интервьюера и кандидата читают там, где ты говоришь, а не в
-   отдельной колонке с правого края экрана. Рейка стадий остаётся слева и
-   тянется на обе строки. */
+   отдельной колонке с правого края экрана. Рейка стадий остаётся слева. */
 .session-page {
   display: grid;
   grid-template-columns: var(--rail-w) minmax(0, 1fr);
   grid-template-areas:
     "head head"
-    "rail work"
-    "rail aside";
+    "rail work";
   gap: var(--s-5);
   align-items: start;
 }
@@ -1547,14 +1545,35 @@ a:focus-visible {
   grid-area: head;
 }
 
-.session-page > .notice,
-.session-page > .voice-panel {
+/* Колонка работы — один контейнер, а не горстка элементов сетки. Пока каждый
+   блок объявлялся сам, случалось следующее (замеры 2026-11-26):
+   - баннер «Сессия на паузе» и пульт микрофона оба стояли в области work и
+     рисовались друг НАД другом (оба с y=189);
+   - отчёту область не объявлена, он уезжал в имплицитную строку под рейку и
+     сжимался до её ширины;
+   - диалог в отдельной строке сетки висел ниже рейки: рейка стадий (336 px)
+     растягивала строку работы, и между пультом и диалогом при зазоре сетки в
+     24 px оставалось 75 px пустоты.
+   Внутри колонки ряды считает обычный поток: между блоками ровно --s-5. */
+.session-page > .session-work {
   grid-area: work;
+  min-width: 0;
+  display: grid;
+  gap: var(--s-5);
+}
+
+/* Карточки внутри колонки не добавляют свой margin-top: ряд уже задаёт gap,
+   иначе отступы сложились бы вдвое. */
+.session-work > * {
+  margin-top: 0;
+}
+
+.session-work > .voice-panel,
+.session-work > .notice {
   min-width: 0;
 }
 
-.session-page > .transcript {
-  grid-area: aside;
+.session-work > .transcript {
   min-width: 0;
   /* Высоту держим: без неё карточка транскрипта уползала вместе со страницей,
      и кнопки микрофона съезжали с экрана посреди интервью. Список скроллится
@@ -1564,7 +1583,7 @@ a:focus-visible {
   flex-direction: column;
 }
 
-.session-page > .transcript .transcript-list {
+.session-work > .transcript .transcript-list {
   flex: 1;
   min-height: 0;
   max-height: none;
@@ -1688,43 +1707,11 @@ a:focus-visible {
   margin-bottom: 0;
 }
 
-/* Кабинет: слева то, что делают (старт интервью), справа то, что копят
-   (прогресс), история — на всю ширину: это таблица, ей нужно место. */
-@media (min-width: 1040px) {
-  .cabinet {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 380px);
-    gap: var(--s-5) var(--s-6);
-    align-items: start;
-  }
-
-  .cabinet > .header {
-    grid-column: 1 / -1;
-  }
-
-  .cabinet > section.card {
-    margin-top: 0;
-  }
-
-  /* «Новое интервью» — на всю ширину: в колонке 1fr карточка обрывалась в
-     380 px от правого края страницы, и на широком экране это читалось как
-     «блок прижат слева, справа пустота» (фидбек 2026-11-26). Прогресс уехал
-     в ряд к истории — ему там место: он про те же интервью. */
-  .cabinet > section.card:nth-of-type(1) {
-    grid-column: 1 / -1;
-    grid-row: 2;
-  }
-
-  .cabinet > .trend-card {
-    grid-column: 2;
-    grid-row: 3;
-  }
-
-  .cabinet > section.card:last-child {
-    grid-column: 1;
-    grid-row: 3;
-  }
-}
+/* Кабинет на широком экране — одна колонка на всю ширину страницы (фидбек
+   2026-11-26). Двухколоночный вариант («старт интервью» + «прогресс» сбоку,
+   история под ними) читался как сломанная вёрстка: карточка обрывалась в
+   380 px от правого края страницы, а ниже короткого «прогресса» висела
+   пустота. Расстояния между карточками держит .card { margin-top }. */
 
 .start-form {
   /* Форму больше не режем по 860 px: карточка «Новое интервью» в широком
@@ -1754,8 +1741,7 @@ a:focus-visible {
     grid-template-areas:
       "head"
       "rail"
-      "work"
-      "aside";
+      "work";
   }
 
   .session-rail {
