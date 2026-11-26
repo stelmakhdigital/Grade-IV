@@ -1,8 +1,8 @@
 package interviewer
 
 // A/B-оценка промптов живым LLM (T-20261009121144). Опционально: запускается
-// только с LLM_EVAL=1 (и LLM_EVAL_URL/LLM_EVAL_MODEL, по умолчанию узел
-// 192.168.1.114:8000). Нормальный сьют (без env) не затрагивается.
+// только с LLM_EVAL=1 и требует LLM_EVAL_URL (и LLM_EVAL_MODEL) — адреса
+// чужих узлов в репозитории не держим. Нормальный сьют (без env) не затрагивается.
 //
 // Методика: корпус сценариев (фиксированный вход) → генерация реплик A и B
 // (temperature как в проде) → LLM-judge по 4 критериям 1–5.
@@ -105,7 +105,7 @@ func TestABEvalLLM(t *testing.T) {
 	}
 	base := os.Getenv("LLM_EVAL_URL")
 	if base == "" {
-		base = "http://192.168.1.114:8000/v1"
+		t.Skip("LLM_EVAL=1, но LLM_EVAL_URL не задан — адрес LLM-узла не держим в репозитории")
 	}
 	model := os.Getenv("LLM_EVAL_MODEL")
 	if model == "" {

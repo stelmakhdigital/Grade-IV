@@ -8,8 +8,10 @@
 #   bash scripts/run-all.sh restart # stop + start
 #
 # Переменные окружения (опционально, есть дефолты):
-#   LLM_BASE_URL  (дефолт http://192.168.1.114:8080/v1) — LLM-узел (OpenAI-совместимый;
-#                 можно без /v1 — нормализуется; модель знать не обязательно)
+#   LLM_BASE_URL  (дефолт http://localhost:8300/v1 — тот же, что у api в
+#                 internal/config/config.go) — LLM-узел (OpenAI-совместимый;
+#                 можно без /v1 — нормализуется; модель знать не обязательно).
+#                 Узел в другой машине: LLM_BASE_URL=http://<узел>:<порт>/v1 make run-all
 #   LLM_MODEL     (пусто → авто-детект по GET {LLM_BASE_URL}/models)
 #   LLM_MOCK      (дефолт 0; 1 — без LLM-узла, эхо-интервьюер)
 #   VOICE_STT_PROVIDER (дефолт gigaam — см. AGENTS.md; faster-whisper | fake)
@@ -42,7 +44,7 @@ if ! command -v go >/dev/null; then
   exit 1
 fi
 
-LLM_BASE_URL="${LLM_BASE_URL:-http://192.168.1.114:8080/v1}"
+LLM_BASE_URL="${LLM_BASE_URL:-http://localhost:8300/v1}"
 # LLM_MODEL: имя модели можно не знать — пусто → api сам спросит {LLM_BASE_URL}/models.
 LLM_MODEL="${LLM_MODEL:-}"
 LLM_MOCK="${LLM_MOCK:-0}"
