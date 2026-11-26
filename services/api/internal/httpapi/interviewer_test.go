@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 	"nhooyr.io/websocket"
@@ -37,30 +36,14 @@ func newInterviewEnv(t *testing.T) *interviewEnv {
 	if os.Getenv("VOCE_TEST_LOG") == "1" {
 		discardLog = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
-	cfg := &config.Config{
-		Addr:           ":0",
-		DatabaseURL:    "sqlite://:memory:",
-		JWTSecret:      "test-secret",
-		JWTExpiryHours: 1,
-		SilenceNudgeS:  1,
-		SandboxURL:     "http://127.0.0.1:1", // нет sandbox: задачи не выдаются
+	srv, mock, ts, _ := newTestServerFull(t, discardLog, nil, func(cfg *config.Config) {
+		cfg.SilenceNudgeS = 1
+		cfg.SandboxURL = "http://127.0.0.1:1" // нет sandbox: задачи не выдаются
 		// /metrics закрыт basic-auth (как в проде); тесты метрик читают его
 		// с этими учетными данными.
-		MetricsUser:     "prom",
-		MetricsPassword: "test-metrics",
-	}
-	database, dialect, err := db.Open(cfg.DatabaseURL)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(context.Background(), database, dialect); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	mock := llm.NewMockProvider()
-	srv := NewWithLLM(cfg, database, dialect, discardLog, mock)
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
+		cfg.MetricsUser = "prom"
+		cfg.MetricsPassword = "test-metrics"
+	}, nil)
 
 	e := &interviewEnv{ts: ts, srv: srv, mock: mock}
 	code, m := doJSON(t, "POST", ts.URL+"/api/v1/auth/register",

@@ -2,10 +2,8 @@ package httpapi
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,32 +11,11 @@ import (
 	"testing"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 )
 
 func newTestEnv(t *testing.T) *httptest.Server {
 	t.Helper()
-	cfg := &config.Config{
-		Addr:           ":0",
-		DatabaseURL:    "sqlite://:memory:",
-		JWTSecret:      "test-secret",
-		JWTExpiryHours: 1,
-		ResumeDir:      t.TempDir(), // файлы резюме не должны попадать в рабочее дерево
-	}
-	database, dialect, err := db.Open(cfg.DatabaseURL)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(context.Background(), database, dialect); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	logger := slog.New(slog.DiscardHandler)
-	srv := NewWithLLM(cfg, database, dialect, logger, llm.NewMockProvider())
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	return ts
+	return newTestServer(t, nil)
 }
 
 func doJSON(t *testing.T, method, url string, body any, headers map[string]string) (int, map[string]any) {
@@ -177,21 +154,6 @@ func TestDebugMicReportFlag(t *testing.T) {
 	}
 
 	// С флагом — эндпоинт жив, файл пишется в FOR_RUN/debug/ (относительно cwd).
-	cfg := &config.Config{
-		Addr:           ":0",
-		DatabaseURL:    "sqlite://:memory:",
-		JWTSecret:      "test-secret",
-		JWTExpiryHours: 1,
-		DebugEndpoints: true,
-	}
-	database, dialect, err := db.Open(cfg.DatabaseURL)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(context.Background(), database, dialect); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -201,9 +163,7 @@ func TestDebugMicReportFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(wd) })
-	srv := NewWithLLM(cfg, database, dialect, slog.New(slog.DiscardHandler), llm.NewMockProvider())
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
+	ts := newTestServer(t, func(cfg *config.Config) { cfg.DebugEndpoints = true })
 
 	code, _ := doJSON(t, "POST", ts.URL+"/debug/mic-report", map[string]any{"kind": "test"}, map[string]string{"Origin": "http://localhost:5173"})
 	if code != http.StatusNoContent {

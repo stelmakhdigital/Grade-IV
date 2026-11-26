@@ -3,10 +3,8 @@ package httpapi
 import (
 	"archive/zip"
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 )
@@ -75,21 +72,10 @@ func putResume(t *testing.T, url, token, about, fileName string, file []byte) (i
 // newResumeEnv — сервер с resumes-каталогом во временной папке и ответом ИИ на подбор роли.
 func newResumeEnv(t *testing.T, roleAnswer string) (*httptest.Server, string) {
 	t.Helper()
-	dir := t.TempDir()
-	cfg := &config.Config{
-		Addr: ":0", DatabaseURL: "sqlite://:memory:", JWTSecret: "test-secret",
-		JWTExpiryHours: 1, ResumeDir: dir + "/resumes",
+	_, mock, ts, _ := newTestServerFull(t, discardLogger(), nil, func(cfg *config.Config) {
 		// Роли — дефолтный набор (backend/sysadmin/pm), файл не читаем из дерева.
-	}
-	database, dialect, err := db.Open(cfg.DatabaseURL)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(context.Background(), database, dialect); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	mock := llm.NewMockProvider()
+		cfg.ResumeDir = t.TempDir() + "/resumes"
+	}, nil)
 	if roleAnswer != "" {
 		mock.SetResponder(func(req llm.Request) (string, error) {
 			for _, m := range req.Messages {
@@ -100,9 +86,6 @@ func newResumeEnv(t *testing.T, roleAnswer string) (*httptest.Server, string) {
 			return "ok", nil
 		})
 	}
-	srv := NewWithLLM(cfg, database, dialect, slog.New(slog.DiscardHandler), mock)
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
 	_, reg := doJSON(t, "POST", ts.URL+"/api/v1/auth/register",
 		map[string]any{"email": "cand@example.com", "password": "Test12345"}, nil)
 	tok, _ := reg["token"].(string)

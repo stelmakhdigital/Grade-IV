@@ -2,17 +2,12 @@ package httpapi
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 )
@@ -240,18 +235,7 @@ func doJSONRaw(t *testing.T, method, url string, body any, headers map[string]st
 // TestTrackGenerate — spec-22: черновик роли по описанию (ИИ). Мок возвращает
 // валидный JSON-черновик; черновик НЕ сохраняется; не-админ → 403.
 func TestTrackGenerate(t *testing.T) {
-	cfg := &config.Config{
-		Addr: ":0", DatabaseURL: "sqlite://:memory:", JWTSecret: "test-secret", JWTExpiryHours: 1,
-	}
-	database, dialect, err := db.Open(cfg.DatabaseURL)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(context.Background(), database, dialect); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	mock := llm.NewMockProvider()
+	_, mock, ts, _ := newTestServerFull(t, discardLogger(), nil, nil, nil)
 	mock.SetResponder(func(req llm.Request) (string, error) {
 		for _, msg := range req.Messages {
 			if msg.Role == llm.RoleSystem && strings.Contains(msg.Content, "конфигурируешь роль") {
@@ -260,10 +244,6 @@ func TestTrackGenerate(t *testing.T) {
 		}
 		return "не туда", nil
 	})
-	logger := slog.New(slog.DiscardHandler)
-	srv := NewWithLLM(cfg, database, dialect, logger, mock)
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
 
 	// Первый пользователь = админ.
 	_, reg := doJSON(t, "POST", ts.URL+"/api/v1/auth/register",

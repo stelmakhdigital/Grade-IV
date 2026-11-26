@@ -9,14 +9,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/voicesvc"
 	"nhooyr.io/websocket"
@@ -81,26 +79,7 @@ func TestSessionPauseResumeActions(t *testing.T) {
 // эквивалентно fake clock из engine_test.go на HTTP-уровне).
 func newTestEnvShortPauseTimeout(t *testing.T) *httptest.Server {
 	t.Helper()
-	cfg := &config.Config{
-		Addr:           ":0",
-		DatabaseURL:    "sqlite://:memory:",
-		JWTSecret:      "test-secret",
-		JWTExpiryHours: 1,
-		PauseTimeoutS:  1,
-	}
-	database, dialect, err := db.Open(cfg.DatabaseURL)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(context.Background(), database, dialect); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	logger := slog.New(slog.DiscardHandler)
-	srv := NewWithLLM(cfg, database, dialect, logger, llm.NewMockProvider())
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	return ts
+	return newTestServer(t, func(cfg *config.Config) { cfg.PauseTimeoutS = 1 })
 }
 
 // TestSessionPauseTimeoutResumeAborted — пауза дольше порога: resume прерывает

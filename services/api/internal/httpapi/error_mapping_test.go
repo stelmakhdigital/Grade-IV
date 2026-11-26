@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"errors"
-	"log/slog"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -55,7 +54,7 @@ func TestWriteSessionEngineErrorStatuses(t *testing.T) {
 	}
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()
-		s := &Server{log: slog.New(slog.DiscardHandler)}
+		s := &Server{log: discardLogger()}
 		s.writeSessionEngineError(rec, tc.err)
 		if rec.Code != tc.want {
 			t.Fatalf("%v: HTTP %d, want %d", tc.err, rec.Code, tc.want)

@@ -4,19 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 )
-
-func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 // runsEnv — окружение с прямым доступом к движку (для перехода в Live-Code) и mock-sandbox.
 type runsEnv struct {
@@ -28,28 +22,7 @@ type runsEnv struct {
 
 func newRunsEnv(t *testing.T, sandboxHandler http.HandlerFunc) *runsEnv {
 	t.Helper()
-	sandbox := httptest.NewServer(sandboxHandler)
-	t.Cleanup(sandbox.Close)
-
-	cfg := &config.Config{
-		Addr:           ":0",
-		DatabaseURL:    "sqlite://:memory:",
-		JWTSecret:      "test-secret",
-		JWTExpiryHours: 1,
-		SandboxURL:     sandbox.URL,
-	}
-	database, dialect, err := db.Open(cfg.DatabaseURL)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(context.Background(), database, dialect); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	logger := discardLogger()
-	srv := NewWithLLM(cfg, database, dialect, logger, llm.NewMockProvider())
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
+	srv, _, ts, _ := newTestServerFull(t, discardLogger(), sandboxHandler, nil, nil)
 
 	e := &runsEnv{ts: ts, server: srv}
 

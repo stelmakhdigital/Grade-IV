@@ -10,10 +10,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"math"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
@@ -21,10 +19,6 @@ import (
 	"time"
 
 	"nhooyr.io/websocket"
-
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 )
 
 const (
@@ -49,23 +43,11 @@ func loadChunkPCM() []byte {
 func TestLoadWS50Sessions(t *testing.T) {
 	// Свой env (не newTestEnv): нужен доступ к Engine().Run — в проде тик-цикл
 	// запускает cmd/api, а timer-сообщения приходят только от него.
-	cfg := &config.Config{
-		Addr: ":0", DatabaseURL: "sqlite://:memory:", JWTSecret: "test-secret", JWTExpiryHours: 1,
-	}
-	database, dialect, err := db.Open(cfg.DatabaseURL)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	if err := db.Migrate(t.Context(), database, dialect); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	srv := NewWithLLM(cfg, database, dialect, slog.New(slog.DiscardHandler), llm.NewMockProvider())
-	// 50 регистраций с одного адреса — это тестовый трафик, а не фарм
-	// аккаунтов: боевой лимит регистрации тут измерял бы транспорт, а не его.
-	srv.registerLimit = newRateLimiter(1000, time.Hour)
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
+	srv, _, ts, _ := newTestServerFull(t, discardLogger(), nil, nil, func(s *Server) {
+		// 50 регистраций с одного адреса — это тестовый трафик, а не фарм
+		// аккаунтов: боевой лимит регистрации тут измерял бы транспорт, а не его.
+		s.registerLimit = newRateLimiter(1000, time.Hour)
+	})
 
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
