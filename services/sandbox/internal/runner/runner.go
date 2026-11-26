@@ -7,7 +7,7 @@
 //     (--network=none, --cpus=1, --memory=512m, --pids-limit=128, --read-only,
 //     --tmpfs, --user 1000:1000).
 //
-// Отклонение от ADR-003 (зафиксировано в PROJECT_MEMORY): WP-6 — контейнер
+// Отклонение от ADR-003 (зафиксировано в docs/DECISIONS.md): WP-6 — контейнер
 // на каждый run (упрощение MVP); long-lived контейнер на сессию — бэклог Operations.
 package runner
 

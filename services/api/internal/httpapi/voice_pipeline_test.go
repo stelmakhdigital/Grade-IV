@@ -388,16 +388,6 @@ func TestBargeIn_ShortUtteranceDoesNotInterrupt(t *testing.T) {
 	}
 }
 
-// containsLine — есть ли строка с префиксом в тексте (по строкам).
-func containsLine(s, prefix string) bool {
-	for _, line := range splitLines(s) {
-		if len(line) >= len(prefix) && line[:len(prefix)] == prefix {
-			return true
-		}
-	}
-	return false
-}
-
 func splitLines(s string) []string {
 	var out []string
 	cur := 0

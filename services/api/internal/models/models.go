@@ -80,7 +80,7 @@ const (
 	StatusAborted  Status = "aborted"
 )
 
-// SessionDurationS — длительность сессии по грейду, с (SRS US-2).
+// SessionDurationS — длительность сессии по грейду, с.
 func SessionDurationS(g Grade) int {
 	switch g {
 	case GradeJunior:
@@ -197,7 +197,7 @@ type Whiteboard struct {
 	UpdatedAt time.Time
 }
 
-// Report — итоговый отчёт (критерии — SRS §12).
+// Report — итоговый отчёт (критерии — docs/ARCHITECTURE.md §5.5).
 type Report struct {
 	ID                  int64
 	SessionID           int64

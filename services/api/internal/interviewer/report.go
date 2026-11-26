@@ -66,7 +66,7 @@ type ProgressEntry struct {
 }
 
 // criteriaFor — критерии отчёта (spec-18/Ф2): из трека, при nil — хардкод
-// по грейду (REQUIREMENTS.md §12, v1.1) для сессий без трека/движка без
+// по грейду (исторический сид весов, до ролевого движка) для сессий без трека/движка без
 // хранилища. Веса трека нормализованы при валидации.
 func criteriaFor(sess models.Session, track *models.Track) []CriterionScore {
 	if track == nil {
@@ -79,7 +79,7 @@ func criteriaFor(sess models.Session, track *models.Track) []CriterionScore {
 	return out
 }
 
-// criteriaForGrade — критерии и веса по грейду (REQUIREMENTS.md §12, v1.1).
+// criteriaForGrade — критерии и веса по грейду (исторический сид, до ролевого движка).
 func criteriaForGrade(grade models.Grade) []CriterionScore {
 	type def struct {
 		name   string

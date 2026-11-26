@@ -43,7 +43,7 @@ func (e *Engine) tick(now time.Time) {
 		if now.Sub(rt.lastPersist) >= TimerBroadcast {
 			rt.lastPersist = now
 			// spec-14/A2: снимаем значение ПОД замком — горутина не должна читать
-			// rt.active без connMu (гонка записи/чтения float64, тарификация).
+			// rt.active без connMu (гонка записи/чтения float64, учёт времени).
 			active := rt.active
 			go func() {
 				_ = e.store.PersistActiveSeconds(context.Background(), id, active)

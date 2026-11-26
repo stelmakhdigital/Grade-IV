@@ -1,5 +1,6 @@
 // Command api — HTTP-сервис «Грейд»: сессии, аутентификация, оркестрация (ARCHITECTURE.md).
-// WP-1: каркас + health; WP-2: модель данных + auth. Дальнейшие WP — см. roadmap.md.
+// WP-1: каркас + health; WP-2: модель данных + auth. История итераций —
+// docs/history/ITERATIONS.md.
 package main
 
 import (

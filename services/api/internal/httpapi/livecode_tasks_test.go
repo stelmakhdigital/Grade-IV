@@ -40,14 +40,6 @@ func sandboxTasksHandler(pools map[string][]map[string]any) http.HandlerFunc {
 	}
 }
 
-func idsOf(list []map[string]any) []string {
-	out := make([]string, 0, len(list))
-	for _, t := range list {
-		out = append(out, fmt.Sprint(t["id"]))
-	}
-	return out
-}
-
 func TestPickLiveCodeTasks(t *testing.T) {
 	pool := make([]liveCodeTask, 0, 5)
 	for i := 0; i < 5; i++ {

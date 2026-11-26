@@ -59,27 +59,9 @@ func (s *Server) orchVoice() voiceorchestrator.Voice {
 
 func splitSentences(text string) []string { return voiceorchestrator.SplitSentences(text) }
 
-func splitSentencesTail(text string) ([]string, string) {
-	return voiceorchestrator.SplitSentencesTail(text)
-}
-
 func splitForTTS(text string) []string { return voiceorchestrator.SplitForTTS(text) }
 
-func splitForTTSStreaming(text string) ([]string, string) {
-	return voiceorchestrator.SplitForTTSStreaming(text)
-}
-
-func splitClauses(part string) []string { return voiceorchestrator.SplitClauses(part) }
-
-func splitClausesWithTail(part string) ([]string, string) {
-	return voiceorchestrator.SplitClausesWithTail(part)
-}
-
-func hasWordChar(s string) bool { return voiceorchestrator.HasWordChar(s) }
-
 func ttsGap(prev string) int { return voiceorchestrator.TTSGap(prev) }
-
-func isUpperNext(text string, i int) bool { return voiceorchestrator.IsUpperNext(text, i) }
 
 // preSTTResult — предварительное распознавание (pre-STT): запущено на
 // текущем буфере реплики при первой тишине (energy-путь: PreSilence,

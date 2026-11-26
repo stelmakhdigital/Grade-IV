@@ -361,5 +361,5 @@ func (c *Client) logf(format string, args ...any) {
 	slog.Debug(format, args...)
 }
 
-// DefaultTimeout — верхний предел хода интервьюера (SRS: p95 хода < 4 с; запас на 4B-модель CPU).
+// DefaultTimeout — верхний предел хода интервьюера: цель p95 < 4 с, с запасом на 4B-модель на CPU.
 const DefaultTimeout = 60 * time.Second

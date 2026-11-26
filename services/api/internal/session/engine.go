@@ -13,13 +13,13 @@ import (
 	"nhooyr.io/websocket"
 )
 
-// Ключевые пороги (SRS §7: численные пороги конфигурируемые).
+// Ключевые пороги — численные, конфигурируемы.
 const (
 	// TimerBroadcast — период отправки timer-сообщений по WS (spec: 1 раз/5 с).
 	TimerBroadcast = 5 * time.Second
 	// tickPeriod — период внутреннего тика таймера.
 	tickPeriod = time.Second
-	// DefaultPauseTimeout — обрыв без возобновления дольше порога → финализация (SRS §7).
+	// DefaultPauseTimeout — обрыв без возобновления дольше порога → финализация.
 	DefaultPauseTimeout = 30 * time.Minute
 )
 
@@ -77,7 +77,7 @@ func (rt *runtime) stageProgram() []models.Stage {
 	return stagesForTrack(rt.track, rt.grade)
 }
 
-// Engine — оркестратор сессий: машина состояний, тарификация, таймер, WS-регистрация.
+// Engine — оркестратор сессий: машина состояний, учёт активного времени, таймер, WS-регистрация.
 type Engine struct {
 	store     *db.SessionStore
 	users     *db.UserStore
@@ -110,7 +110,7 @@ func WithNow(f func() time.Time) Opt { return func(e *Engine) { e.now = f } }
 // s == 0 — дефолт: лимит по грейду (models.SessionDurationS).
 func WithSessionLimit(s int) Opt { return func(e *Engine) { e.sessionLimitS = s } }
 
-// WithPauseTimeout задаёт порог «обрыв без возобновления» (SRS §7).
+// WithPauseTimeout задаёт порог «обрыв без возобновления».
 func WithPauseTimeout(d time.Duration) Opt {
 	return func(e *Engine) {
 		if d > 0 {

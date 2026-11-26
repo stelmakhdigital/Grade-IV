@@ -33,7 +33,7 @@ type Config struct {
 	JWTSecret      string // секрет подписи JWT (JWT_SECRET)
 	Env            string // среда: dev (default) | prod (APP_ENV); в prod dev-секрет JWT запрещён
 	JWTExpiryHours int    // время жизни токена, ч (JWT_EXPIRY_HOURS)
-	PauseTimeoutS  int    // пауза дольше порога → aborted, с (SESSION_PAUSE_TIMEOUT_S, SRS §7)
+	PauseTimeoutS  int    // пауза дольше порога → aborted, с (SESSION_PAUSE_TIMEOUT_S)
 	// ResumeDir — каталог файлов резюме кандидатов (RESUME_DIR, def ./data/resumes).
 	ResumeDir string
 	// SessionLimitS — лимит длительности сессии (SESSION_LIMIT_S):

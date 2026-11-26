@@ -1,8 +1,9 @@
-// Package session — машина состояний сессии и движок тарификации (WP-3, ARCHITECTURE.md §4, SRS §7).
+// Package session — машина состояний сессии и учёт активного времени
+// (WP-3, docs/ARCHITECTURE.md §4 и §5.2).
 //
 // Стадии: voice → livecode → [design] → report.
 // Стадия System Design входит в программу грейдов Middle/Senior/Staff;
-// у Junior программа: voice → livecode → report (SRS US-2).
+// у Junior программа: voice → livecode → report.
 //
 // Статусы: active ↔ paused; финальные — finished (успешное завершение,
 // включая выход на стадию report) и aborted (принудительное завершение:

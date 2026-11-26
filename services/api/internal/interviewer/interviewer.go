@@ -327,7 +327,7 @@ func (i *Interviewer) OnCodeRun(ctx context.Context, sessionID int64, summary ma
 // designReviewMessage — user-сообщение ревью схемы System Design (OnDesignSubmit).
 // Формат-контракт (T-20261009152316): ревью будет ОЗВУЧЕНО TTS — 3–5 предложений
 // живой речью, без списков/нумерации (без ограничения модель отдаёт ~150 слов
-// со структурой — voice_fit=2 по A/B-оценке, prompts-ab-2026-10-09.md).
+// со структурой — voice_fit=2 по A/B-прогону 2026-10-09).
 func designReviewMessage(structureRaw string) string {
 	return "Кандидат представил схему System Design. Структура (JSON: блоки и связи): " +
 		structureRaw +

@@ -364,7 +364,7 @@ func (e *Engine) reconstructFromStore(id int64) *runtime {
 	return rt
 }
 
-// Pause ставит активную сессию в паузу (тарификация останавливается).
+// Pause ставит активную сессию в паузу (учёт активного времени останавливается).
 func (e *Engine) Pause(id int64) (*Snapshot, error) { return e.pause(id, "user") }
 
 func (e *Engine) pause(id int64, reason string) (*Snapshot, error) {
@@ -438,8 +438,7 @@ func (e *Engine) Resume(id int64) (*Snapshot, error) {
 }
 
 // Finish завершает сессию по инициативе кандидата: переход на стадию report
-// и финализация тарификации (SRS §7: тарификация — до сгенерированного отчёта,
-// в MVP финализация совпадает с выходом на report).
+// и итоговый учёт активного времени (в MVP он совпадает с выходом на report).
 func (e *Engine) Finish(id int64) (*Snapshot, error) { return e.finish(id, true, "user") }
 
 func (e *Engine) finish(id int64, byUser bool, reason string) (*Snapshot, error) {
@@ -498,8 +497,8 @@ func (e *Engine) finish(id int64, byUser bool, reason string) (*Snapshot, error)
 	return e.snapshotLocked(rt)
 }
 
-// abort — принудительное завершение (пауза дольше порога); тарифицируется
-// фактическое активное время (SRS §7).
+// abort — принудительное завершение (пауза дольше порога); учитывается
+// фактическое активное время.
 func (e *Engine) abort(id int64, reason string) (*Snapshot, error) {
 	rt := e.rt(id)
 	if rt == nil {

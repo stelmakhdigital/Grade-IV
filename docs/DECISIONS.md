@@ -35,6 +35,10 @@
 Якоря: `services/sandbox/cmd/sandbox/main.go`, `services/sandbox/internal/runner/runner.go`,
 `infra/docker-compose.yml` (сервис `docker-proxy`).
 
+Отклонение, зафиксированное здесь: с WP-6 контейнер поднимается на каждый запуск
+(`docker run --rm`), а не живёт долго на всю сессию — упрощение MVP. Долгоживущий
+контейнер на сессию остаётся задачей эксплуатации; `runner.go` ссылается на этот абзац.
+
 ## ADR-004 — схема System Design хранится как JSON холста, а не как картинка
 
 Клиент рисует в Excalidraw, на сервер уходит структура холста (узлы, связи,
