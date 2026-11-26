@@ -13,7 +13,10 @@ function mockApi(opts: { me?: unknown; sessions?: unknown } = {}) {
     if (url.includes('/auth/me')) {
       return json(opts.me !== undefined ? 200 : 401, opts.me ?? { code: 'unauthorized', msg: 'нет' });
     }
-    if (url.includes('/sessions')) {
+    // Список — ровно /sessions (можно с ?query). /sessions/{id} и его
+    // /report — не он: иначе в ReportView приходит массив сессий и он падает
+    // на criteria.map (регресс мока в b2734cf, валил CI на master).
+    if (/\/sessions(\?|$)/.test(url)) {
       return json(200, opts.sessions ?? []);
     }
     return json(404, {});
