@@ -20,9 +20,15 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+// passwordCost — стоимость bcrypt. DefaultCost (10) сегодня — это ~60 мс на
+// проверку и в 4 раза дешевле по цене перебора, чем ориентир OWASP (≥12).
+// Старые хеши остаются валидными: стоимость читается из самого хеша, поэтому
+// миграция не нужна — новые пароли станут дороже сами.
+const passwordCost = 12
+
 // HashPassword хеширует пароль (bcrypt).
 func HashPassword(pw string) (string, error) {
-	b, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+	b, err := bcrypt.GenerateFromPassword([]byte(pw), passwordCost)
 	if err != nil {
 		return "", fmt.Errorf("bcrypt hash: %w", err)
 	}

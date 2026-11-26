@@ -46,10 +46,15 @@ beforeEach(() => {
   setToken('tok');
   FakeWebSocket.instances = [];
   vi.stubGlobal('WebSocket', FakeWebSocket);
+  // WS-connect спрашивает одноразовый тикет (секрет в URL больше не ездит).
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ ticket: 'tik' }) })),
+  );
 });
 
 describe('SessionWS (WP-8)', () => {
-  it('URL: /ws/session/{id}?token=… и binaryType=arraybuffer', async () => {
+  it('URL: /ws/session/{id}?ticket=… и binaryType=arraybuffer', async () => {
     const ws = new SessionWS();
     ws.connect(42, {
       onMessage: () => {},
@@ -57,8 +62,20 @@ describe('SessionWS (WP-8)', () => {
     });
     await flush();
     const fake = FakeWebSocket.instances[0];
-    expect(fake.url).toContain('/ws/session/42?token=tok');
+    expect(fake.url).toContain('/ws/session/42?ticket=tik');
+    // JWT в query быть не может: он остаётся в access-логе прокси до конца TTL.
+    expect(fake.url).not.toContain('token=tok');
     expect(fake.binaryType).toBe('arraybuffer');
+  });
+
+  it('тикет не выдали — не подключаемся и сообщаем об ошибке', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    let closed: string | null = null;
+    const ws = new SessionWS();
+    ws.connect(7, { onMessage: () => {}, onAudio: () => {}, onClose: (r) => (closed = r) });
+    await flush();
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    expect(closed).toBe('error');
   });
 
   it('JSON-сообщения: timer/transcript/error доставляются в onMessage', async () => {

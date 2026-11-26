@@ -241,3 +241,31 @@ func writeMock(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
+
+// TestRunsThrottle: прогоны сериализованы семафором в песочнице, поэтому
+// кандидат, крутящий «Запустить тесты» подряд, занимает очередь у всех
+// остальных (тёплый go test 1.4 с, холодный 43 с). Сессия выше лимита получает
+// 429, а соседняя сессия того же пользователя — нет (ключ — сессия).
+func TestRunsThrottle(t *testing.T) {
+	e := newRunsEnv(t, func(w http.ResponseWriter, r *http.Request) {
+		writeMock(w, http.StatusOK, map[string]any{
+			"exit_code": 0, "stdout": "ok", "stderr": "", "duration_ms": 1,
+			"passed": true, "tests": []map[string]any{},
+		})
+	})
+	e.toLiveCode(t)
+	e.assignTasks(t, "go-two-sum")
+	u := fmt.Sprintf("%s/api/v1/sessions/%d/runs", e.ts.URL, e.session)
+	h := map[string]string{"Authorization": "Bearer " + e.token}
+	body := map[string]any{"files": map[string]string{"main.go": "package main"}, "task_id": "go-two-sum"}
+
+	for i := 0; i < 6; i++ {
+		if code, m := doJSON(t, "POST", u, body, h); code != http.StatusOK {
+			t.Fatalf("прогон %d: %d (%v)", i+1, code, m)
+		}
+	}
+	code, m := doJSON(t, "POST", u, body, h)
+	if code != http.StatusTooManyRequests {
+		t.Fatalf("седьмой прогон: %d (%v), хочу 429", code, m)
+	}
+}

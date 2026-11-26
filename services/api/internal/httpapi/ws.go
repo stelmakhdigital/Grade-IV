@@ -40,12 +40,17 @@ type wsMessage struct {
 // (proxy_set_header Host $host): браузерный Origin «http://host:8081» не
 // совпадал с «host», апгрейд отваливался с 403 — голосовая стадия не
 // начиналась, в логе не было ни строки. Без проверки безопасно: апгрейд
-// авторизуется одноразовым тикетом или JWT из query (wsAuthUser), cookie api
-// не раздаёт, поэтому межсайтовой запрос чужую сессию не подхватит.
+// авторизуется одноразовым тикетом (или JWT в заголовке для не-браузерных
+// клиентов), cookie api не раздаёт, поэтому межсайтовой запрос чужую сессию не подхватит.
 var wsAcceptOptions = &websocket.AcceptOptions{InsecureSkipVerify: true}
 
-// wsAuthUser — аутентификация WS-upgrade: одноразовый тикет (spec-14/#12,
-// приоритет — JWT в query попадает в логи прокси) либо JWT из query/заголовка.
+// wsAuthUser — аутентификация WS-upgrade: одноразовый тикет (spec-14/#12) либо
+// JWT в заголовке Authorization (не-браузерные клиенты, тесты).
+//
+// JWT из query больше не принимается совсем: токен в URL оседает в access-логе
+// caddy/nginx (пишется полный URL) и в истории браузера, а живёт он до конца
+// TTL — то есть любой, кто читает логи, получает чужой аккаунт. Тикет ровно для
+// этого и вводили, а fallback на «?token=» обходилась первая же сетевая ошибка.
 func (s *Server) wsAuthUser(r *http.Request) (int64, error) {
 	if ticket := r.URL.Query().Get("ticket"); ticket != "" {
 		if id, ok := s.wsTickets.consume(ticket); ok {
@@ -53,12 +58,9 @@ func (s *Server) wsAuthUser(r *http.Request) (int64, error) {
 		}
 		return 0, errors.New("тикет недействителен или уже использован")
 	}
-	token := r.URL.Query().Get("token")
-	if token == "" {
-		h := r.Header.Get("Authorization")
-		if strings.HasPrefix(h, "Bearer ") {
-			token = strings.TrimPrefix(h, "Bearer ")
-		}
+	token := ""
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		token = strings.TrimPrefix(h, "Bearer ")
 	}
 	if token == "" {
 		return 0, errors.New("нет токена")

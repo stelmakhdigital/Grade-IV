@@ -30,8 +30,9 @@ func TestSessionWSUpgradeBehindProxy(t *testing.T) {
 	if _, err := rand.Read(key); err != nil {
 		t.Fatalf("ключ кадра: %v", err)
 	}
-	req := fmt.Sprintf("GET /ws/session/%d?token=%s HTTP/1.1\r\n"+
+	req := fmt.Sprintf("GET /ws/session/%d HTTP/1.1\r\n"+
 		"Host: grade.internal\r\n"+
+		"Authorization: Bearer %s\r\n"+
 		"Origin: http://grade.internal:8081\r\n"+
 		"Upgrade: websocket\r\nConnection: Upgrade\r\n"+
 		"Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n",

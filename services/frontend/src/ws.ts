@@ -70,18 +70,16 @@ export class SessionWS {
   private hadError = false;
 
   /**
-   * URL WS-upgrade: одноразовый тикет (spec-14/#12) — секрет больше не в
-   * query-параметре (утечка в логи прокси/сервера). Fallback на JWT в query —
-   * для старых серверов (audio-debug.html).
+   * URL WS-upgrade: одноразовый тикет (spec-14/#12). Секрет в query-параметре
+   * не используется вовсе: токен в URL живёт до конца TTL в access-логе
+   * caddy/nginx (там пишется полный URL) и в истории браузера, а fallback на
+   * «?token=» обходил всю защиту первой же сетевой ошибкой. Нет тикета —
+   * не подключаемся: вызывающий покажет «ошибка соединения» и кнопку повтора.
    */
   static async buildUrl(id: number): Promise<string> {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    try {
-      const ticket = await fetchWSTicket();
-      return `${proto}://${window.location.host}/ws/session/${id}?ticket=${encodeURIComponent(ticket)}`;
-    } catch {
-      return `${proto}://${window.location.host}/ws/session/${id}?token=${encodeURIComponent(getToken() ?? '')}`;
-    }
+    const ticket = await fetchWSTicket();
+    return `${proto}://${window.location.host}/ws/session/${id}?ticket=${encodeURIComponent(ticket)}`;
   }
 
   connect(id: number, events: WsEvents): void {

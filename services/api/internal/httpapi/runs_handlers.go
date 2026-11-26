@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
@@ -70,6 +71,16 @@ func (s *Server) handleSessionRuns(w http.ResponseWriter, r *http.Request) {
 	if m.Stage != models.StageLiveCode {
 		writeError(w, http.StatusConflict, "invalid_state",
 			"сдача кода доступна только на стадии Live-Code (текущая: "+string(m.Stage)+")")
+		return
+	}
+
+	// Один кандидат не должен занимать общую песочницу: прогоны сериализованы
+	// семафором в sandbox, поэтому цикл из «Запустить тесты» греет очередь у
+	// всех остальных (тёплый go test 1.4 с, холодный 43 с).
+	if ok, retry := s.runLimit.allow("run:" + strconv.FormatInt(id, 10)); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
+		writeError(w, http.StatusTooManyRequests, "too_many_requests",
+			"слишком часто запускаешь тесты — подожди "+strconv.Itoa(retry)+" с")
 		return
 	}
 

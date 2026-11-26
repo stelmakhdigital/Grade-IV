@@ -32,6 +32,18 @@ func registerAndGetToken(t *testing.T, ts *httptest.Server) string {
 	return token
 }
 
+// wsTicket — одноразовый тикет для WS-upgrade (тот же путь, что у браузера).
+func wsTicket(t *testing.T, ts *httptest.Server, token string) string {
+	t.Helper()
+	_, m := doJSON(t, "GET", ts.URL+"/api/v1/ws-ticket", nil,
+		map[string]string{"Authorization": "Bearer " + token})
+	tk, _ := m["ticket"].(string)
+	if tk == "" {
+		t.Fatalf("ws-ticket: %v", m)
+	}
+	return tk
+}
+
 // doRaw — как doJSON, но возвращает сырые байты (для ответов-массивов).
 func doRaw(t *testing.T, method, url string, body []byte, headers map[string]string, token string) (int, []byte) {
 	t.Helper()
@@ -246,10 +258,13 @@ func wsWriteJSON(t *testing.T, conn *websocket.Conn, v any) {
 func dialWS(t *testing.T, ts *httptest.Server, token string, id int64) *websocket.Conn {
 	t.Helper()
 	u := url.URL{Scheme: "ws", Host: ts.Listener.Addr().String(),
-		Path: fmt.Sprintf("/ws/session/%d", id), RawQuery: "token=" + url.QueryEscape(token)}
+		Path: fmt.Sprintf("/ws/session/%d", id)}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	conn, _, err := websocket.Dial(ctx, u.String(), nil)
+	// JWT в query сервер больше не читает (токен в URL остаётся в access-логе
+	// прокси) — тест идёт путём не-браузерного клиента: заголовок Authorization.
+	dialOpt := &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + token}}}
+	conn, _, err := websocket.Dial(ctx, u.String(), dialOpt)
 	if err != nil {
 		t.Fatalf("ws dial: %v", err)
 	}

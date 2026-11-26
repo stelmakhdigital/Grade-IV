@@ -173,6 +173,8 @@ function mockApi(opts: { session?: unknown; events?: unknown; report?: unknown }
     if (url.endsWith('/sessions/9')) return json(200, opts.session ?? S_ACTIVE);
     if (url.includes('/events')) return json(200, opts.events ?? EVENTS);
     if (url.includes('/report')) return json(200, opts.report ?? REPORT_MIN);
+    if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
+    if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
     if (url.includes('/sessions')) return json(200, []);
     return json(404, {});
   }) as unknown as FetchMock;
@@ -303,6 +305,8 @@ describe('SessionView (WP-8)', () => {
         return json(200, { exit_code: 0, stdout: '', stderr: '', duration_ms: 10, passed: true, tests: [] });
       }
       if (url.includes('/events')) return json(200, []);
+      if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
+      if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
       if (url.includes('/sessions')) return json(200, []);
       return json(404, {});
     });
@@ -348,6 +352,8 @@ describe('SessionView (WP-8)', () => {
         return json(200, { saved: true, structure: { blocks: [], links: 0 } });
       }
       if (url.includes('/events')) return json(200, []);
+      if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
+      if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
       if (url.includes('/sessions')) return json(200, []);
       return json(404, {});
     });
@@ -444,6 +450,8 @@ describe('SessionView (WP-8)', () => {
       if (url.includes('/report')) return json(200, REPORT_WITH_TASKS);
       if (url.endsWith('/sessions/9')) return json(200, finished ? S_FINISHED : S_ACTIVE);
       if (url.includes('/events')) return json(200, []);
+      if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
+      if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
       if (url.includes('/sessions')) return json(200, []);
       return json(404, {});
     });

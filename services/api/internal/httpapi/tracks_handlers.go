@@ -98,10 +98,14 @@ func (s *Server) handleAdminTracksList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// trackMaxBodyBytes — потолок тела admin-запроса по треку: полезная нагрузка
+// тут десятки килобайт, раздутое тело — это память процесса без пользы.
+const trackMaxBodyBytes = 256 << 10
+
 // decodeTrack — тело admin-запроса: {"track": {...}} (канонично) либо
 // «голый» объект трека. Тело буферизуется (два прохода декодера).
 func decodeTrack(r *http.Request) (models.Track, error) {
-	raw, err := io.ReadAll(r.Body)
+	raw, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, trackMaxBodyBytes))
 	if err != nil {
 		return models.Track{}, err
 	}

@@ -39,6 +39,14 @@ type Server struct {
 	// wsTickets — одноразовые тикеты WS-upgrade (spec-14/#12: JWT в query
 	// параметре утекает в логи прокси; тикет выдаётся по REST и consumed).
 	wsTickets *wsTicketStore
+	// Ограничители частоты (см. ratelimit.go): логин по аккаунту, общий IP-
+	// фильтр на /auth/*, регистрация по адресу, выдача ws-тикетов по
+	// пользователю и запуски кода на сессию.
+	loginLimit    *rateLimiter
+	authIPLimit   *rateLimiter
+	registerLimit *rateLimiter
+	wsTicketLimit *rateLimiter
+	runLimit      *rateLimiter
 	// tracks — треки собеседований (spec-18): файл + admin-CRUD.
 	tracks       *tracks.Store
 	templates    *db.TemplateStore // итерация A: настраиваемые планы
@@ -87,6 +95,14 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		log.Warn("сид дефолтных шаблонов не удался (используется gradeProgram)", "err", err)
 	}
 	wsTickets := newWSTicketStore()
+	// Частотные лимиты. Значения из практики живого стенда, не «с потолка»:
+	// 8 попыток входа на аккаунт за 5 мин хватает на честного пользователя,
+	// который трижды опечатался, и не оставляет места для перебора.
+	loginLimit := newRateLimiter(8, 5*time.Minute)    // по аккаунту
+	authIPLimit := newRateLimiter(60, 10*time.Minute) // по адресу (best effort)
+	registerLimit := newRateLimiter(10, time.Hour)    // по адресу (best effort)
+	wsTicketLimit := newRateLimiter(60, time.Minute)  // по пользователю
+	runLimit := newRateLimiter(6, time.Minute)        // запусков кода на сессию
 	// spec-18: треки собеседований (config/roles.json; оверрайд
 	// ROLE_TRACKS_FILE) — до построения engine/interviewer (DI резолверов).
 	// Ошибка файла — не валит старт: in-memory дефолты (сигнатуры New не
@@ -159,23 +175,28 @@ func NewWithLLM(cfg *config.Config, database *sql.DB, dialect db.Dialect, log *s
 		}))
 	voice := voicesvc.NewClient(cfg.VoiceURL)
 	s := &Server{
-		cfg:          cfg,
-		users:        users,
-		sessions:     sessions,
-		submissions:  submissions,
-		whiteboards:  whiteboards,
-		reports:      reports,
-		templates:    templates,
-		profiles:     profiles,
-		tracks:       tracksStore,
-		wsTickets:    wsTickets,
-		ttsVoices:    ttsVoices,
-		openingsPath: openingsPath,
-		engine:       engine,
-		interviewer:  interviewer,
-		voice:        voice,
-		log:          log,
-		wsSessions:   make(map[int64]*wsSession),
+		cfg:           cfg,
+		users:         users,
+		sessions:      sessions,
+		submissions:   submissions,
+		whiteboards:   whiteboards,
+		reports:       reports,
+		templates:     templates,
+		profiles:      profiles,
+		tracks:        tracksStore,
+		wsTickets:     wsTickets,
+		loginLimit:    loginLimit,
+		authIPLimit:   authIPLimit,
+		registerLimit: registerLimit,
+		wsTicketLimit: wsTicketLimit,
+		runLimit:      runLimit,
+		ttsVoices:     ttsVoices,
+		openingsPath:  openingsPath,
+		engine:        engine,
+		interviewer:   interviewer,
+		voice:         voice,
+		log:           log,
+		wsSessions:    make(map[int64]*wsSession),
 	}
 	// DI-оркестратор голосового хода (A1): стабильные зависимости (engine,
 	// interviewer, лог, колбэки событий/текста). Voice передаётся в методы как
@@ -240,8 +261,14 @@ func (s *Server) Handler() http.Handler {
 	if s.cfg.MetricsPassword != "" {
 		mux.Handle("GET /metrics", requireBasicAuth(s.cfg.MetricsUser, s.cfg.MetricsPassword, http.HandlerFunc(metrics.Handler)))
 	}
-	mux.HandleFunc("POST /api/v1/auth/register", s.handleRegister)
-	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
+	mux.Handle("POST /api/v1/auth/register",
+		rateLimited(s.registerLimit, ipKey, "регистраций с этого адреса", http.HandlerFunc(s.handleRegister)))
+	// Вход ограничивается дважды: по аккаунту (перебор чужого пароля) и по
+	// адресу (грубая корзина: XFF клиент может принести свой, см. ratelimit.go).
+	mux.Handle("POST /api/v1/auth/login",
+		rateLimited(s.loginLimit, loginEmailKey, "входов в этот аккаунт",
+			rateLimited(s.authIPLimit, ipKey, "входов с этого адреса",
+				http.HandlerFunc(s.handleLogin))))
 	mux.Handle("GET /api/v1/auth/me", s.requireAuth(http.HandlerFunc(s.handleMe)))
 	// F6 (итерация 12): вакансия/кампания кандидата (профиль → system-промпт).
 	mux.Handle("GET /api/v1/me/vacancy", s.requireAuth(http.HandlerFunc(s.handleGetVacancy)))
@@ -274,7 +301,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /api/v1/sessions/{id}/share", s.requireAuth(http.HandlerFunc(s.handleSessionShareRevoke)))
 	mux.Handle("GET /api/v1/public/reports/{token}", http.HandlerFunc(s.handlePublicReport))
 	// spec-14/#12: одноразовый тикет WS-upgrade (JWT больше не в query).
-	mux.Handle("GET /api/v1/ws-ticket", s.requireAuth(http.HandlerFunc(s.handleWSTicket)))
+	mux.Handle("GET /api/v1/ws-ticket", s.requireAuth(
+		rateLimited(s.wsTicketLimit, userKey, "выдач токена подключения",
+			http.HandlerFunc(s.handleWSTicket))))
 	// spec-18: треки собеседований (кабинет) + admin-CRUD.
 	mux.Handle("GET /api/v1/tracks", s.requireAuth(http.HandlerFunc(s.handleTracksList)))
 	mux.Handle("GET /api/v1/admin/tracks", s.requireAdmin(http.HandlerFunc(s.handleAdminTracksList)))

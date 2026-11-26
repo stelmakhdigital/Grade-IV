@@ -61,6 +61,9 @@ func TestLoadWS50Sessions(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 	srv := NewWithLLM(cfg, database, dialect, slog.New(slog.DiscardHandler), llm.NewMockProvider())
+	// 50 регистраций с одного адреса — это тестовый трафик, а не фарм
+	// аккаунтов: боевой лимит регистрации тут измерял бы транспорт, а не его.
+	srv.registerLimit = newRateLimiter(1000, time.Hour)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
@@ -117,8 +120,10 @@ func TestLoadWS50Sessions(t *testing.T) {
 				wsBase = "ws://" + strings.TrimPrefix(wsBase, "http://")
 			}
 			u, _ := url.ParseRequestURI(wsBase + "/ws/session/" + fmt.Sprint(sid))
+			// Тикет вместо JWT в query: боевой путь, и токен в URL в этом
+			// тесте жил бы 50 раз в логах прокси.
 			q := u.Query()
-			q.Set("token", tok)
+			q.Set("ticket", wsTicket(t, ts, tok))
 			u.RawQuery = q.Encode()
 			conn, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{
 				HTTPClient: http.DefaultClient,
