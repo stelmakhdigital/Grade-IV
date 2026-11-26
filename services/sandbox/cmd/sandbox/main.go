@@ -180,6 +180,10 @@ func main() {
 		Commands: map[string]string{
 			"python": getenv("SANDBOX_CMD_PYTHON", ""),
 		},
+		// Общий кэш сборки go между прогонами: без него каждая сборка пересобирает
+		// std заново (~40 с), а gate генерации делает до 7 сборок на задачу.
+		// В docker-режиме — имя тома, в subprocess — каталог на хосте.
+		GoCache: getenv("SANDBOX_GO_CACHE", ""),
 	})
 
 	// BUG-20261011-014: subprocess-режим честно шлёт код через `sh -c "go test ..."`/

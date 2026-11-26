@@ -175,7 +175,13 @@ func handleTaskRegister(bank *tasks.Bank, rn taskgen.Runner, log *slog.Logger) h
 func gateAndStore(ctx context.Context, bank *tasks.Bank, rn taskgen.Runner, t *tasks.Task,
 	reference map[string]string, mutants []map[string]string, log *slog.Logger) (*registerResponse, int, error) {
 
-	cctx, cancel := context.WithTimeout(ctx, gateTimeout)
+	// Работу не привязываем к жизни запроса: context без отмены от клиента.
+	// Клиент (api) ждёт конечное время и отваливается по таймауту, а gate стоит
+	// десятки секунд на сборках; с r.Context() такой таймаут убивал недоделанную
+	// работу, и задача не появлялась в банке никогда. Теперь она дозапускается и
+	// сохраняется — админ увидит её при следующем обновлении пула; потолок
+	// остаётся gateTimeout.
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gateTimeout)
 	defer cancel()
 	verdict, err := taskgen.Check(cctx, rn, taskgen.Request{Task: t, Reference: reference, Mutants: mutants})
 	if err != nil {

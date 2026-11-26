@@ -84,10 +84,24 @@ services:
       context: ../services/sandbox
       dockerfile: ../../infra/docker/sandbox.Dockerfile
     image: grade/sandbox:dev
-    ports:
-      - "8200:8200"
+    # Наружу порт не публикуется: POST /api/v1/sessions/{id}/runs без токена —
+    # его вызывает api по внутренней docker-сети (SANDBOX_URL: http://sandbox:8200),
+    # а опубликованный порт отдал бы любому, кто до него достанется, возможность
+    # запускать контейнеры на демоне хоста. Ручные проверки: docker compose exec.
+    expose:
+      - "8200"
+    # Прогоны идут через прокси (DOCKER_HOST ниже), сырой сокет контейнеру не
+    # нужен — поэтому он может работать непривилегированным.
+    user: "${GRADE_UID:-1000}:${GRADE_GID:-1000}"
     environment:
       SANDBOX_MODE: "${SANDBOX_MODE:-docker}"
+      # Домен-сокет больше не монтируется: обращения к демону идут через
+      # docker-proxy со списком разрешённых маршрутов (см. его сервис ниже).
+      DOCKER_HOST: "tcp://docker-proxy:2375"
+      # Общий кэш сборки go (именованный том, он же попадёт в контейнер прогона).
+      # Без него каждая сборка пересобирает std (~40 с), а gate генерации делает
+      # до 7 прогонов на задачу — отсюда и «context deadline exceeded» в пуле.
+      SANDBOX_GO_CACHE: "grade_gocache"
       # spec-20 / BUG-20261103-025: задачи банка идут через pytest, которого
       # нет в python:3.12-slim — образ с запечённым pytest собирается ниже.
       SANDBOX_IMAGE_PYTHON: "grade/python-tests:dev"
@@ -110,12 +124,52 @@ services:
       #   sudo mkdir -p /var/lib/grade-sandbox/work && sudo chown 1000:1000 $_
       # Локально без root: SANDBOX_WORK_ROOT=/tmp/grade-sandbox-work
       - "${SANDBOX_WORK_ROOT:-/var/lib/grade-sandbox/work}:${SANDBOX_WORK_ROOT:-/var/lib/grade-sandbox/work}"
-      # WP-6: управление контейнерами сессий
-      - /var/run/docker.sock:/var/run/docker.sock
-      # spec-24: принятые gate задачи должны переживать пересборку контейнера
+      # Кэш сборки go. Том именуется grade_gocache (см. volumes внизу) — это имя
+      # песочница передаёт в `docker run -v`, поэтому оно не зависит от префикса
+      # compose-проекта. Том инициализируется из /cache образа песочницы, то есть
+      # принадлежит uid песочницы; при GRADE_UID != 1000 том нужно один раз
+      # переприсвоить:
+      #   docker run --rm -v grade_gocache:/c alpine chown -R UID:GID /c
+      - sandbox_gocache:/cache
+      # spec-24: принятые gate задачи должны переживать пересборку контейнера.
+      # Существующий том (создан, когда песочница была root) тоже нужно один раз
+      # переприсвоить — содержимое есть, инициализация из образа не сработает:
+      #   docker run --rm -v grade_sandbox_tasks:/v alpine chown -R 1000:1000 /v
       - sandbox_tasks:/var/lib/grade-sandbox
     depends_on:
       - python-tests
+      - docker-proxy
+    restart: unless-stopped
+    profiles: [prod]
+
+  # === prod: единственная точка доступа к docker-демону ===
+  # Песочнице демон нужен (она поднимает контейнер на каждый прогон), но сырой
+  # сокет = root на хосте. Прокси держит список разрешённых маршрутов; сам он —
+  # единственный контейнер, который сокет видит.
+  #
+  # Закрывает: exec в чужие контейнеры (EXEC=0), networks / volumes / plugins /
+  # secrets / configs / swarm / nodes / tasks / system, сборку образов (BUILD),
+  # коммит (COMMIT), учётки registry (/auth) и общий поток событий.
+  # НЕ закрывает: POST /containers/create — он нужен прогонам, а с ним можно
+  # попросить демон примонтировать / хоста. Подробно — в шапке sandbox.Dockerfile.
+  #
+  # Флаги сверены с шаблоном haproxy из образа v0.5.0 (в v0.3 они были другими —
+  # поэтому тег зафиксирован, а не latest).
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    environment:
+      POST: "1"        # без него запрещены все не-GET: create/start/attach/pull
+      PING: "1"        # /_ping — docker CLI согласует по нему версию API
+      VERSION: "1"     # /version — то же согласование
+      CONTAINERS: "1"  # сами прогоны: create, start, attach, logs, kill, delete
+      IMAGES: "1"      # warmup-прогрев: docker pull образов стека
+      # Остальное по умолчанию 0: EXEC, NETWORKS, VOLUMES, PLUGINS, SECRETS,
+      # CONFIGS, SWARM, SERVICES, NODES, TASKS, SYSTEM, BUILD, COMMIT, AUTH,
+      # EVENTS, DISTRIBUTION, GRPC, INFO, SESSION.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    expose:
+      - "2375"
     restart: unless-stopped
     profiles: [prod]
 
@@ -282,6 +336,10 @@ services:
 volumes:
   pgdata:
   sandbox_tasks:
+  # Кэш сборки go. Имя фиксируем, чтобы песочница могла передать его в
+  # `docker run -v` (демон ищет том по имени, а не по compose-ссылке).
+  sandbox_gocache:
+    name: grade_gocache
   resumes:
   caddy_data:
   caddy_config:

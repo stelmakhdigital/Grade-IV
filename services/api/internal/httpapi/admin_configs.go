@@ -49,6 +49,46 @@ func writeAtomic(path string, data []byte) error {
 	return os.Rename(tmpName, path)
 }
 
+// withMetaKeys дописывает обратно служебные ключи вида "_comment"/"_README"
+// из файла, который лежит на диске. Marshal по структуре их выбрасывает, и
+// первое же сохранение из админки стирало пояснения, дописанные оператором
+// руками (в config/openings.json и config/tts-voices.json они есть).
+// Файла нет / он не читается / не распарсился — отдаём payload как есть:
+// потеря комментариев не причина отказывать в сохранении.
+func withMetaKeys(path string, payload []byte) []byte {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return payload
+	}
+	var old map[string]json.RawMessage
+	if json.Unmarshal(raw, &old) != nil {
+		return payload
+	}
+	meta := map[string]json.RawMessage{}
+	for k, v := range old {
+		if strings.HasPrefix(k, "_") {
+			meta[k] = v
+		}
+	}
+	if len(meta) == 0 {
+		return payload
+	}
+	var out map[string]json.RawMessage
+	if json.Unmarshal(payload, &out) != nil {
+		return payload
+	}
+	for k, v := range meta {
+		if _, ok := out[k]; !ok {
+			out[k] = v
+		}
+	}
+	b, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return payload
+	}
+	return b
+}
+
 // ---------- Openings ----------
 
 type openingDTO struct {
@@ -99,7 +139,7 @@ func (s *Server) handleAdminOpeningsPut(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	path := s.openingsPath
-	if err := writeAtomic(path, content); err != nil {
+	if err := writeAtomic(path, withMetaKeys(path, content)); err != nil {
 		s.log.Error("admin openings: запись файла", "err", err)
 		writeError(w, http.StatusInternalServerError, "io_error", "ошибка записи файла: "+err.Error())
 		return
@@ -166,7 +206,7 @@ func (s *Server) handleAdminTTSVoicesPut(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	path := s.ttsVoices.Path()
-	if err := writeAtomic(path, content); err != nil {
+	if err := writeAtomic(path, withMetaKeys(path, content)); err != nil {
 		s.log.Error("admin tts-voices: запись файла", "err", err)
 		writeError(w, http.StatusInternalServerError, "io_error", "ошибка записи файла: "+err.Error())
 		return

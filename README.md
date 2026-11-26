@@ -137,11 +137,31 @@ voice, postgres и grafana в прод-профиле портов не публ
 - На сети без pypi.org — `PIP_INDEX_URL=<зеркало>` в `.env`: compose передаёт
   его в сборку voice (дефолт остаётся pypi.org, чтобы зеркало чьей-то сети не
   стало дефолтом прода).
-- Контейнеры api и voice — не root (uid из `GRADE_UID`/`GRADE_GID`, по
+- Контейнеры api, voice и sandbox — не root (uid из `GRADE_UID`/`GRADE_GID`, по
   умолчанию 1000). Правки админа в `config/` остаются принадлежать твоему
-  пользователю. `sandbox` — осознанное исключение: он работает через
-  `/var/run/docker.sock`, а это root на хосте независимо от uid (подробности —
-  в шапке `infra/docker/sandbox.Dockerfile`).
+  пользователю.
+- Песочница попадает к docker-деону через `docker-proxy`
+  (`tecnativa/docker-socket-proxy:v0.5.0`) со списком разрешённых маршрутов:
+  сырой сокет ей не монтируется. Закрыты exec в чужие контейнеры, networks,
+  volumes, plugins, secrets, swarm, сборка образов, коммит, `/auth` и события.
+  Не закрыто: `POST /containers/create` — он нужен прогонам, а с ним можно
+  попросить демон примонтировать корень хоста. Подробно — в шапке
+  `infra/docker/sandbox.Dockerfile`. Тег прокси зафиксирован: в v0.3 набор
+  флагов был другой, и allowlist тихо расплылся бы.
+- Первый запуск go-задачи стоит минуту (холодная сборка стандартной
+  библиотеки, ~43 с), каждый следующий — около 1,4 с: том `grade_gocache`
+  (`SANDBOX_GO_CACHE`) общий для всех прогонов. Без него gate генерации
+  (эталон + до 6 мутантов) не успевал никогда.
+- Перешло на непривилегированный uid с root-прошлого: тома `sandbox_tasks` и
+  рабочие каталоги нужно один раз переприсвоить, содержимое там есть и
+  инициализация из образа не сработает:
+  ```bash
+  docker run --rm -v grade_sandbox_tasks:/v alpine chown -R 1000:1000 /v
+  mkdir -p /var/lib/grade-sandbox/work && sudo chown 1000:1000 /var/lib/grade-sandbox/work
+  ```
+- Порт 8200 (песочница) наружу не публикуется: `POST /api/v1/sessions/{id}/runs`
+  без токена — его вызывает api по внутренней сети. Ручные проверки —
+  `docker compose exec sandbox ...`.
 - Профили: `prod` (api, postgres, sandbox, voice, frontend, caddy),
   `gpu` (voice на CUDA), `monitoring` (prometheus + grafana).
 

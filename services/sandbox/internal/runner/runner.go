@@ -101,6 +101,13 @@ type Config struct {
 	// MaxConcurrent — предел одновременных запусков (spec-14/C3: N параллельных
 	// холодных go test ≈ N×2 ГБ VA → OOM хоста). 0 → defaultMaxConcurrent.
 	MaxConcurrent int
+	// GoCache — общий кэш сборки go между прогонами (SANDBOX_GO_CACHE).
+	// В docker-режиме — ИМЯ docker-тома (монтируется в /cache, kэш в
+	// /cache/go-build), в subprocess — каталог на хосте. Пусто — кэш per-run
+	// (/work/.gocache), то есть каждая сборка пересобирает std заново.
+	// Зачем: cold std build стоит ~40 с (см. defaultTimeoutGo), а gate генерации
+	// делает 1 эталон + до 6 мутантов = до 7 сборок — 4,5 минуты на задачу.
+	GoCache string
 }
 
 // defaultMaxConcurrent — см. Config.MaxConcurrent.
@@ -487,6 +494,11 @@ func (r *Runner) runSubprocess(ctx context.Context, stack, workdir, cmdLine stri
 	cmd := exec.Command("sh", "-c", cmdLine)
 	cmd.Dir = workdir
 	cmd.Env = cleanEnv(workdir, stack)
+	if r.cfg.GoCache != "" {
+		// GOCACHE перекрывает per-run значение (os/exec оставляет последнее
+		// вхождение переменной).
+		cmd.Env = append(cmd.Env, "GOCACHE="+r.cfg.GoCache)
+	}
 	var out bytes.Buffer
 	capped := &cappedWriter{buf: &out, limit: int64(r.cfg.MaxBytes * 2)}
 	cmd.Stdout = capped
@@ -547,6 +559,31 @@ func isResourceLimitKill(ee *exec.ExitError) bool {
 	return false
 }
 
+// goCacheRefs — как docker-прогон получает кэш сборки go. Без конфига — каталог
+// в рабочем каталоге (per-run: std пересобирается каждый раз, ~40 с). С конфигом
+// — общий том: значение SANDBOX_GO_CACHE передаётся в `docker run -v` как ЕСТЬ,
+// поэтому это именно ИМЯ docker-тома (путь без «/» демон трактует как volume),
+// а не путь хоста.
+//
+// Права: том инициализируется содержимым и владельцем каталога в образе в момент
+// первого монтирования, поэтому в образе песочницы /cache принадлежит пользователю
+// песочницы (см. sandbox.Dockerfile) — иначе том достался бы root'у и go не смог
+// бы в него писать под --user.
+//
+// Что это НЕ гарантирует: кэш общий для всех кандидатов. Go ключует записи по
+// хэшу исходников и тулчейна, поэтому повлиять на чужой результат нельзя,
+// а забить диск мусорными записями — можно. shortcut: порог у go сам,
+// размусоривание лечится периодическим `docker volume rm`.
+func (r *Runner) goCacheRefs(stack string) (mounts []string, cacheDir string) {
+	if stack != "go" {
+		return nil, "/work/.gocache"
+	}
+	if r.cfg.GoCache == "" {
+		return nil, "/work/.gocache"
+	}
+	return []string{"-v", r.cfg.GoCache + ":/cache"}, "/cache/go-build"
+}
+
 // runDocker — prod-режим: контейнер на run с лимитами ADR-003. Каталог
 // градатора монтируется отдельно и только на чтение (/grade) — код кандидата
 // живёт в /work и не может ни изменить, ни найти файлы банка в своём дереве
@@ -566,9 +603,10 @@ func (r *Runner) runDocker(ctx context.Context, stack, runDir, gradeDir, cmdLine
 	// — дисковый (не RAM), зачищается с workdir после прогона. CGO_ENABLED=0 —
 	// сборка без gcc (в 2-3 раза меньше кэш; cgo-задачи не поддерживались
 	// и раньше: GOPROXY=off).
+	cacheMounts, goCache := r.goCacheRefs(stack)
 	env := []string{
 		"HOME=/tmp", "TMPDIR=/tmp",
-		"GOCACHE=/work/.gocache", "GOPATH=/tmp/gopath", "GOTOOLCHAIN=local",
+		"GOCACHE=" + goCache, "GOPATH=/tmp/gopath", "GOTOOLCHAIN=local",
 		"GOWORK=off", // go.work хоста не должен включать сборку в workspace mode
 		// -p=2: при сборке std на много-ядерном хосте параллельные compile не влезают
 		// в --pids-limit/--memory (BUG-20261122-035)
@@ -621,6 +659,7 @@ func (r *Runner) runDocker(ctx context.Context, stack, runDir, gradeDir, cmdLine
 		// --user ниже это uid хоста).
 		"-v", gradeDir + ":/grade:ro",
 	}
+	args = append(args, cacheMounts...)
 	for _, e := range env {
 		args = append(args, "-e", e)
 	}

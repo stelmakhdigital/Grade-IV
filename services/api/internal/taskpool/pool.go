@@ -78,7 +78,12 @@ func applyDefaults(c *Config) {
 		c.Interval = 10 * time.Minute
 	}
 	if c.HTTP == nil {
-		c.HTTP = &http.Client{Timeout: 2 * time.Minute}
+		// Генерация задачи = pre-flight gate: до 7 прогонов (эталон + мутанты), и
+		// каждый для go — сборка. С общим кэшем (SANDBOX_GO_CACHE) это десятки
+		// секунд, без него — минуты на сборку std; 2 минуты из предыдущей
+		// редакции здесь срабатывали на ровном месте. Работу это больше не
+		// убивает: sandbox дозапускает gate без отмены от клиента.
+		c.HTTP = &http.Client{Timeout: 6 * time.Minute}
 	}
 	if c.Rand == nil {
 		c.Rand = rand.New(rand.NewSource(time.Now().UnixNano()))
