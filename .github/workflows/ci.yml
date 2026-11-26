@@ -146,6 +146,11 @@ jobs:
           #   pnpm exec vitest run --sequence.shuffle --sequence.seed 1
           pnpm exec vitest run --sequence.shuffle --sequence.seed 1
           pnpm exec vite build
+      # Лендинг и приложение рисуются из одной палитры; скрипт сверяет токены.
+      # В `make test` он есть, в CI его не было — то есть расхождение палитры
+      # прилетало бы только на локальной машине.
+      - name: токены лендинга и приложения
+        run: node scripts/check-tokens.mjs
 
   voice:
     name: Voice (pytest, fake-провайдеры)
