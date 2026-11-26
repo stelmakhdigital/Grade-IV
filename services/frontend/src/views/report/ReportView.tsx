@@ -100,7 +100,9 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS, 
 
   if (state === 'loading') {
     return (
-      <section className="card report" data-testid="report-loading">
+      // role=status: состояние сменытся само (202 -> 200), и незрячий
+      // пользователь должен узнать об этом без опроса страницы руками.
+      <section className="card report" data-testid="report-loading" role="status" aria-live="polite">
         <p className="muted">Считаем результаты интервью…</p>
       </section>
     );
@@ -319,11 +321,11 @@ export function ReportBody({
           <table className="progress-table">
             <thead>
               <tr>
-                <th>Дата</th>
-                <th>Грейд</th>
-                <th>Стек</th>
-                <th>Итог</th>
-                <th>Δ к текущему</th>
+                <th scope="col">Дата</th>
+                <th scope="col">Грейд</th>
+                <th scope="col">Стек</th>
+                <th scope="col">Итог</th>
+                <th scope="col">Δ к текущему</th>
               </tr>
             </thead>
             <tbody>

@@ -494,13 +494,13 @@ export function CabinetView() {
           <table className="sessions-table">
             <thead>
               <tr>
-                <th>Дата</th>
-                <th>Роль</th>
-                <th>Уровень</th>
-                <th>Стадия</th>
-                <th>Статус</th>
-                <th>Длительность</th>
-                <th></th>
+                <th scope="col">Дата</th>
+                <th scope="col">Роль</th>
+                <th scope="col">Уровень</th>
+                <th scope="col">Стадия</th>
+                <th scope="col">Статус</th>
+                <th scope="col">Длительность</th>
+                <th scope="col"></th>
               </tr>
             </thead>
             <tbody>

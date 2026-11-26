@@ -220,12 +220,12 @@ function TemplatesTab() {
         <table className="sessions-table">
           <thead>
             <tr>
-              <th>Грейд</th>
-              <th>Стек</th>
-              <th>Имя</th>
-              <th>Дефолт</th>
-              <th>Блоки</th>
-              <th></th>
+              <th scope="col">Грейд</th>
+              <th scope="col">Стек</th>
+              <th scope="col">Имя</th>
+              <th scope="col">Дефолт</th>
+              <th scope="col">Блоки</th>
+              <th scope="col"></th>
             </tr>
           </thead>
           <tbody>
@@ -428,9 +428,9 @@ function OpeningsTab() {
         <table className="sessions-table">
           <thead>
             <tr>
-              <th>Грейд</th>
-              <th>Реплика</th>
-              <th></th>
+              <th scope="col">Грейд</th>
+              <th scope="col">Реплика</th>
+              <th scope="col"></th>
             </tr>
           </thead>
           <tbody>
@@ -547,11 +547,11 @@ function VoicesTab() {
           <table className="sessions-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Название</th>
-                <th>Пол</th>
-                <th>Спикер (voice)</th>
-                <th></th>
+                <th scope="col">ID</th>
+                <th scope="col">Название</th>
+                <th scope="col">Пол</th>
+                <th scope="col">Спикер (voice)</th>
+                <th scope="col"></th>
               </tr>
             </thead>
             <tbody>
@@ -903,11 +903,11 @@ function TracksTab() {
           <table className="sessions-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Название</th>
-                <th>Практика</th>
-                <th>Грейды</th>
-                <th></th>
+                <th scope="col">ID</th>
+                <th scope="col">Название</th>
+                <th scope="col">Практика</th>
+                <th scope="col">Грейды</th>
+                <th scope="col"></th>
               </tr>
             </thead>
             <tbody>
@@ -1301,10 +1301,10 @@ function TracksTab() {
           <table className="sessions-table" data-testid="admin-track-criteria">
             <thead>
               <tr>
-                <th>Критерий</th>
-                <th>Вес (0..1)</th>
-                <th>Подсказка оценщику</th>
-                <th></th>
+                <th scope="col">Критерий</th>
+                <th scope="col">Вес (0..1)</th>
+                <th scope="col">Подсказка оценщику</th>
+                <th scope="col"></th>
               </tr>
             </thead>
             <tbody>
