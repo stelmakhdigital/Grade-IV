@@ -17,27 +17,19 @@ import {
   getToken,
 } from './api';
 
-function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-
 beforeEach(() => {
   localStorage.clear();
 });
 
 describe('api-клиент (WP-7)', () => {
   it('register шлёт Bearer-заголовки только при наличии токена и парсит ответ', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(201, {
+    const fetchMock = __api.on({
+      '/auth/register': {
         token: 'tok',
         expires_in_s: 86400,
         user: { id: 1, email: 'a@b.c', created_at: '2026-09-14T00:00:00Z' },
-      }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
+      },
+    });
     const r = await register('a@b.c', 'password1');
     expect(r.user.email).toBe('a@b.c');
     expect(r.token).toBe('tok');
@@ -49,20 +41,14 @@ describe('api-клиент (WP-7)', () => {
 
   it('me() добавляет Authorization: Bearer из localStorage', async () => {
     setToken('tok123');
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(200, { user: { id: 1, email: 'a@b.c', created_at: '' } }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
+    const fetchMock = __api.on({ '/auth/me': { user: { id: 1, email: 'a@b.c', created_at: '' } } });
     await me();
     const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect((opts.headers as Record<string, string>)['Authorization']).toBe('Bearer tok123');
   });
 
   it('401/код из тела -> ApiError со статусом и кодом', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(401, { code: 'unauthorized', msg: 'неверный email или пароль' })),
-    );
+    __api.on({ '/auth/login': __api.failure(401, 'unauthorized', 'неверный email или пароль') });
     const err = await login('a@b.c', 'wrong').catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(401);
@@ -70,6 +56,8 @@ describe('api-клиент (WP-7)', () => {
     expect(err.message).toBe('неверный email или пароль');
   });
 
+  // Транспорт «упал» маршрутом не выразить (ответа нет вовсе) — единственная
+  // заглушка поверх обвязки: локальный vi.stubGlobal('fetch', ...).
   it('сеть недоступна -> ApiError network', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fail')));
     const err = await listSessions().catch((e) => e);
@@ -78,9 +66,11 @@ describe('api-клиент (WP-7)', () => {
   });
 
   it('createSession/listSessions/listEvents — пути и методы', async () => {
-    const fetchMock = vi.fn(async (..._args: [string, RequestInit]) =>
-      jsonResponse(201, { id: 7, status: 'active' }));
-    vi.stubGlobal('fetch', fetchMock);
+    const fetchMock = __api.on({
+      'POST /sessions': { id: 7, status: 'active' },
+      'GET /sessions': [{ id: 7 }],
+      '/sessions/7/events': [{ seq: 1, kind: 'finished' }],
+    });
     await createSession({ grade: 'middle', stack: 'go' });
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/sessions');
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST');
@@ -93,21 +83,17 @@ describe('api-клиент (WP-7)', () => {
     await createSession();
     expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({});
 
-    fetchMock.mockResolvedValue(jsonResponse(200, [{ id: 7 }]));
     await listSessions();
     expect(fetchMock.mock.calls[2][0]).toBe('/api/v1/sessions');
     expect((fetchMock.mock.calls[2][1] as RequestInit).method).toBe('GET');
 
-    fetchMock.mockResolvedValue(jsonResponse(200, [{ seq: 1, kind: 'finished' }]));
     await listEvents(7);
     expect(fetchMock.mock.calls[3][0]).toBe('/api/v1/sessions/7/events');
   });
 
   it('резюме: GET/DELETE + PUT multipart с Bearer', async () => {
     setToken('tok123');
-    const fetchMock = vi.fn(async (..._args: [string, RequestInit]) =>
-      jsonResponse(200, { about: '', file_name: '', text_chars: 0 }));
-    vi.stubGlobal('fetch', fetchMock);
+    const fetchMock = __api.on({ '/me/resume': { about: '', file_name: '', text_chars: 0 } });
 
     await getResume();
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/me/resume');
@@ -128,10 +114,10 @@ describe('api-клиент (WP-7)', () => {
 
   it('pauseSession/resumeSession: POST /sessions/{id}/pause|resume, DTO и Bearer', async () => {
     setToken('tok123');
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(200, { id: 7, status: 'paused', paused_at: '2026-09-14T10:05:00Z' }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
+    const fetchMock = __api.on({
+      'POST /sessions/7/pause': { id: 7, status: 'paused', paused_at: '2026-09-14T10:05:00Z' },
+      'POST /sessions/7/resume': { id: 7, status: 'active' },
+    });
     const s = await pauseSession(7);
     expect(s.status).toBe('paused');
     const [pauseUrl, pauseOpts] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -139,7 +125,6 @@ describe('api-клиент (WP-7)', () => {
     expect(pauseOpts.method).toBe('POST');
     expect((pauseOpts.headers as Record<string, string>)['Authorization']).toBe('Bearer tok123');
 
-    fetchMock.mockResolvedValue(jsonResponse(200, { id: 7, status: 'active' }));
     const r = await resumeSession(7);
     expect(r.status).toBe('active');
     const [resumeUrl, resumeOpts] = fetchMock.mock.calls[1] as [string, RequestInit];
@@ -148,27 +133,25 @@ describe('api-клиент (WP-7)', () => {
   });
 
   it('pauseSession: код из тела -> ApiError (статус + code + msg)', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(409, { code: 'invalid_state', msg: 'сессия не активна' })),
-    );
+    __api.on({ 'POST /sessions/7/pause': __api.failure(409, 'invalid_state', 'сессия не активна') });
     const err = await pauseSession(7).catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(409);
     expect(err.code).toBe('invalid_state');
     expect(err.message).toBe('сессия не активна');
-
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fail')));
-    const netErr = await resumeSession(7).catch((e) => e);
-    expect(netErr).toBeInstanceOf(ApiError);
-    expect(netErr.code).toBe('network');
   });
 
   it('runTests: POST /sessions/{id}/runs {files, action, task_id}', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(200, { exit_code: 0, stdout: 'ok', stderr: '', duration_ms: 12, passed: true, tests: [{ name: 'TestMain', passed: true }] }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
+    const fetchMock = __api.on({
+      'POST /sessions/9/runs': {
+        exit_code: 0,
+        stdout: 'ok',
+        stderr: '',
+        duration_ms: 12,
+        passed: true,
+        tests: [{ name: 'TestMain', passed: true }],
+      },
+    });
     const r = await runTests(9, { 'main.go': 'package main' }, 'go-rev');
     expect(r.passed).toBe(true);
     const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];

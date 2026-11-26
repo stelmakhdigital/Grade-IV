@@ -1,14 +1,10 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { setToken } from '../api';
 import { useAuth, AuthProvider, type AuthContextValue } from '../auth';
 import { LoginView, apiErrorMessage } from './LoginView';
 import { ApiError } from '../api';
-
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status });
-}
 
 const AUTH_OK = {
   token: 'tok',
@@ -16,14 +12,15 @@ const AUTH_OK = {
   user: { id: 1, email: 'cand@example.com', created_at: '2026-09-14T00:00:00Z' },
 };
 
-/** Обёртка: AuthProvider с подменённым useAuth для изоляции полей. */
-function harness(fetchMock: ReturnType<typeof vi.fn>) {
-  vi.stubGlobal('fetch', fetchMock);
-  return render(
+/** Обёртка: AuthProvider + маршруты auth; возвращает fetch-mock для ассертов. */
+function harness(routes: Record<string, unknown> = {}) {
+  const fetchMock = __api.on(routes);
+  render(
     <AuthProvider>
       <LoginView />
     </AuthProvider>,
   );
+  return fetchMock;
 }
 
 beforeEach(() => {
@@ -32,8 +29,7 @@ beforeEach(() => {
 
 describe('LoginView (WP-7)', () => {
   it('валидация: короткий пароль и не-email блокируют отправку', async () => {
-    const fetchMock = vi.fn();
-    harness(fetchMock);
+    const fetchMock = harness();
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('Email'), 'не email');
     await user.type(screen.getByLabelText('Пароль'), '123');
@@ -47,8 +43,7 @@ describe('LoginView (WP-7)', () => {
   });
 
   it('успешная регистрация: токен сохранён', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(json(201, AUTH_OK));
-    harness(fetchMock);
+    const fetchMock = harness({ '/auth/register': AUTH_OK });
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Регистрация' }));
     await user.type(screen.getByLabelText('Email'), 'cand@example.com');
@@ -59,10 +54,9 @@ describe('LoginView (WP-7)', () => {
   });
 
   it('ошибка email_exists — человекочитаемое сообщение', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(json(409, { code: 'email_exists', msg: 'email уже зарегистрирован' }));
-    harness(fetchMock);
+    harness({
+      '/auth/register': __api.failure(409, 'email_exists', 'email уже зарегистрирован'),
+    });
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Регистрация' }));
     await user.type(screen.getByLabelText('Email'), 'cand@example.com');

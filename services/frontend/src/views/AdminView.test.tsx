@@ -1,13 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setToken } from '../api';
 import { AuthProvider } from '../auth';
 import { AdminView } from './AdminView';
-
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status });
-}
 
 const ME_ADMIN = {
   user: { id: 1, email: 'admin@example.com', created_at: '2026-09-14T00:00:00Z', is_admin: true },
@@ -53,17 +49,17 @@ interface MockOpts {
   deleteBody?: unknown;
 }
 
-function mockApi(opts: MockOpts = {}): Mock {
-  return vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.includes('/auth/me')) return json(200, ME_ADMIN);
-    if (url.endsWith('/admin/tracks')) {
-      if (init?.method === 'POST') {
-        return json(opts.createStatus ?? 201, opts.createBody ?? (init.body ? JSON.parse(init.body as string) : {}));
-      }
-      return json(200, opts.tracks ?? TRACKS);
-    }
-    if (url.endsWith('/admin/tracks/generate')) {
-      return json(opts.generateStatus ?? 200, opts.generateBody ?? {
+/** Маршруты admin-редактора ролей (spec-18/22): POST/PUT/DELETE/generate. */
+function adminRoutes(opts: MockOpts = {}): Record<string, unknown> {
+  /** Ответ-эхо: сервер возвращает присланную роль (или override теста). */
+  const echo = (status: number, body: unknown, init?: RequestInit): Response =>
+    __api.json(status, body ?? (init?.body ? JSON.parse(init.body as string) : {}));
+  return {
+    '/auth/me': ME_ADMIN,
+    // generate раньше идёт по точному пути — 'POST /admin/tracks' матчит и его,
+    // поэтому порядок в таблице важен.
+    'POST /admin/tracks/generate': () =>
+      __api.json(opts.generateStatus ?? 200, opts.generateBody ?? {
         track: {
           id: 'data-engineer',
           title: 'Data-инженер',
@@ -73,33 +69,26 @@ function mockApi(opts: MockOpts = {}): Mock {
           board: { title: 'Схема пайплайна', review_prompt: 'Оцени полноту', groups: [{ title: 'Источники', names: ['API'] }] },
           criteria: [{ name: 'Моделирование', weight: 0.5 }, { name: 'Коммуникация', weight: 0.5 }],
         },
-      });
-    }
-    if (url.includes('/admin/tracks/')) {
-      if (init?.method === 'DELETE') {
-        return json(
-          opts.deleteStatus ?? 200,
-          opts.deleteBody ?? { ok: true },
-        );
-      }
-      if (init?.method === 'PUT') {
-        return json(
-          opts.updateStatus ?? 200,
-          opts.updateBody ?? (init.body ? JSON.parse(init.body as string) : {}),
-        );
-      }
-    }
-    return json(404, { code: 'not_found', message: 'not found' });
-  });
+      }),
+    'POST /admin/tracks': (_url: string, init?: RequestInit) =>
+      echo(opts.createStatus ?? 201, opts.createBody, init),
+    'PUT /admin/tracks*': (_url: string, init?: RequestInit) =>
+      echo(opts.updateStatus ?? 200, opts.updateBody, init),
+    'DELETE /admin/tracks*': () => __api.json(opts.deleteStatus ?? 200, opts.deleteBody ?? { ok: true }),
+    // Список ролей — любой другой метод на /admin/tracks.
+    '/admin/tracks': opts.tracks ?? TRACKS,
+  };
 }
 
-function renderAdmin(fetchMock: Mock) {
-  vi.stubGlobal('fetch', fetchMock);
-  return render(
+/** Рендер админки; возвращает fetch-mock — ассерты по URL, методу и телу. */
+function renderAdmin(opts: MockOpts = {}) {
+  const fetchMock = __api.on(adminRoutes(opts));
+  render(
     <AuthProvider>
       <AdminView />
     </AuthProvider>,
   );
+  return fetchMock;
 }
 
 beforeEach(() => {
@@ -111,8 +100,7 @@ beforeEach(() => {
 
 describe('AdminView: роли собеседований (spec-18/22)', () => {
   it('загружает и показывает список ролей с бейджами практики (spec-22)', async () => {
-    const fetchMock = mockApi();
-    renderAdmin(fetchMock);
+    const fetchMock = renderAdmin();
     const user = userEvent.setup();
     await screen.findByText('admin@example.com');
     await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
@@ -127,8 +115,7 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
   });
 
   it('создание трека: POST с body {track}', async () => {
-    const fetchMock = mockApi();
-    renderAdmin(fetchMock);
+    const fetchMock = renderAdmin();
     const user = userEvent.setup();
     await screen.findByText('admin@example.com');
     await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
@@ -150,8 +137,7 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
   });
 
   it('spec-22: ИИ-заполнение новой роли — форма предзаполнена черновиком', async () => {
-    const fetchMock = mockApi();
-    renderAdmin(fetchMock);
+    const fetchMock = renderAdmin();
     const user = userEvent.setup();
     await screen.findByText('admin@example.com');
     await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
@@ -174,8 +160,7 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
   });
 
   it('палитра-превью: чипы групп как на доске кандидата', async () => {
-    const fetchMock = mockApi();
-    renderAdmin(fetchMock);
+    renderAdmin();
     const user = userEvent.setup();
     await screen.findByText('admin@example.com');
     await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
@@ -189,8 +174,7 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
   });
 
   it('spec-22: практика — чекбокс + рантайм, в payload уходит practice:{runtime}', async () => {
-    const fetchMock = mockApi();
-    renderAdmin(fetchMock);
+    const fetchMock = renderAdmin();
     const user = userEvent.setup();
     await screen.findByText('admin@example.com');
     await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
@@ -211,13 +195,12 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
   });
 
   it('issue #7: практика заблокирована у роли с незавершёнными сессиями', async () => {
-    const fetchMock = mockApi({
+    renderAdmin({
       tracks: [
         { ...TRACKS[0], active_sessions: 2 },
         { ...TRACKS[1], active_sessions: 0 },
       ],
     });
-    renderAdmin(fetchMock);
     const user = userEvent.setup();
     await screen.findByText('admin@example.com');
     await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
@@ -235,8 +218,7 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
   });
 
   it('issue #7: 409 на сохранение — в форме честная причина', async () => {
-    const fetchMock = mockApi({ updateStatus: 409, updateBody: { code: 'track_in_use', message: 'идут сессии' } });
-    renderAdmin(fetchMock);
+    renderAdmin({ updateStatus: 409, updateBody: { code: 'track_in_use', message: 'идут сессии' } });
     const user = userEvent.setup();
     await screen.findByText('admin@example.com');
     await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
@@ -249,8 +231,7 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
   });
 
   it('drag-n-drop: перестановка групп за ручку', async () => {
-    const fetchMock = mockApi();
-    renderAdmin(fetchMock);
+    renderAdmin();
     const user = userEvent.setup();
     await screen.findByText('admin@example.com');
     await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
@@ -274,8 +255,7 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
   });
 
   it('drag-n-drop: перенос блока (чипа) между группами в превью', async () => {
-    const fetchMock = mockApi();
-    renderAdmin(fetchMock);
+    renderAdmin();
     const user = userEvent.setup();
     await screen.findByText('admin@example.com');
     await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
@@ -299,8 +279,7 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
   });
 
   it('удаление используемого трека: 409 → сообщение «используется сессиями»', async () => {
-    const fetchMock = mockApi({ deleteStatus: 409, deleteBody: { code: 'track_in_use', message: 'track exists in sessions' } });
-    renderAdmin(fetchMock);
+    const fetchMock = renderAdmin({ deleteStatus: 409, deleteBody: { code: 'track_in_use', message: 'track exists in sessions' } });
     const user = userEvent.setup();
     await screen.findByText('admin@example.com');
     await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
@@ -320,7 +299,7 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
   });
 
   it('порядок критериев меняется кнопками ↑/↓ (клавиатурный путь, ui-review 2026-11-27)', async () => {
-    renderAdmin(mockApi());
+    renderAdmin();
     const user = userEvent.setup();
     await screen.findByText('admin@example.com');
     await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
@@ -342,7 +321,7 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
 
   it('вкладки админки: стрелки переводят выбор, раздел живёт в адресе', async () => {
     window.location.hash = '#/admin';
-    renderAdmin(mockApi());
+    renderAdmin();
     const user = userEvent.setup();
     await screen.findByText('admin@example.com');
     screen.getByRole('tab', { name: 'Шаблоны' }).focus();
@@ -355,7 +334,7 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
 
 });
 
-async function waitForPost(fetchMock: Mock): Promise<void> {
+async function waitForPost(fetchMock: ReturnType<typeof __api.on>): Promise<void> {
   await waitFor(() =>
     expect(fetchMock.mock.calls.some((c) => c[1]?.method === 'POST' && String(c[0]).endsWith('/admin/tracks'))).toBe(true),
   );

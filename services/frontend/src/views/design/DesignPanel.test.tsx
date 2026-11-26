@@ -5,10 +5,6 @@ import type { ComponentType } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DESIGN_BLOCKS, DesignPanel, type CanvasProps } from './DesignPanel';
 
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status });
-}
-
 interface MockApi {
   placeBlock: ReturnType<typeof vi.fn>;
   snapshot: () => Promise<{
@@ -49,24 +45,19 @@ function makeMockCanvas() {
   return { api, Canvas, calls };
 }
 
+/** Маршруты холста: по умолчанию — сохранённой схемы нет (GET 404), PUT принят. */
+const WHITEBOARD_OK = { 'PUT /whiteboard': { saved: true, structure: { blocks: [], links: 0 } } };
+
 function renderPanel(opts: {
-  fetchMock?: unknown;
+  routes?: Record<string, unknown>;
   review?: string;
   canvas?: { api: MockApi; Canvas: ComponentType<CanvasProps> };
 } = {}) {
   const mock = opts.canvas ?? makeMockCanvas();
-  vi.stubGlobal(
-    'fetch',
-    opts.fetchMock ??
-      vi.fn(async (url: string, init?: RequestInit) => {
-        if (init?.method === 'PUT' && url.endsWith('/whiteboard')) {
-          return json(200, { saved: true, structure: { blocks: [], links: 0 } });
-        }
-        return json(404, {});
-      }),
-  );
+  const fetchMock = __api.on(opts.routes ?? WHITEBOARD_OK);
   return {
     ...mock,
+    fetchMock,
     utils: render(
       <DesignPanel
         sessionId={7}
@@ -106,10 +97,7 @@ describe('DesignPanel (WP-10)', () => {
   });
 
   it('«Оценить» — PUT /whiteboard со state и структурой', async () => {
-    // Response читается один раз — на каждый запрос нужен новый (GET + PUT)
-    const fetchMock = vi.fn(async () => json(200, { saved: true }));
-    vi.stubGlobal('fetch', fetchMock);
-    const { api } = renderPanel({ fetchMock });
+    const { api, fetchMock } = renderPanel({ routes: { '/whiteboard': { saved: true } } });
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Client' }));
     await user.click(screen.getByRole('button', { name: 'Кэш' }));
@@ -135,11 +123,8 @@ describe('DesignPanel (WP-10)', () => {
       state: { elements: [{ id: 'x', type: 'rectangle' }], appState: {} },
       structure: { blocks: ['Кэш'], links: 1 },
     };
-    const fetchMock = vi.fn(async (url: string) =>
-      String(url).endsWith('/whiteboard') ? json(200, saved) : json(404, {}),
-    );
     const mock = makeMockCanvas();
-    renderPanel({ fetchMock, canvas: mock });
+    renderPanel({ routes: { '/whiteboard': saved }, canvas: mock });
     await waitFor(() => expect(screen.getByTestId('mock-canvas')).toHaveTextContent('saved:1'));
     // счётчик блоков тоже восстанавливается, иначе «Оценить» остаётся заблокированной
     expect(screen.getByText('Блоков на холсте: 1')).toBeInTheDocument();
@@ -151,10 +136,9 @@ describe('DesignPanel (WP-10)', () => {
   });
 
   it('ошибка сохранения — сообщение об ошибке', async () => {
-    const fetchMock = vi.fn(async () =>
-      json(500, { code: 'internal', message: 'ошибка сохранения холста' }),
-    );
-    const { api } = renderPanel({ fetchMock });
+    const { api } = renderPanel({
+      routes: { '/whiteboard': __api.failure(500, 'internal', 'ошибка сохранения холста') },
+    });
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'CDN' }));
     await user.click(screen.getByTestId('design-evaluate'));

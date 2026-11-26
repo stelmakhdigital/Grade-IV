@@ -3,10 +3,6 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LiveCodePanel, DEFAULT_CODE, codeCache, saveDraft, restoreDraft } from './LiveCodePanel';
 
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status });
-}
-
 const RUN_OK = {
   exit_code: 0,
   stdout: 'PASS',
@@ -45,21 +41,10 @@ const TASK_FILES = {
 };
 
 function renderPanel(opts: {
-  fetchMock?: unknown;
   review?: string;
   taskTitle?: string;
   taskFiles?: Record<string, string> | null;
 } = {}) {
-  vi.stubGlobal(
-    'fetch',
-    opts.fetchMock ??
-      vi.fn(async (url: string, init?: RequestInit) => {
-        if (init?.method === 'POST' && url.endsWith('/runs')) {
-          return json(200, RUN_OK);
-        }
-        return json(404, {});
-      }),
-  );
   return render(
     <LiveCodePanel
       sessionId={9}
@@ -94,9 +79,8 @@ describe('LiveCodePanel (WP-9)', () => {
   });
 
   it('запуск: POST с файлом main.go и task_id; вывод тестов', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(json(200, RUN_OK));
-    vi.stubGlobal('fetch', fetchMock);
-    renderPanel({ fetchMock: fetchMock });
+    const fetchMock = __api.on({ 'POST /runs': RUN_OK });
+    renderPanel();
     const user = userEvent.setup();
     await user.click(screen.getByTestId('run-tests'));
     await waitFor(() =>
@@ -118,11 +102,8 @@ describe('LiveCodePanel (WP-9)', () => {
   });
 
   it('ошибка sandbox — человекочитаемое сообщение', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      json(502, { code: 'sandbox_error', msg: 'контейнер не создан' }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    renderPanel({ fetchMock: fetchMock });
+    __api.on({ 'POST /runs': __api.failure(502, 'sandbox_error', 'контейнер не создан') });
+    renderPanel();
     const user = userEvent.setup();
     await user.click(screen.getByTestId('run-tests'));
     expect(await screen.findByTestId('run-error')).toHaveTextContent(
@@ -138,9 +119,8 @@ describe('LiveCodePanel (WP-9)', () => {
   });
 
   it('файлы задачи: вкладки, активный solution.go, /runs с полным набором', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(json(200, RUN_OK));
-    vi.stubGlobal('fetch', fetchMock);
-    renderPanel({ fetchMock, taskFiles: TASK_FILES, taskTitle: 'Разворот строки' });
+    const fetchMock = __api.on({ 'POST /runs': RUN_OK });
+    renderPanel({ taskFiles: TASK_FILES, taskTitle: 'Разворот строки' });
     // вкладки всех файлов задачи
     expect(screen.getByRole('tab', { name: 'go.mod' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'solution_test.go' })).toBeInTheDocument();
@@ -156,10 +136,6 @@ describe('LiveCodePanel (WP-9)', () => {
   });
 
   it('python-стек: main.py и python-синтаксис', () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => json(200, { ...RUN_OK, tests: [] })),
-    );
     render(
       <LiveCodePanel sessionId={9} stack="python" editor={stubEditor()} review="" />,
     );
@@ -201,15 +177,6 @@ describe('LiveCodePanel (WP-9)', () => {
     };
 
     const renderTwoTasks = () => {
-      vi.stubGlobal(
-        'fetch',
-        vi.fn(async (url: string, init?: RequestInit) => {
-          if (init?.method === 'POST' && url.endsWith('/runs')) {
-            return json(200, RUN_OK);
-          }
-          return json(404, {});
-        }),
-      );
       return render(
         <LiveCodePanel
           sessionId={77}
@@ -265,8 +232,7 @@ describe('LiveCodePanel (WP-9)', () => {
     });
 
     it('«Запустить тесты» — /runs с task_id активной задачи; статус-точка и счётчик', async () => {
-      const fetchMock = vi.fn().mockResolvedValue(json(200, RUN_OK));
-      vi.stubGlobal('fetch', fetchMock);
+      const fetchMock = __api.on({ 'POST /runs': RUN_OK });
       const user = userEvent.setup();
       render(
         <LiveCodePanel

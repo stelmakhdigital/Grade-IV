@@ -117,10 +117,6 @@ class FakeWebSocket {
   }
 }
 
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status });
-}
-
 const ME = {
   user: { id: 1, email: 'cand@example.com', created_at: '2026-09-14T00:00:00Z' },
 };
@@ -155,39 +151,42 @@ const EVENTS = [
   { seq: 3, ts: '2026-09-14T10:01:10Z', kind: 'ai_utterance', data: { text: 'Расскажите о себе' } },
 ];
 
-/** fetch-мок с доступным .mock.calls (для ассертов POST-вызовов). */
-type FetchMock = {
-  (url: string, init?: RequestInit): Promise<Response>;
-  mock: { calls: unknown[][] };
-};
-
-function mockApi(opts: { session?: unknown; events?: unknown; report?: unknown } = {}): FetchMock {
-  return vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.includes('/auth/me')) return json(200, ME);
-    if (init?.method === 'POST' && url.endsWith('/sessions/9/pause')) {
-      return json(200, { ...(opts.session ?? S_ACTIVE), status: 'paused', paused_at: '2026-09-14T10:10:00Z' });
-    }
-    if (init?.method === 'POST' && url.endsWith('/sessions/9/resume')) {
-      return json(200, opts.session ?? S_ACTIVE);
-    }
-    if (url.endsWith('/sessions/9')) return json(200, opts.session ?? S_ACTIVE);
-    if (url.includes('/events')) return json(200, opts.events ?? EVENTS);
-    if (url.includes('/report')) return json(200, opts.report ?? REPORT_MIN);
-    if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
-    if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
-    if (url.includes('/sessions')) return json(200, []);
-    return json(404, {});
-  }) as unknown as FetchMock;
+/** Маршруты grade-api страницы сессии (id=9); extra — точечные маршруты теста. */
+function sessionRoutes(
+  opts: {
+    session?: unknown;
+    events?: unknown;
+    report?: unknown;
+    extra?: Record<string, unknown>;
+  } = {},
+): Record<string, unknown> {
+  return {
+    '/auth/me': ME,
+    'POST /sessions/9/pause': {
+      ...(opts.session ?? S_ACTIVE),
+      status: 'paused',
+      paused_at: '2026-09-14T10:10:00Z',
+    },
+    'POST /sessions/9/resume': opts.session ?? S_ACTIVE,
+    'GET /sessions/9': opts.session ?? S_ACTIVE,
+    '/events': opts.events ?? EVENTS,
+    '/report': opts.report ?? REPORT_MIN,
+    '/ws-ticket': { ticket: 'tik' },
+    '/sessions': [],
+    ...(opts.extra ?? {}),
+  };
 }
 
-function renderSession(fetchMock: unknown) {
-  vi.stubGlobal('fetch', fetchMock);
+/** Рендер страницы сессии; возвращает fetch-mock — ассерты по запросам. */
+function renderSession(opts: Parameters<typeof sessionRoutes>[0] = {}) {
+  const fetchMock = __api.on(sessionRoutes(opts));
   vi.stubGlobal('WebSocket', FakeWebSocket);
-  return render(
+  render(
     <AuthProvider>
       <SessionView id={9} />
     </AuthProvider>,
   );
+  return fetchMock;
 }
 
 function flush(): Promise<void> {
@@ -206,7 +205,7 @@ beforeEach(() => {
 
 describe('SessionView (WP-8)', () => {
   it('завершённая сессия — только чтение: запись диалога из /events', async () => {
-    renderSession(mockApi({ session: S_FINISHED }));
+    renderSession({ session: S_FINISHED });
     expect(await screen.findByText('Кандидат')).toBeInTheDocument();
     expect(screen.getByText('Привет')).toBeInTheDocument();
     expect(screen.getByText('ИИ-интервьюер')).toBeInTheDocument();
@@ -215,7 +214,7 @@ describe('SessionView (WP-8)', () => {
   });
 
   it('завершённая сессия: отчёт (WP-11) под записью', async () => {
-    renderSession(mockApi({ session: S_FINISHED }));
+    renderSession({ session: S_FINISHED });
     const report = await screen.findByTestId('report');
     expect(report).toHaveTextContent('Итог: 3,70 / 5');
     expect(screen.getByTestId('report-grade')).toHaveTextContent(
@@ -225,7 +224,7 @@ describe('SessionView (WP-8)', () => {
   });
 
   it('активная сессия: таймер, живой транскрипт, «ИИ говорит», finish', async () => {
-    renderSession(mockApi({ session: S_ACTIVE }));
+    renderSession({ session: S_ACTIVE });
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const fake = FakeWebSocket.instances[0];
     expect(fake.url).toContain('/ws/session/9');
@@ -264,7 +263,7 @@ describe('SessionView (WP-8)', () => {
   }, 10000);
 
   it('стриминговый STT: stt_partial → интерим-строка, final фиксирует её', async () => {
-    renderSession(mockApi({ session: S_ACTIVE }));
+    renderSession({ session: S_ACTIVE });
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const fake = FakeWebSocket.instances[0];
     await flush();
@@ -294,7 +293,7 @@ describe('SessionView (WP-8)', () => {
   // текстом. Причина — финал искал интерим только среди последней строки, а
   // между partial и final вставала реплика интервьюера.
   it('реплика интервьюера между partial и final не оставляет висячее «распознаётся ⋯»', async () => {
-    renderSession(mockApi({ session: S_ACTIVE }));
+    renderSession({ session: S_ACTIVE });
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const fake = FakeWebSocket.instances[0];
     await flush();
@@ -317,7 +316,7 @@ describe('SessionView (WP-8)', () => {
   }, 10000);
 
   it('микрофон без доступа к device — статус «нет доступа»', async () => {
-    renderSession(mockApi({ session: S_ACTIVE }));
+    renderSession({ session: S_ACTIVE });
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     await flush();
     // ждём именно разблокировки кнопки: экземпляр WS создаётся раньше onopen,
@@ -331,19 +330,13 @@ describe('SessionView (WP-8)', () => {
 
   it('стадия livecode: панель Live-Code, запуск → POST /runs', async () => {
     const S_LIVECODE = { ...S_ACTIVE, stage: 'livecode' };
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.includes('/auth/me')) return json(200, ME);
-      if (url.endsWith('/sessions/9')) return json(200, S_LIVECODE);
-      if (init?.method === 'POST' && url.endsWith('/runs')) {
-        return json(200, { exit_code: 0, stdout: '', stderr: '', duration_ms: 10, passed: true, tests: [] });
-      }
-      if (url.includes('/events')) return json(200, []);
-      if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
-      if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
-      if (url.includes('/sessions')) return json(200, []);
-      return json(404, {});
+    const fetchMock = renderSession({
+      session: S_LIVECODE,
+      events: [],
+      extra: {
+        'POST /runs': { exit_code: 0, stdout: '', stderr: '', duration_ms: 10, passed: true, tests: [] },
+      },
     });
-    renderSession(fetchMock);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const fake = FakeWebSocket.instances[0];
     await flush();
@@ -378,19 +371,15 @@ describe('SessionView (WP-8)', () => {
 
   it('стадия design: панель System Design с палитрой и холстом', async () => {
     const S_DESIGN = { ...S_ACTIVE, stage: 'design' };
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.includes('/auth/me')) return json(200, ME);
-      if (url.endsWith('/sessions/9')) return json(200, S_DESIGN);
-      if (init?.method === 'PUT' && url.endsWith('/whiteboard')) {
-        return json(200, { saved: true, structure: { blocks: [], links: 0 } });
-      }
-      if (url.includes('/events')) return json(200, []);
-      if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
-      if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
-      if (url.includes('/sessions')) return json(200, []);
-      return json(404, {});
+    renderSession({
+      session: S_DESIGN,
+      events: [],
+      extra: {
+        'PUT /sessions/9/whiteboard': { saved: true, structure: { blocks: [], links: 0 } },
+        // GET холста — как раньше: сохранённой схемы нет.
+        '/sessions/9/whiteboard': { state: null, structure: null },
+      },
     });
-    renderSession(fetchMock);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const fake = FakeWebSocket.instances[0];
     await flush();
@@ -409,8 +398,7 @@ describe('SessionView (WP-8)', () => {
   }, 15000);
 
   it('пауза (FR-S7): активная сессия — «Пауза», клик → POST /pause + баннер + «Продолжить»', async () => {
-    const fetchMock = mockApi();
-    renderSession(fetchMock);
+    const fetchMock = renderSession();
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const fake = FakeWebSocket.instances[0];
     await flush();
@@ -459,7 +447,7 @@ describe('SessionView (WP-8)', () => {
 
   it('пауза (FR-S7): перезагрузка страницы на paused-сессии — баннер и «Продолжить»', async () => {
     const S_PAUSED = { ...S_ACTIVE, status: 'paused', paused_at: '2026-09-14T10:10:00Z' };
-    renderSession(mockApi({ session: S_PAUSED }));
+    renderSession({ session: S_PAUSED });
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     expect(await screen.findByTestId('paused-banner')).toHaveTextContent('время не тарифицируется');
     expect(screen.getByRole('button', { name: 'Продолжить' })).toBeInTheDocument();
@@ -483,17 +471,11 @@ describe('SessionView (WP-8)', () => {
     // После finish REST отдаёт завершённую сессию (так делает сервер: WS закрыт,
     // refreshStatus видит finished → UI рисует отчёт).
     let finished = false;
-    const fetchMock = vi.fn(async (url: string) => {
-      if (url.includes('/auth/me')) return json(200, ME);
-      if (url.includes('/report')) return json(200, REPORT_WITH_TASKS);
-      if (url.endsWith('/sessions/9')) return json(200, finished ? S_FINISHED : S_ACTIVE);
-      if (url.includes('/events')) return json(200, []);
-      if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
-      if (url.includes('/ws-ticket')) return json(200, { ticket: 'tik' });
-      if (url.includes('/sessions')) return json(200, []);
-      return json(404, {});
+    renderSession({
+      events: [],
+      report: REPORT_WITH_TASKS,
+      extra: { 'GET /sessions/9': () => __api.json(200, finished ? S_FINISHED : S_ACTIVE) },
     });
-    renderSession(fetchMock);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const fake = FakeWebSocket.instances[0];
     await flush();
@@ -515,7 +497,7 @@ describe('SessionView (WP-8)', () => {
   }, 15000);
 
   it('stage_action: «К Live-Code» шлёт ui-событие', async () => {
-    renderSession(mockApi({ session: S_ACTIVE }));
+    renderSession({ session: S_ACTIVE });
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     const fake = FakeWebSocket.instances[0];
     await flush();
@@ -529,7 +511,7 @@ describe('SessionView (WP-8)', () => {
   }, 10000);
 
   it('отладка стадий: переключатель появляется с debug в stage-сообщении', async () => {
-    vi.stubGlobal('fetch', mockApi());
+    __api.on(sessionRoutes());
     // Без флага (prod) блока нет — переключателя стадий кандидат не видит.
     hookMock.fake = fakeVoiceSession(null);
     render(
@@ -570,7 +552,7 @@ describe('SessionView (WP-8)', () => {
 
   it('mic-dbg (dev): строка статистики рендерится при micDbg.chunks > 0', async () => {
     vi.stubEnv('VITE_MIC_DEBUG', 'true');
-    vi.stubGlobal('fetch', mockApi());
+    __api.on(sessionRoutes());
     hookMock.fake = fakeVoiceSession({
       path: 'worklet',
       ctxState: 'running',
@@ -595,7 +577,7 @@ describe('SessionView (WP-8)', () => {
 
   it('mic-dbg (dev): строки нет при chunks = 0 или micDbg = null', async () => {
     vi.stubEnv('VITE_MIC_DEBUG', 'true');
-    vi.stubGlobal('fetch', mockApi());
+    __api.on(sessionRoutes());
 
     // chunks = 0 — блок не рендерится
     hookMock.fake = fakeVoiceSession({
@@ -629,7 +611,7 @@ describe('SessionView (WP-8)', () => {
   }, 10000);
 
   it('mic-dbg (dev): без VITE_MIC_DEBUG строки нет даже при chunks > 0', async () => {
-    vi.stubGlobal('fetch', mockApi());
+    __api.on(sessionRoutes());
     hookMock.fake = fakeVoiceSession({
       path: 'worklet',
       ctxState: 'running',
@@ -648,7 +630,7 @@ describe('SessionView (WP-8)', () => {
   }, 10000);
 
   it('muted + error с /audio-debug.html — кликабельные ссылки (самодиагностика)', async () => {
-    vi.stubGlobal('fetch', mockApi());
+    __api.on(sessionRoutes());
     hookMock.fake = fakeVoiceSession(null, {
       mic: 'muted',
       error:
@@ -672,7 +654,7 @@ describe('SessionView (WP-8)', () => {
   }, 10000);
 
   it('error без /audio-debug.html — рендерится обычным текстом, ссылки нет', async () => {
-    vi.stubGlobal('fetch', mockApi());
+    __api.on(sessionRoutes());
     hookMock.fake = fakeVoiceSession(null, {
       mic: 'denied',
       error: 'Нет доступа к микрофону — разрешите в браузере.',
@@ -716,7 +698,7 @@ describe('Voice UX: история новые-сверху + режим запи
 
   it('REST-история завершённой сессии — тот же порядок (новое сверху)', async () => {
     // EVENTS: user «Привет» → ai «Расскажите о себе» (последнее).
-    renderSession(mockApi({ session: S_FINISHED }));
+    renderSession({ session: S_FINISHED });
     await screen.findByText('Кандидат');
     const items = Array.from(document.querySelectorAll('[data-testid="lines"] > li'));
     expect(items.length).toBeGreaterThanOrEqual(2);
@@ -727,7 +709,7 @@ describe('Voice UX: история новые-сверху + режим запи
     const scrollToSpy = vi.fn();
     // jsdom: scrollTo отсутствует — ставим шпион на прототип (до рендера).
     (Element.prototype as unknown as { scrollTo: unknown }).scrollTo = scrollToSpy;
-    renderSession(mockApi({ session: S_ACTIVE }));
+    renderSession({ session: S_ACTIVE });
     const fake = await waitFor(() => {
       expect(FakeWebSocket.instances).toHaveLength(1);
       return FakeWebSocket.instances[0]!;
@@ -880,7 +862,7 @@ describe('Voice UX: история новые-сверху + режим запи
 
   it('режим записи (E2E): сегменты не становятся user-строками и не запускают AI-ход; выключение мика → одно utterance со склеенным текстом', async () => {
     stubMicEnv();
-    renderSession(mockApi({ session: S_ACTIVE }));
+    renderSession({ session: S_ACTIVE });
     const fake = await waitFor(() => {
       expect(FakeWebSocket.instances).toHaveLength(1);
       return FakeWebSocket.instances[0]!;
@@ -927,7 +909,7 @@ describe('Voice UX: история новые-сверху + режим запи
 
   it('«недостаточно речи» (E2E): запись < 1.5 с речи → utterance НЕ отправляется, заметка', async () => {
     stubMicEnv();
-    renderSession(mockApi({ session: S_ACTIVE }));
+    renderSession({ session: S_ACTIVE });
     const fake = await waitFor(() => {
       expect(FakeWebSocket.instances).toHaveLength(1);
       return FakeWebSocket.instances[0]!;
@@ -963,14 +945,14 @@ describe('SessionView: интервью по резюме', () => {
   };
 
   it('заголовок — должность из резюме, а не название роли', async () => {
-    renderSession(mockApi({ session: S_RESUME }));
+    renderSession({ session: S_RESUME });
     expect(
       await screen.findByRole('heading', { name: 'Интервью: Python-разработчик / python' }),
     ).toBeInTheDocument();
   });
 
   it('в рельсе: роль по резюме, код — по первому языку, остальные — на вопросы', async () => {
-    renderSession(mockApi({ session: S_RESUME }));
+    renderSession({ session: S_RESUME });
     expect(await screen.findByText('Python-разработчик')).toBeInTheDocument();
     expect(screen.getByText('Ещё языки')).toBeInTheDocument();
     expect(screen.getByText('go')).toBeInTheDocument();

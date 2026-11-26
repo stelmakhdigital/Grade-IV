@@ -1,13 +1,9 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { beforeEach, describe, expect, it, type Mock } from 'vitest';
 import { setToken } from '../api';
 import { AuthProvider } from '../auth';
 import { CabinetView } from './CabinetView';
-
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status });
-}
 
 const ME = {
   user: { id: 1, email: 'cand@example.com', created_at: '2026-09-14T00:00:00Z' },
@@ -47,7 +43,7 @@ const PROFILES = [
 
 const RESUME = { about: 'Go 5 лет', file_name: 'resume.pdf', text_chars: 1234 };
 
-function mockApi(
+function cabinetRoutes(
   opts: {
     sessions?: unknown;
     create?: unknown;
@@ -58,31 +54,26 @@ function mockApi(
     /** Ответ GET (текущее состояние). По умолчанию — резюме нет. */
     resumeGet?: unknown;
   } = {},
-): Mock {
-  return vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.includes('/auth/me')) return json(200, opts.me ?? ME);
-    if (url.includes('/me/resume') && init?.method === 'PUT') {
-      return json(200, opts.resume ?? RESUME);
-    }
-    if (url.includes('/me/resume')) {
-      return json(200, opts.resumeGet ?? { about: '', file_name: '', text_chars: 0 });
-    }
-    if (init?.method === 'POST' && url.endsWith('/sessions')) {
-      return json(201, opts.create ?? S_ACTIVE);
-    }
-    if (url.includes('/profiles')) return json(200, opts.profiles ?? PROFILES);
-    if (url.includes('/sessions')) return json(200, opts.sessions ?? []);
-    return json(404, {});
-  });
+) {
+  return {
+    '/auth/me': opts.me ?? ME,
+    'PUT /me/resume': opts.resume ?? RESUME,
+    '/me/resume': opts.resumeGet ?? { about: '', file_name: '', text_chars: 0 },
+    'POST /sessions': opts.create ?? S_ACTIVE,
+    '/profiles': opts.profiles ?? PROFILES,
+    '/sessions': opts.sessions ?? [],
+  };
 }
 
-function renderCabinet(fetchMock: Mock) {
-  vi.stubGlobal('fetch', fetchMock);
-  return render(
+/** Рендер кабинета; возвращает fetch-mock — ассерты по URL, методу и телу. */
+function renderCabinet(opts: Parameters<typeof cabinetRoutes>[0] = {}) {
+  const fetchMock = __api.on(cabinetRoutes(opts));
+  render(
     <AuthProvider>
       <CabinetView />
     </AuthProvider>,
   );
+  return fetchMock;
 }
 
 /** Тело запроса старт-сессии (POST /sessions). */
@@ -98,8 +89,7 @@ beforeEach(() => {
 
 describe('CabinetView (WP-7)', () => {
   it('email и длительность интервью вместо баланса; история со статусами и действиями', async () => {
-    const fetchMock = mockApi({ sessions: [S_ACTIVE, S_FINISHED] });
-    renderCabinet(fetchMock);
+    renderCabinet({ sessions: [S_ACTIVE, S_FINISHED] });
     expect(await screen.findByTestId('user-email')).toBeInTheDocument();
     // Баланса минут больше нет; время — метрика: суммарная длительность сессий.
     expect(screen.queryByTestId('minutes')).not.toBeInTheDocument();
@@ -118,13 +108,12 @@ describe('CabinetView (WP-7)', () => {
   });
 
   it('пустая история — подсказка', async () => {
-    renderCabinet(mockApi({ sessions: [] }));
+    renderCabinet({ sessions: [] });
     expect(await screen.findByText(/Сессий пока нет/)).toBeInTheDocument();
   });
 
   it('старт: роль и грейд не отправляем — их подбирает ИИ по резюме', async () => {
-    const fetchMock = mockApi({ sessions: [], create: S_ACTIVE });
-    renderCabinet(fetchMock);
+    const fetchMock = renderCabinet({ sessions: [], create: S_ACTIVE });
     await screen.findByTestId('user-email');
     const user = userEvent.setup();
     await user.click(screen.getByTestId('start-session'));
@@ -134,8 +123,7 @@ describe('CabinetView (WP-7)', () => {
   });
 
   it('выбор профиля интервьюера — profile_id в body (итерация B)', async () => {
-    const fetchMock = mockApi({ sessions: [], create: S_ACTIVE });
-    renderCabinet(fetchMock);
+    const fetchMock = renderCabinet({ sessions: [], create: S_ACTIVE });
     await screen.findByTestId('user-email');
     const user = userEvent.setup();
     await user.selectOptions(screen.getByLabelText('Профиль интервьюера'), '1');
@@ -144,8 +132,7 @@ describe('CabinetView (WP-7)', () => {
   });
 
   it('резюме: индикатор из GET, сохранение — multipart PUT', async () => {
-    const fetchMock = mockApi({ resume: RESUME, resumeGet: RESUME });
-    renderCabinet(fetchMock);
+    const fetchMock = renderCabinet({ resume: RESUME, resumeGet: RESUME });
     await screen.findByTestId('resume-indicator');
     expect(screen.getByTestId('resume-indicator')).toHaveTextContent('resume.pdf');
     expect(screen.getByTestId('resume-indicator')).toHaveTextContent('1234');
@@ -169,13 +156,13 @@ describe('CabinetView (WP-7)', () => {
   });
 
   it('резюме нет — индикатор подсказывает заполнить', async () => {
-    renderCabinet(mockApi());
+    renderCabinet();
     await screen.findByTestId('resume-indicator');
     expect(screen.getByTestId('resume-indicator')).toHaveTextContent('не заполнено');
   });
 
   it('диалог: Escape закрывает при фокусе вне диалога, Tab не уходит в фон, фокус возвращается на кнопку', async () => {
-    renderCabinet(mockApi({ resumeGet: RESUME }));
+    renderCabinet({ resumeGet: RESUME });
     await screen.findByTestId('resume-indicator');
     const user = userEvent.setup();
     await user.click(screen.getByTestId('resume-open'));
@@ -212,7 +199,7 @@ describe('история: страницы, фильтр в URL, инертны�
       id: 100 + i,
       started_at: `2026-09-15T1${i % 10}:00:00Z`,
     }));
-    renderCabinet(mockApi({ sessions: many }));
+    renderCabinet({ sessions: many });
     await screen.findByTestId('user-email');
     expect(document.querySelectorAll('tbody tr').length).toBe(20);
     expect(screen.getByTestId('hist-more')).toHaveTextContent('Показать ещё 5 из 5');
@@ -222,7 +209,7 @@ describe('история: страницы, фильтр в URL, инертны�
   });
 
   it('фильтр пишется в адрес — F5 и «Назад» его сохраняют', async () => {
-    renderCabinet(mockApi({ sessions: [S_ACTIVE, S_FINISHED] }));
+    renderCabinet({ sessions: [S_ACTIVE, S_FINISHED] });
     await screen.findByTestId('user-email');
     const user = userEvent.setup();
     const chip = screen.getByTestId('hist-filter-active');
@@ -235,7 +222,7 @@ describe('история: страницы, фильтр в URL, инертны�
   });
 
   it('открытый диалог делает фон inert и aria-hidden, закрытый — снимает', async () => {
-    renderCabinet(mockApi({ resumeGet: RESUME }));
+    renderCabinet({ resumeGet: RESUME });
     await screen.findByTestId('resume-indicator');
     const header = () => document.querySelector('.header') as HTMLElement;
     expect(header().hasAttribute('inert')).toBe(false);

@@ -1,10 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ReportView } from './ReportView';
-
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status });
-}
 
 const REPORT = {
   overall: 4.25,
@@ -25,7 +21,7 @@ afterEach(() => {
 
 describe('ReportView (WP-11)', () => {
   it('200: рендер итогового отчёта', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json(200, REPORT)));
+    __api.on({ '/report': REPORT });
     render(<ReportView sessionId={9} />);
     expect(await screen.findByTestId('report')).toBeInTheDocument();
     expect(screen.getByTestId('report')).toHaveTextContent('Итог: 4,25 / 5');
@@ -41,13 +37,12 @@ describe('ReportView (WP-11)', () => {
 
   it('202 → 200: опрос до готовности', async () => {
     let calls = 0;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
+    __api.on({
+      '/report': () => {
         calls += 1;
-        return calls < 3 ? json(202, { status: 'generating' }) : json(200, REPORT);
-      }),
-    );
+        return calls < 3 ? __api.json(202, { status: 'generating' }) : __api.json(200, REPORT);
+      },
+    });
     render(<ReportView sessionId={9} pollMs={10} maxPolls={5} />);
     // Пока отчёт генерируется, состояние озвучивается скринридеру: блок
     // сменится сам, человек не должен опрашивать страницу руками.
@@ -61,12 +56,9 @@ describe('ReportView (WP-11)', () => {
   });
 
   it('409: ошибка (сессия не завершена)', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () =>
-        json(409, { code: 'invalid_state', message: 'отчёт доступен после завершения сессии' }),
-      ),
-    );
+    __api.on({
+      '/report': __api.failure(409, 'invalid_state', 'отчёт доступен после завершения сессии'),
+    });
     render(<ReportView sessionId={9} />);
     await waitFor(() => {
       expect(screen.getByTestId('report-error')).toHaveTextContent(
@@ -76,10 +68,7 @@ describe('ReportView (WP-11)', () => {
   });
 
   it('ошибка «ещё генерируется» после исчерпания опросов — с кнопкой «Повторить»', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => json(202, { status: 'generating' })),
-    );
+    __api.on({ '/report': __api.json(202, { status: 'generating' }) });
     render(<ReportView sessionId={9} pollMs={10} maxPolls={4} />);
     // 4 опроса × 10 мс — исчерпано, «ещё генерируется»
     await waitFor(() =>
@@ -112,7 +101,7 @@ describe('ReportView (WP-11)', () => {
         { session_id: 2, date: '2026-09-20T10:00:00Z', stack: 'python', grade: 'junior', overall: 4.1, same_stack: false, criteria_delta: {} },
       ],
     };
-    vi.stubGlobal('fetch', vi.fn(async () => json(200, REPORT_B)));
+    __api.on({ '/report': REPORT_B });
     render(<ReportView sessionId={9} />);
     expect(await screen.findByTestId('report')).toBeInTheDocument();
     expect(screen.getByTestId('report-verdict')).toHaveTextContent('Сильное Middle');
@@ -137,7 +126,7 @@ describe('ReportView (WP-11)', () => {
         { id: 'go-s1', title: 'Worker pool (stretch)', status: 'no_submission' },
       ],
     };
-    vi.stubGlobal('fetch', vi.fn(async () => json(200, REPORT_C)));
+    __api.on({ '/report': REPORT_C });
     render(<ReportView sessionId={9} />);
     expect(await screen.findByTestId('livecode-tasks')).toBeInTheDocument();
     expect(screen.getByTestId('livecode-tasks')).toHaveTextContent('Разворот списка');
@@ -169,7 +158,7 @@ describe('ReportView: оценки по стадиям (spec-24)', () => {
   };
 
   it('показывает число, основание и пропущенные артефакты', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json(200, withStages)));
+    __api.on({ '/report': withStages });
     render(<ReportView sessionId={9} />);
     const list = await screen.findByTestId('report-stages');
     expect(list).toHaveTextContent('задач 3, сдано 2, пройдено 1');
@@ -179,7 +168,7 @@ describe('ReportView: оценки по стадиям (spec-24)', () => {
   });
 
   it('отчёта без стадий не ломает блок (старые сессии)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json(200, REPORT)));
+    __api.on({ '/report': REPORT });
     render(<ReportView sessionId={9} />);
     await screen.findByTestId('report');
     expect(screen.queryByTestId('report-stages')).toBeNull();

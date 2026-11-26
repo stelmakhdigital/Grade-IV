@@ -47,10 +47,7 @@ beforeEach(() => {
   FakeWebSocket.instances = [];
   vi.stubGlobal('WebSocket', FakeWebSocket);
   // WS-connect спрашивает одноразовый тикет (секрет в URL больше не ездит).
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ ticket: 'tik' }) })),
-  );
+  __api.on({ '/ws-ticket': { ticket: 'tik' } });
 });
 
 describe('SessionWS (WP-8)', () => {
@@ -69,7 +66,7 @@ describe('SessionWS (WP-8)', () => {
   });
 
   it('тикет не выдали — не подключаемся и сообщаем об ошибке', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    __api.on({ '/ws-ticket': __api.failure(500, 'internal', 'тикет не выдан') });
     let closed: string | null = null;
     const ws = new SessionWS();
     ws.connect(7, { onMessage: () => {}, onAudio: () => {}, onClose: (r) => (closed = r) });
