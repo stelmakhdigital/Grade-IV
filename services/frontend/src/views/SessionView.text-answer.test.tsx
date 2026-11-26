@@ -8,7 +8,7 @@
  * SessionView.test.tsx не трогаем (его fakeVoiceSession не знает про
  * sendTextUtterance).
  */
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -68,6 +68,7 @@ const t = vi.hoisted(() => {
 
 vi.mock('../hooks/useVoiceSession', () => ({
   useVoiceSession: () => t.fakeSession(),
+  MAX_TRANSCRIPT_LINES: 200,
 }));
 
 vi.mock('../auth', () => ({
@@ -144,5 +145,34 @@ describe('текстовый ввод реплик (voice-стадия, spec-18 
     t.state.paused = true;
     renderView();
     expect(screen.queryByTestId('text-answer')).toBeNull();
+  });
+
+  it('ход занят: причина блокировки — текстом, а не только title кнопки', async () => {
+    t.state.speaking = true; // интервьюер говорит => waitingForAI
+    try {
+      renderView();
+      const hint = await screen.findByTestId('wait-hint');
+      expect(hint).toHaveTextContent('Интервьюер формулирует вопрос');
+      expect(screen.getByTestId('mic-toggle')).toBeDisabled();
+    } finally {
+      t.state.speaking = false;
+    }
+  });
+
+  it('ответ дольше 30 с — подсказка говорит, что можно завершить', async () => {
+    vi.useFakeTimers();
+    t.state.speaking = true;
+    try {
+      renderView();
+      // сразу — нейтральная формулировка
+      expect(screen.getByTestId('wait-hint')).toHaveTextContent('формулирует вопрос');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(31_000);
+      });
+      expect(screen.getByTestId('wait-hint')).toHaveTextContent('Завершить интервью');
+    } finally {
+      t.state.speaking = false;
+      vi.useRealTimers();
+    }
   });
 });

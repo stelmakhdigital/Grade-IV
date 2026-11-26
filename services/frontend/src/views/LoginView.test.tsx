@@ -50,7 +50,7 @@ describe('LoginView (WP-7)', () => {
     const fetchMock = vi.fn().mockResolvedValue(json(201, AUTH_OK));
     harness(fetchMock);
     const user = userEvent.setup();
-    await user.click(screen.getByRole('tab', { name: 'Регистрация' }));
+    await user.click(screen.getByRole('button', { name: 'Регистрация' }));
     await user.type(screen.getByLabelText('Email'), 'cand@example.com');
     await user.type(screen.getByLabelText('Пароль'), 'password1');
     await user.click(screen.getByRole('button', { name: 'Создать аккаунт' }));
@@ -64,7 +64,7 @@ describe('LoginView (WP-7)', () => {
       .mockResolvedValue(json(409, { code: 'email_exists', msg: 'email уже зарегистрирован' }));
     harness(fetchMock);
     const user = userEvent.setup();
-    await user.click(screen.getByRole('tab', { name: 'Регистрация' }));
+    await user.click(screen.getByRole('button', { name: 'Регистрация' }));
     await user.type(screen.getByLabelText('Email'), 'cand@example.com');
     await user.type(screen.getByLabelText('Пароль'), 'password1');
     await user.click(screen.getByRole('button', { name: 'Создать аккаунт' }));

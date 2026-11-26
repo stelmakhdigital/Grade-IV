@@ -80,7 +80,7 @@ func (s *Server) handleSessionRuns(w http.ResponseWriter, r *http.Request) {
 	if ok, retry := s.runLimit.allow("run:" + strconv.FormatInt(id, 10)); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
 		writeError(w, http.StatusTooManyRequests, "too_many_requests",
-			"слишком часто запускаешь тесты — подожди "+strconv.Itoa(retry)+" с")
+			"Слишком часто запускаете тесты — подождите "+strconv.Itoa(retry)+" с")
 		return
 	}
 

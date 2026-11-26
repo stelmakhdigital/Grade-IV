@@ -214,7 +214,7 @@ describe('SessionView (WP-8)', () => {
   it('завершённая сессия: отчёт (WP-11) под записью', async () => {
     renderSession(mockApi({ session: S_FINISHED }));
     const report = await screen.findByTestId('report');
-    expect(report).toHaveTextContent('Итог: 3.70 / 5');
+    expect(report).toHaveTextContent('Итог: 3,70 / 5');
     expect(screen.getByTestId('report-grade')).toHaveTextContent(
       'грейд подтверждён, есть точки роста',
     );

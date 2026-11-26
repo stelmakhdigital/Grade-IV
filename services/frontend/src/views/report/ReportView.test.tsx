@@ -28,12 +28,12 @@ describe('ReportView (WP-11)', () => {
     vi.stubGlobal('fetch', vi.fn(async () => json(200, REPORT)));
     render(<ReportView sessionId={9} />);
     expect(await screen.findByTestId('report')).toBeInTheDocument();
-    expect(screen.getByTestId('report')).toHaveTextContent('Итог: 4.25 / 5');
+    expect(screen.getByTestId('report')).toHaveTextContent('Итог: 4,25 / 5');
     expect(screen.getByTestId('report-grade')).toHaveTextContent(
       'грейд подтверждён с запасом',
     );
     expect(screen.getByTestId('score-Live-Code (алгоритм, качество кода, тесты)')).toHaveTextContent(
-      '5.0',
+      '5,0',
     );
     expect(screen.getByText('сильная аргументация')).toBeInTheDocument();
     expect(screen.getByText('попрактиковаться в design')).toBeInTheDocument();
@@ -117,15 +117,15 @@ describe('ReportView (WP-11)', () => {
     expect(await screen.findByTestId('report')).toBeInTheDocument();
     expect(screen.getByTestId('report-verdict')).toHaveTextContent('Сильное Middle');
     expect(screen.getByTestId('evidence-Live-Code (алгоритм, качество кода, тесты)')).toHaveTextContent('пропущен edge-case');
-    expect(screen.getByTestId('gap-Live-Code (алгоритм, качество кода, тесты)')).toHaveTextContent('1.5');
+    expect(screen.getByTestId('gap-Live-Code (алгоритм, качество кода, тесты)')).toHaveTextContent('1,5');
     expect(screen.getByText('разбирать 2 задачи в день')).toBeInTheDocument();
     expect(screen.getByTestId('report-study-2w')).toHaveTextContent('неделя 1: алгоритмы');
     expect(screen.getByTestId('report-grade-gap')).toHaveTextContent('До Senior не хватает');
     expect(screen.getByTestId('report-progress')).toBeInTheDocument();
-    expect(screen.getByTestId('progress-overall-1')).toHaveTextContent('3.80');
-    expect(screen.getByTestId('progress-overall-2')).toHaveTextContent('4.10');
+    expect(screen.getByTestId('progress-overall-1')).toHaveTextContent('3,80');
+    expect(screen.getByTestId('progress-overall-2')).toHaveTextContent('4,10');
     // Δ к текущему
-    expect(screen.getByText('Live-Code (алгоритм, качество кода, тесты): -0.8')).toBeInTheDocument();
+    expect(screen.getByText('Live-Code (алгоритм, качество кода, тесты): -0,8')).toBeInTheDocument();
   });
 
   it('spec-13B T3: per-task секция Live-Code (название + результат)', async () => {
@@ -173,7 +173,7 @@ describe('ReportView: оценки по стадиям (spec-24)', () => {
     render(<ReportView sessionId={9} />);
     const list = await screen.findByTestId('report-stages');
     expect(list).toHaveTextContent('задач 3, сдано 2, пройдено 1');
-    expect(list).toHaveTextContent('2.3 / 5');
+    expect(list).toHaveTextContent('2,3 / 5');
     expect(list).toHaveTextContent('обязательных артефактов кейса: 3 из 5');
     expect(screen.getByText(/VPN, Мониторинг/)).toBeInTheDocument();
   });

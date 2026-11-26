@@ -5,6 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getReport, revokeShare, shareReport, type Report, type ShareInfo } from '../../api';
+import { num } from '../../format';
 import { apiErrorMessage } from '../LoginView';
 
 export interface ReportViewProps {
@@ -140,7 +141,11 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS, 
                 aria-label="Публичная ссылка на отчёт"
                 onFocus={(e) => e.currentTarget.select()}
               />
-              {copied && <span className="muted small">скопировано в буфер обмена</span>}
+              {copied && (
+                <span className="muted small" role="status">
+                  скопировано в буфер обмена
+                </span>
+              )}
               <button type="button" className="btn ghost" onClick={() => void revoke()}>
                 Отозвать
               </button>
@@ -172,7 +177,7 @@ export function ReportBody({
     <section className="card report" data-testid="report">
       <header className="report-head">
         <div>
-          <h2>Итог: {report.overall.toFixed(2)} / 5</h2>
+          <h2>Итог: {num(report.overall)} / 5</h2>
           <p className="report-grade" data-testid="report-grade">
             {report.grade_recommendation}
           </p>
@@ -192,7 +197,7 @@ export function ReportBody({
             <div className="criterion-top">
               <span className="criterion-name">{c.name}</span>
               <span className={`criterion-score ${scoreColor(c.score)}`} data-testid={`score-${c.name}`}>
-                {c.score.toFixed(1)}
+                {num(c.score, 1)}
                 <small className="muted"> · {Math.round(c.weight * 100)}%</small>
               </span>
             </div>
@@ -213,7 +218,7 @@ export function ReportBody({
             )}
             {c.gap_to_grade !== undefined && c.gap_to_grade > 0 && (
               <p className="criterion-gap" data-testid={`gap-${c.name}`}>
-                Разрыв до грейда: {c.gap_to_grade.toFixed(1)} балла
+                Разрыв до грейда: {num(c.gap_to_grade, 1)} балла
               </p>
             )}
             {c.study_plan && c.study_plan.length > 0 && (
@@ -234,7 +239,7 @@ export function ReportBody({
               <li key={st.stage} className="report-stage">
                 <span className="report-stage-title">{st.title}</span>
                 <span className={`report-stage-score ${scoreColor(st.score)}`}>
-                  {st.score.toFixed(1)} / 5
+                  {num(st.score, 1)} / 5
                 </span>
                 <p className="report-stage-basis">{st.basis}</p>
                 {st.evidence && st.evidence.length > 0 && (
@@ -334,11 +339,11 @@ export function ReportBody({
                   <td>{new Date(p.date).toLocaleDateString('ru-RU')}</td>
                   <td>{p.grade}</td>
                   <td>{p.stack}</td>
-                  <td data-testid={`progress-overall-${p.session_id}`}>{p.overall.toFixed(2)}</td>
+                  <td data-testid={`progress-overall-${p.session_id}`}>{num(p.overall)}</td>
                   <td>
                     {Object.entries(p.criteria_delta).map(([k, d]) => (
                       <span key={k} className={`delta ${d > 0 ? 'up' : d < 0 ? 'down' : 'flat'}`}>
-                        {k}: {d > 0 ? '+' : ''}{d.toFixed(1)}
+                        {k}: {d > 0 ? '+' : ''}{num(d, 1)}
                       </span>
                     ))}
                   </td>

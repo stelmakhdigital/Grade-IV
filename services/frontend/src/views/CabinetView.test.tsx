@@ -200,3 +200,52 @@ describe('CabinetView (WP-7)', () => {
     expect(document.activeElement).toBe(screen.getByTestId('resume-open'));
   });
 });
+
+describe('история: страницы, фильтр в URL, инертный фон диалога (ui-review 2026-11-27)', () => {
+  beforeEach(() => {
+    window.location.hash = '#/';
+  });
+
+  it('больше 20 сессий — показаны 20 и кнопка «Показать ещё»', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      ...S_ACTIVE,
+      id: 100 + i,
+      started_at: `2026-09-15T1${i % 10}:00:00Z`,
+    }));
+    renderCabinet(mockApi({ sessions: many }));
+    await screen.findByTestId('user-email');
+    expect(document.querySelectorAll('tbody tr').length).toBe(20);
+    expect(screen.getByTestId('hist-more')).toHaveTextContent('Показать ещё 5 из 5');
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('hist-more'));
+    expect(document.querySelectorAll('tbody tr').length).toBe(25);
+  });
+
+  it('фильтр пишется в адрес — F5 и «Назад» его сохраняют', async () => {
+    renderCabinet(mockApi({ sessions: [S_ACTIVE, S_FINISHED] }));
+    await screen.findByTestId('user-email');
+    const user = userEvent.setup();
+    const chip = screen.getByTestId('hist-filter-active');
+    expect(chip).toHaveAttribute('aria-pressed', 'false');
+    await user.click(chip);
+    expect(window.location.hash).toBe('#/?f=active');
+    expect(screen.getByTestId('hist-filter-active')).toHaveAttribute('aria-pressed', 'true');
+    // в фильтре только активные
+    await waitFor(() => expect(document.querySelectorAll('tbody tr').length).toBe(1));
+  });
+
+  it('открытый диалог делает фон inert и aria-hidden, закрытый — снимает', async () => {
+    renderCabinet(mockApi({ resumeGet: RESUME }));
+    await screen.findByTestId('resume-indicator');
+    const header = () => document.querySelector('.header') as HTMLElement;
+    expect(header().hasAttribute('inert')).toBe(false);
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('resume-open'));
+    await screen.findByTestId('resume-about');
+    expect(header().hasAttribute('inert')).toBe(true);
+    expect(header()).toHaveAttribute('aria-hidden', 'true');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('resume-about')).not.toBeInTheDocument());
+    expect(header().hasAttribute('inert')).toBe(false);
+  });
+});

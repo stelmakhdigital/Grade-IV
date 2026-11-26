@@ -29,10 +29,14 @@ import {
   type TTSVoice,
 } from '../api';
 import { useAuth } from '../auth';
+import { useHashQuery } from '../hooks/useHashQuery';
+import { tablistKeyDown } from '../hooks/tablistKeys';
 import { practiceLabel } from '../labels';
 import { ConfirmDialog, type AskConfirm } from '../confirm';
 
 const GRADES: Grade[] = ['junior', 'middle', 'senior', 'staff'];
+
+type AdminTab = 'templates' | 'openings' | 'voices' | 'tracks';
 const GRADE_LABEL: Record<string, string> = {
   junior: 'Junior',
   middle: 'Middle',
@@ -57,7 +61,14 @@ function gradeLabel(g: string): string {
 
 export function AdminView() {
   const { user, logout } = useAuth();
-  const [tab, setTab] = useState<'templates' | 'openings' | 'voices' | 'tracks'>('templates');
+  // Вкладка — в URL (#/admin?tab=voices): F5 и «Назад» сохраняют раздел
+  // (ui-review 2026-11-27).
+  const [query, setQuery] = useHashQuery();
+  const TABS = ['templates', 'openings', 'voices', 'tracks'] as const;
+  const tab: AdminTab = (TABS as readonly string[]).includes(query.get('tab') ?? '')
+    ? (query.get('tab') as AdminTab)
+    : 'templates';
+  const setTab = (t: AdminTab): void => setQuery({ tab: t === 'templates' ? '' : t });
 
   // Защита: прямой заход на #/admin без прав — запрет (роут публичный, доступ по is_admin).
   if (user !== null && user.is_admin === false) {
@@ -86,7 +97,16 @@ export function AdminView() {
         </div>
       </header>
 
-      <div className="file-tabs" role="tablist">
+      <div
+        className="file-tabs"
+        role="tablist"
+        aria-label="Разделы админки"
+        onKeyDown={tablistKeyDown({
+          index: TABS.indexOf(tab),
+          count: TABS.length,
+          onSelect: (i) => setTab(TABS[i]),
+        })}
+      >
         {(
           [
             ['templates', 'Шаблоны'],
@@ -99,6 +119,8 @@ export function AdminView() {
             key={key}
             type="button"
             role="tab"
+            id={`admin-tab-${key}`}
+            aria-controls="admin-panel"
             aria-selected={tab === key}
             className={tab === key ? 'tab active' : 'tab'}
             onClick={() => setTab(key)}
@@ -108,10 +130,12 @@ export function AdminView() {
         ))}
       </div>
 
-      {tab === 'templates' && <TemplatesTab />}
-      {tab === 'openings' && <OpeningsTab />}
-      {tab === 'voices' && <VoicesTab />}
-      {tab === 'tracks' && <TracksTab />}
+      <div id="admin-panel" role="tabpanel" aria-labelledby={`admin-tab-${tab}`}>
+        {tab === 'templates' && <TemplatesTab />}
+        {tab === 'openings' && <OpeningsTab />}
+        {tab === 'voices' && <VoicesTab />}
+        {tab === 'tracks' && <TracksTab />}
+      </div>
     </main>
   );
 }
@@ -1138,8 +1162,8 @@ function TracksTab() {
               >
                 <span
                   className="drag-handle"
-                  title="Порядок группы — перетащите"
-                  aria-label="Перетащить группу"
+                  title="Порядок группы — перетащите или кнопками выше/ниже"
+                  aria-hidden="true"
                   draggable
                   onDragStart={(e) => {
                     e.dataTransfer.setData('text/plain', String(i));
@@ -1304,6 +1328,7 @@ function TracksTab() {
                 <th scope="col">Критерий</th>
                 <th scope="col">Вес (0..1)</th>
                 <th scope="col">Подсказка оценщику</th>
+                <th scope="col">Порядок</th>
                 <th scope="col"></th>
               </tr>
             </thead>
@@ -1339,6 +1364,41 @@ function TracksTab() {
                         setF({ criteria: form.criteria.map((x, j) => (j === i ? { ...x, hint: e.target.value } : x)) })
                       }
                     />
+                  </td>
+                  <td>
+                    {/* Порядок критериев менялся только перетаскиванием группы;
+                        для строк таблицы клавиатурного пути не было вовсе
+                        (ui-review 2026-11-27). */}
+                    <button
+                      type="button"
+                      className="btn ghost small"
+                      aria-label={`Критерий «${c.name}» выше`}
+                      disabled={i === 0}
+                      onClick={() =>
+                        setF({
+                          criteria: form.criteria.map((x, j, arr) =>
+                            j === i - 1 ? arr[i] : j === i ? arr[i - 1] : x,
+                          ),
+                        })
+                      }
+                    >
+                      ↑
+                    </button>{' '}
+                    <button
+                      type="button"
+                      className="btn ghost small"
+                      aria-label={`Критерий «${c.name}» ниже`}
+                      disabled={i === form.criteria.length - 1}
+                      onClick={() =>
+                        setF({
+                          criteria: form.criteria.map((x, j, arr) =>
+                            j === i + 1 ? arr[i] : j === i ? arr[i + 1] : x,
+                          ),
+                        })
+                      }
+                    >
+                      ↓
+                    </button>
                   </td>
                   <td>
                     <button

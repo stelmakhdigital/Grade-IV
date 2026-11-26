@@ -7,7 +7,8 @@
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useAuth } from '../auth';
 import { MicVisualizer, type MicEqMode } from './MicVisualizer';
-import { useVoiceSession } from '../hooks/useVoiceSession';
+import { useVoiceSession, MAX_TRANSCRIPT_LINES } from '../hooks/useVoiceSession';
+import { num } from '../format';
 import { micDebugEnabled } from '../audio/mic';
 import { formatRecDuration, mergeRecording, MIN_SPEECH_MS } from '../recording';
 import { formatClock, practiceLabel, statusLabel, stageLabel } from '../labels';
@@ -99,6 +100,16 @@ export function SessionView({ id }: { id: number }) {
     const t = window.setTimeout(() => setConfirmFinish(false), 5000);
     return () => window.clearTimeout(t);
   }, [confirmFinish]);
+
+  // Если интервьюер отвечает дольше 30 с — кандидату нужно сказать, что
+  // делать, а не показывать вечное «Ожидание ИИ…» (ui-review 2026-11-27).
+  const [aiStalled, setAiStalled] = useState(false);
+  useEffect(() => {
+    setAiStalled(false);
+    if (!waitingForAI) return;
+    const t = window.setTimeout(() => setAiStalled(true), 30_000);
+    return () => window.clearTimeout(t);
+  }, [waitingForAI]);
 
   // История диалога — новые СВЕРХУ (FR-S8): lines хранятся как есть (append,
   // кап 200), рендер — перевёрнутый порядок (interim — последняя — наверху).
@@ -465,7 +476,7 @@ export function SessionView({ id }: { id: number }) {
                   {/* spec-14/D15: живой прогресс минимума речи — раньше
                       «недостаточно речи» выяснялось постфактум в recNote. */}
                   <span className="rec-speech-hint" data-testid="rec-speech-hint">
-                    речи {(recTotalSpeechMs / 1000).toFixed(1)} с · нужно ≥ {(MIN_SPEECH_MS / 1000).toFixed(1)} с
+                    речи {num(recTotalSpeechMs / 1000, 1)} с · нужно ≥ {num(MIN_SPEECH_MS / 1000, 1)} с
                   </span>
                   <button
                     type="button"
@@ -574,6 +585,17 @@ export function SessionView({ id }: { id: number }) {
               </button>
             )}
           </div>
+
+          {/* Причина, почему микрофон и отправка текстом сейчас неактивны:
+              на disabled-кнопке её не объявить, поэтому она текстом рядом.
+              Скринридеру — polite, чтобы не перекрикивать реплику ИИ. */}
+          {waitingForAI && (
+            <p className="muted small" role="status" data-testid="wait-hint">
+              {aiStalled
+                ? 'Интервьюер отвечает дольше обычного. Можно подождать или завершить интервью кнопкой «Завершить интервью».'
+                : 'Интервьюер формулирует вопрос — отвечать можно, когда он закончит.'}
+            </p>
+          )}
             </>
           )}
           {error !== null && (
@@ -597,6 +619,13 @@ export function SessionView({ id }: { id: number }) {
 
       <section className="card transcript" aria-label="Транскрипт">
         {lines.length === 0 && <p className="muted">Диалог появится здесь.</p>}
+        {/* Кап держим во вьюшке, но молчать о нём — выглядит как потеря записи. */}
+        {lines.length >= MAX_TRANSCRIPT_LINES && (
+          <p className="muted small" data-testid="transcript-cap">
+            Показаны последние {MAX_TRANSCRIPT_LINES} реплик. Полная запись — в
+            отчёте после завершения.
+          </p>
+        )}
         <ol className="transcript-list" data-testid="lines" ref={transcriptRef}>
           {[...lines].reverse().map((l) => (
             <li key={l.id} className={`line ${l.who}${l.interim ? ' interim' : ''}`}>

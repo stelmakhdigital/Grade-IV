@@ -81,11 +81,14 @@ export function LoginView() {
       </section>
 
       <form className="card auth-card" onSubmit={onSubmit} noValidate>
-        <div className="tabs" role="tablist">
+        {/* Это переключатель режима одной и той же формы, а не вкладки с
+            панелями: роль tab обещала бы клавиатуру стрелок и role=tabpanel.
+            Группа кнопок с aria-pressed — то же самое без несблюдаемого
+            контракта (ui-review 2026-11-27). */}
+        <div className="tabs" role="group" aria-label="Вход или регистрация">
           <button
             type="button"
-            role="tab"
-            aria-selected={mode === 'login'}
+            aria-pressed={mode === 'login'}
             className={mode === 'login' ? 'tab active' : 'tab'}
             onClick={() => switchMode('login')}
           >
@@ -93,8 +96,7 @@ export function LoginView() {
           </button>
           <button
             type="button"
-            role="tab"
-            aria-selected={mode === 'register'}
+            aria-pressed={mode === 'register'}
             className={mode === 'register' ? 'tab active' : 'tab'}
             onClick={() => switchMode('register')}
           >
@@ -128,7 +130,7 @@ export function LoginView() {
           </p>
         )}
         <button type="submit" className="btn primary" disabled={busy}>
-          {busy ? '…' : mode === 'login' ? 'Войти' : 'Создать аккаунт'}
+          {busy ? (mode === 'login' ? 'Входим…' : 'Создаём аккаунт…') : mode === 'login' ? 'Войти' : 'Создать аккаунт'}
         </button>
       </form>
     </main>

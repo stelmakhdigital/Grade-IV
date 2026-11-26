@@ -12,6 +12,9 @@ body {
   background: var(--ink-0);
   color: var(--text-1);
   -webkit-font-smoothing: antialiased;
+  /* Над кнопкой микрофона стягивание вниз перезагружало страницу посреди
+     интервью (pull-to-refresh). */
+  overscroll-behavior-y: contain;
 }
 
 /* Моноширинный — только там, где что-то измеряется или исполняется: метрики,
@@ -41,6 +44,9 @@ samp,
   max-width: var(--page-max);
   margin: 0 auto;
   padding: var(--s-7) var(--s-5);
+  /* Чёлка/home-indicator: низ растёт на безопасную зону (нужен
+     viewport-fit=cover в index.html). */
+  padding-bottom: calc(var(--s-7) + env(safe-area-inset-bottom));
 }
 
 /* Ширина строки: читать должно быть удобно. Мера нужна там, где читают
@@ -138,8 +144,12 @@ p {
   text-decoration: none;
 }
 
-.btn:hover {
-  border-color: var(--line-3);
+/* Подсветку «наведено» держим только там, где наведение существует: после
+   тапа :hover остаётся и кнопка выглядит наведённой ложно. */
+@media (hover: hover) {
+  .btn:hover {
+    border-color: var(--line-3);
+  }
 }
 
 /* Отклик на нажатие: на тач-устройствах :hover не срабатывает, и без
@@ -190,8 +200,10 @@ p {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.vacancy-link:hover {
-  color: var(--accent-hi);
+@media (hover: hover) {
+  .vacancy-link:hover {
+    color: var(--accent-hi);
+  }
 }
 
 .vacancy-indicator {
@@ -528,7 +540,8 @@ p {
   display: inline-block;
   padding: 2px 8px;
   border-radius: var(--r-ctl);
-  font-size: var(--fs-label);
+  /* Статус — смысл, а не украшение: 12px для него мелко (ui-review 2026-11-27). */
+  font-size: var(--fs-meta);
   border: 1px solid var(--line-2);
 }
 
@@ -1164,8 +1177,10 @@ p {
   cursor: pointer;
   font-size: var(--fs-meta);
 }
-.palette-item:hover {
-  border-color: var(--accent);
+@media (hover: hover) {
+  .palette-item:hover {
+    border-color: var(--accent);
+  }
 }
 /* spec-19: превью палитры в админ-редакторе трека — как на доске кандидата. */
 .palette-preview {
@@ -1418,7 +1433,7 @@ a:focus-visible {
   padding: 1px 6px;
   border-radius: var(--r-tag);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  font-size: var(--fs-label);
+  font-size: var(--fs-meta);
 }
 .score-chip.good {
   color: var(--ok);
@@ -1434,7 +1449,7 @@ a:focus-visible {
 .paused-warn {
   display: block;
   margin-top: 3px;
-  font-size: var(--fs-label);
+  font-size: var(--fs-meta);
   color: var(--warn);
 }
 .paused-warn.danger {
@@ -1505,6 +1520,9 @@ a:focus-visible {
   .tab,
   .task-tab,
   .palette-item,
+  .field select,
+  .field input,
+  .vacancy-link,
   .history-filter .chip {
     min-height: 44px;
   }
@@ -1742,6 +1760,16 @@ a:focus-visible {
       "head"
       "rail"
       "work";
+  }
+
+  /* На телефоне колонка одна и страница скроллится сама: внутренний скролл
+     диалога только прятал реплики (ui-review 2026-11-27). */
+  .session-work > .transcript {
+    max-height: none;
+  }
+
+  .session-work > .transcript .transcript-list {
+    max-height: 60vh;
   }
 
   .session-rail {

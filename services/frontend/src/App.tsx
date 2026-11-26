@@ -26,9 +26,15 @@ function useHashRoute(): string {
   return hash;
 }
 
+/** Путь роута без query (#/sessions/7?t=2 -> #/sessions/7). */
+function pathOf(hash: string): string {
+  const i = hash.indexOf('?');
+  return i < 0 ? hash : hash.slice(0, i);
+}
+
 /** #/sessions/42 -> 42; null — если id не число. */
 function parseSessionId(hash: string): number | null {
-  const m = /^#\/sessions\/(\d+)$/.exec(hash);
+  const m = /^#\/sessions\/(\d+)$/.exec(pathOf(hash));
   return m !== null ? Number(m[1]) : null;
 }
 
@@ -41,14 +47,30 @@ function parseShareToken(hash: string): string | null {
 
 // #/admin — admin-UI (итерация 11): редактирование шаблонов/начал/голосов.
 function isAdminRoute(hash: string): boolean {
-  return hash === '#/admin' || hash === '#/admin/';
+  const p = pathOf(hash);
+  return p === '#/admin' || p === '#/admin/';
 }
 
 function Routes() {
-  const { status } = useAuth();
+  const { status, user } = useAuth();
   const hash = useHashRoute();
   const sessionId = parseSessionId(hash);
   const shareToken = parseShareToken(hash);
+  const admin = isAdminRoute(hash);
+
+  // Вкладка браузера должна различать экраны (ui-review 2026-11-27).
+  useEffect(() => {
+    document.title =
+      shareToken !== null
+        ? 'Отчёт — Грейд'
+        : sessionId !== null
+          ? `Интервью #${sessionId} — Грейд`
+          : admin
+            ? 'Админ — Грейд'
+            : status === 'guest'
+              ? 'Вход — Грейд'
+              : 'Грейд';
+  }, [hash, status, sessionId, shareToken, admin]);
 
   if (status === 'loading') {
     return (
@@ -69,7 +91,20 @@ function Routes() {
   if (status === 'guest') {
     return <LoginView />;
   }
-  if (isAdminRoute(hash)) {
+  if (admin) {
+    // Не-админ, пришедший по прямой ссылке, должен видеть «нет прав», а не
+    // обвес админки с текстом 403 (ui-review 2026-11-27).
+    if (user?.is_admin !== true) {
+      return (
+        <main className="app">
+          <h1>Грейд</h1>
+          <p className="muted">
+            Недостаточно прав: эта страница только для администраторов.{' '}
+            <a href="#/">В кабинет</a>
+          </p>
+        </main>
+      );
+    }
     return <AdminView />;
   }
   if (sessionId !== null) {

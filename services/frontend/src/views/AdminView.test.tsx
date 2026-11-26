@@ -263,7 +263,7 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
     // drag строки 0 на строку 1 → Бета должна стать первой
     const r0 = screen.getByTestId('admin-track-group-row-0');
     const r1 = screen.getByTestId('admin-track-group-row-1');
-    fireEvent.dragStart(within(r0).getByLabelText('Перетащить группу'), { dataTransfer: { setData: vi.fn() } });
+    fireEvent.dragStart(r0.querySelector('.drag-handle') as HTMLElement, { dataTransfer: { setData: vi.fn() } });
     fireEvent.dragOver(r1, { dataTransfer: { getData: () => '0' } });
     fireEvent.drop(r1, { dataTransfer: { getData: () => '0' } });
     // порядок: первая строка теперь «Бета»
@@ -316,6 +316,41 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
     const del = fetchMock.mock.calls.find((c) => c[1]?.method === 'DELETE' && String(c[0]).includes('/admin/tracks/backend'));
     expect(del).toBeDefined();
   });
+
+  it('порядок критериев меняется кнопками ↑/↓ (клавиатурный путь, ui-review 2026-11-27)', async () => {
+    renderAdmin(mockApi());
+    const user = userEvent.setup();
+    await screen.findByText('admin@example.com');
+    await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
+    await screen.findByTestId('admin-tracks');
+    await user.click(screen.getByTestId('admin-track-new'));
+
+    const table = await screen.findByTestId('admin-track-criteria');
+    const names = () => Array.from(table.querySelectorAll<HTMLInputElement>('tbody tr td:first-child input'));
+    await user.type(names()[0], 'Альфа');
+    await user.click(screen.getByRole('button', { name: '+ Критерий' }));
+    await user.type(names()[1], 'Бета');
+    expect(names().map((i) => i.value)).toEqual(['Альфа', 'Бета']);
+
+    await user.click(within(table).getByRole('button', { name: 'Критерий «Альфа» ниже' }));
+    expect(names().map((i) => i.value)).toEqual(['Бета', 'Альфа']);
+    await user.click(within(table).getByRole('button', { name: 'Критерий «Альфа» выше' }));
+    expect(names().map((i) => i.value)).toEqual(['Альфа', 'Бета']);
+  });
+
+  it('вкладки админки: стрелки переводят выбор, раздел живёт в адресе', async () => {
+    window.location.hash = '#/admin';
+    renderAdmin(mockApi());
+    const user = userEvent.setup();
+    await screen.findByText('admin@example.com');
+    screen.getByRole('tab', { name: 'Шаблоны' }).focus();
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: 'Начала разговора' })).toHaveAttribute('aria-selected', 'true');
+    expect(window.location.hash).toContain('tab=openings');
+    await user.keyboard('{Home}');
+    expect(screen.getByRole('tab', { name: 'Шаблоны' })).toHaveAttribute('aria-selected', 'true');
+  });
+
 });
 
 async function waitForPost(fetchMock: Mock): Promise<void> {

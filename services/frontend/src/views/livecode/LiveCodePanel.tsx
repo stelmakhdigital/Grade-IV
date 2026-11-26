@@ -12,6 +12,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ApiError, runTests, type RunResult, type Stack } from '../../api';
 import type { StageTask } from '../../ws';
 import { apiErrorMessage } from '../LoginView';
+import { useHashQuery } from '../../hooks/useHashQuery';
+import { tablistKeyDown } from '../../hooks/tablistKeys';
 import { CodeEditor } from './CodeEditor';
 import { parseGoTestJSON } from './goTestDigest';
 
@@ -186,8 +188,15 @@ export function LiveCodePanel({
   }, [tasks, taskId, taskTitle, taskFiles]);
   const nTasks = taskList.length;
 
-  // Активная вкладка: старт — первая задача (spec-13B T2.4).
-  const [activeIdx, setActiveIdx] = useState(0);
+  // Активная вкладка: старт — первая задача (spec-13B T2.4). Номер держим в
+  // URL (#/sessions/7?t=2), чтобы F5 и «Назад» не швыряли кандидата на
+  // первую задачу (ui-review 2026-11-27).
+  const [query, setQuery] = useHashQuery();
+  const activeIdx = Math.max(0, (Number(query.get('t') ?? '1') || 1) - 1);
+  const setActiveIdx = (i: number): void => {
+    setQuery({ t: i === 0 ? '' : String(i + 1) });
+    setError(null);
+  };
   const activeIdxSafe = nTasks > 0 ? Math.min(activeIdx, nTasks - 1) : 0;
   const activeTask = nTasks > 0 ? taskList[activeIdxSafe] : undefined;
   const activeTaskId = activeTask?.id;
@@ -209,6 +218,7 @@ export function LiveCodePanel({
     return { [MAIN_FILE[stack]]: DEFAULT_CODE[stack] };
   });
   const [activeFile, setActiveFile] = useState<string>(() => solutionFile(stack, files));
+  const fileNames = Object.keys(files);
 
   // Переключение вкладки (или приход stage.tasks после монтирования) —
   // восстанавливаем файлы именно этой задачи.
@@ -340,12 +350,23 @@ export function LiveCodePanel({
   return (
     <div className="livecode" data-testid="livecode">
       {nTasks > 1 && (
-        <div className="task-tabs" role="tablist" aria-label="Задачи">
+        <div
+          className="task-tabs"
+          role="tablist"
+          aria-label="Задачи"
+          onKeyDown={tablistKeyDown({
+            index: activeIdxSafe,
+            count: nTasks,
+            onSelect: (i) => setActiveIdx(i),
+          })}
+        >
           {taskList.map((t, i) => (
             <button
               key={t.id ?? i}
               type="button"
               role="tab"
+              id={`lc-task-${i + 1}`}
+              aria-controls="lc-editor"
               aria-selected={i === activeIdxSafe}
               className={i === activeIdxSafe ? 'task-tab active' : 'task-tab'}
               onClick={() => {
@@ -373,8 +394,17 @@ export function LiveCodePanel({
         </p>
       )}
 
-      <div className="file-tabs" role="tablist" aria-label="Файлы">
-        {Object.keys(files).map((name) => (
+      <div
+        className="file-tabs"
+        role="tablist"
+        aria-label="Файлы"
+        onKeyDown={tablistKeyDown({
+          index: fileNames.indexOf(activeFile),
+          count: fileNames.length,
+          onSelect: (i) => setActiveFile(fileNames[i]),
+        })}
+      >
+        {fileNames.map((name) => (
           <button
             key={name}
             type="button"
@@ -388,11 +418,13 @@ export function LiveCodePanel({
         ))}
       </div>
 
-      <Editor
-        language={LANGUAGE_BY_STACK[stack]}
-        value={files[activeFile] ?? ''}
-        onChange={(v) => setFiles((prev) => ({ ...prev, [activeFile]: v }))}
-      />
+      <div id="lc-editor" role="tabpanel" aria-label="Редактор задачи">
+        <Editor
+          language={LANGUAGE_BY_STACK[stack]}
+          value={files[activeFile] ?? ''}
+          onChange={(v) => setFiles((prev) => ({ ...prev, [activeFile]: v }))}
+        />
+      </div>
 
       <div className="voice-controls">
         <button

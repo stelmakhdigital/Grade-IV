@@ -89,7 +89,7 @@ func rateLimited(l *rateLimiter, key func(*http.Request) string, what string, ne
 		if ok, retry := l.allow(k); !ok {
 			w.Header().Set("Retry-After", strconv.Itoa(retry))
 			writeError(w, http.StatusTooManyRequests, "too_many_requests",
-				"слишком много попыток («"+what+"»), попробуй через "+strconv.Itoa(retry)+" с")
+				"Слишком много попыток («"+what+"»), попробуйте через "+strconv.Itoa(retry)+" с")
 			return
 		}
 		next.ServeHTTP(w, r)

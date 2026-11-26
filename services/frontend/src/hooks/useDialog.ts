@@ -4,15 +4,40 @@
  * диалога; при открытии фокус попадает внутрь; после закрытия возвращается на
  * кнопку, которая открыла диалог.
  *
- * shortcut: фон страницы скрыт от клавиатуры (ловушкой Tab), но не помечен
- * aria-hidden/inert — скринридер его по-прежнему озвучивает. Апгрейд — когда
- * диалогов станет больше двух-трёх: рендерить оверлей порталом в body и вешать
- * inert на контейнер приложения.
+ * Фон страницы на время открытия становится inert + aria-hidden: скринридер
+ * его не озвучивает, клавиатура туда не уходит.
  */
 import { useEffect, type MutableRefObject, type RefObject } from 'react';
 
 const FOCUSABLE =
   'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Пометить всё, кроме пути к диалогу. Обёртки-оверлеи рендерятся соседями к
+ * <header> и секциям, поэтому обход по соседям вверх закрывает весь фон.
+ * Возвращает функцию снятия пометок.
+ */
+function inertBackground(box: HTMLElement): () => void {
+  const marked: Element[] = [];
+  for (
+    let node: HTMLElement | null = box;
+    node !== null && node.parentElement !== null;
+    node = node.parentElement
+  ) {
+    for (const sib of Array.from(node.parentElement.children)) {
+      if (sib === node || sib.hasAttribute('inert')) continue;
+      sib.setAttribute('inert', '');
+      sib.setAttribute('aria-hidden', 'true');
+      marked.push(sib);
+    }
+  }
+  return () => {
+    for (const el of marked) {
+      el.removeAttribute('inert');
+      el.removeAttribute('aria-hidden');
+    }
+  };
+}
 
 export function useDialog(opts: {
   open: boolean;
@@ -52,6 +77,8 @@ export function useDialog(opts: {
       }
     };
     document.addEventListener('keydown', onKey, true);
+    // фон — вне диалога: inert снимается в cleanup этого же эффекта
+    const unInert = boxRef.current !== null ? inertBackground(boxRef.current) : () => {};
     // autoFocus уже мог поставить фокус внутрь; если нет — ведём туда сами
     const box = boxRef.current;
     if (box !== null && !box.contains(document.activeElement)) {
@@ -59,6 +86,7 @@ export function useDialog(opts: {
     }
     return () => {
       document.removeEventListener('keydown', onKey, true);
+      unInert();
       // возврат фокуса — в cleanup, когда диалог закрылся (open true → false)
       returnFocusTo.current?.focus();
       returnFocusTo.current = null;

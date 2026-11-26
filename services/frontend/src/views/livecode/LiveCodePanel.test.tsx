@@ -226,6 +226,25 @@ describe('LiveCodePanel (WP-9)', () => {
       expect(screen.getByTestId('submitted-counter')).toHaveTextContent('Сдано задач: 0 из 2');
     });
 
+
+    it('клик по вкладке пишет номер задачи в адрес', async () => {
+      window.location.hash = '#/sessions/77';
+      renderTwoTasks();
+      const user = userEvent.setup();
+      await user.click(screen.getByTestId('task-tab-2'));
+      expect(window.location.hash).toBe('#/sessions/77?t=2');
+      expect(screen.getByTestId('editor')).toHaveValue('package task // t2');
+      window.location.hash = '#/sessions/77';
+    });
+
+    it('открытая по ссылке задача восстанавливается (?t=2)', () => {
+      window.location.hash = '#/sessions/77?t=2';
+      renderTwoTasks();
+      expect(screen.getByTestId('task-tab-2')).toHaveAttribute('aria-selected', 'true');
+      expect(screen.getByTestId('editor')).toHaveValue('package task // t2');
+      window.location.hash = '#/sessions/77';
+    });
+
     it('код сохраняется при переключении вкладок (task_id в ключе кэша)', async () => {
       const user = userEvent.setup();
       renderTwoTasks();

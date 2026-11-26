@@ -33,7 +33,7 @@ describe('App: маршрутизация (WP-7)', () => {
   it('без токена — экран входа', async () => {
     vi.stubGlobal('fetch', mockApi());
     render(<App />);
-    expect(await screen.findByRole('tab', { name: 'Вход' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Вход' })).toBeInTheDocument();
     expect(screen.getByText('Регистрация')).toBeInTheDocument();
   });
 
@@ -41,7 +41,7 @@ describe('App: маршрутизация (WP-7)', () => {
     setToken('old');
     vi.stubGlobal('fetch', mockApi());
     render(<App />);
-    expect(await screen.findByRole('tab', { name: 'Вход' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Вход' })).toBeInTheDocument();
     expect(localStorage.getItem('grade.token')).toBeNull();
   });
 
@@ -77,4 +77,24 @@ describe('App: маршрутизация (WP-7)', () => {
     expect(screen.getByText('Привет')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'В кабинет' })).toHaveAttribute('href', '#/');
   });
+
+  it('не-админ на #/admin — состояние «нет прав», а не обвес админки', async () => {
+    window.location.hash = '#/admin';
+    setToken('tok');
+    vi.stubGlobal('fetch', mockApi({ me: ME }));
+    render(<App />);
+    expect(await screen.findByText(/Недостаточно прав/)).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Шаблоны' })).not.toBeInTheDocument();
+  });
+
+  it('заголовок вкладки различает экраны', async () => {
+    setToken('tok');
+    vi.stubGlobal('fetch', mockApi({ me: ME }));
+    render(<App />);
+    await screen.findByTestId('user-email');
+    expect(document.title).toBe('Грейд');
+    window.location.hash = '#/sessions/42';
+    await vi.waitFor(() => expect(document.title).toBe('Интервью #42 — Грейд'));
+  });
+
 });

@@ -29,6 +29,8 @@ import {
 } from '../api';
 import { useAuth } from '../auth';
 import { useDialog } from '../hooks/useDialog';
+import { useHashQuery } from '../hooks/useHashQuery';
+import { num } from '../format';
 import { apiErrorMessage } from './LoginView';
 import { humanSeconds, practiceLabel, statusLabel, stageLabel } from '../labels';
 
@@ -52,12 +54,25 @@ function pausedLeftMs(s: Session, now: number): number | null {
 /** Пустое состояние резюме (пока не пришли данные). */
 const NO_RESUME: ResumeInfo = { about: '', file_name: '', text_chars: 0 };
 
+/** Страница истории (ui-review 2026-11-27). */
+const HIST_PAGE = 20;
+
 export function CabinetView() {
   const { user, logout } = useAuth();
   const [sessions, setSessions] = useState<Session[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // spec-20: фильтр истории (все/активные/завершённые).
-  const [histFilter, setHistFilter] = useState<'all' | 'active' | 'finished'>('all');
+  // spec-20: фильтр истории (все/активные/завершённые). Живёт в URL (#/?f=active),
+  // чтобы F5 и «Назад» его сохраняли (ui-review 2026-11-27).
+  const [query, setQuery] = useHashQuery();
+  const histFilter: 'all' | 'active' | 'finished' =
+    query.get('f') === 'active' ? 'active' : query.get('f') === 'finished' ? 'finished' : 'all';
+  // История постраничная: без лимита лента у пользователя с сотней интервью
+  // renderится целиком.
+  const [histShown, setHistShown] = useState(HIST_PAGE);
+  const setHistFilter = (f: 'all' | 'active' | 'finished'): void => {
+    setQuery({ f: f === 'all' ? '' : f });
+    setHistShown(HIST_PAGE);
+  };
   // Имена ролей для истории (роль выбирает ИИ — подписи берём из /tracks).
   const [tracks, setTracks] = useState<Track[]>([]);
   useEffect(() => {
@@ -436,7 +451,7 @@ export function CabinetView() {
             <div className="history-head">
               <h2 id="trend">Прогресс по итогам</h2>
               <span className="trend-delta" data-testid="trend-delta">
-                {arrow} {delta >= 0 ? '+' : ''}{delta.toFixed(2)}{rows.length > 2 ? ` (за ${rows.length} интервью)` : ''}
+                {arrow} {delta >= 0 ? '+' : ''}{num(delta)}{rows.length > 2 ? ` (за ${rows.length} интервью)` : ''}
               </span>
             </div>
             <div className="trend-row" data-testid="trend-row">
@@ -449,9 +464,9 @@ export function CabinetView() {
                   <span
                     key={s.id}
                     className={`trend-chip ${cls}`}
-                    title={`${formatDate(s.started_at)} · ${s.grade} / ${s.stack}${diff !== null ? ` · к прошлому: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}` : ''}`}
+                    title={`${formatDate(s.started_at)} · ${s.grade} / ${s.stack}${diff !== null ? ` · к прошлому: ${diff >= 0 ? '+' : ''}${num(diff)}` : ''}`}
                   >
-                    {v.toFixed(1)}
+                    {num(v, 1)}
                   </span>
                 );
               })}
@@ -471,6 +486,7 @@ export function CabinetView() {
                 key={key}
                 type="button"
                 className={`chip small${histFilter === key ? ' chip-active' : ''}`}
+                aria-pressed={histFilter === key}
                 onClick={() => setHistFilter(key)}
                 data-testid={`hist-filter-${key}`}
               >
@@ -482,7 +498,7 @@ export function CabinetView() {
             Обновить
           </button>
         </div>
-        {loadError !== null && <p className="form-error">{loadError}</p>}
+        {loadError !== null && <p className="form-error" role="alert">{loadError}</p>}
         {sessions === null && loadError === null && <p className="muted">Загрузка…</p>}
         {sessions !== null && sessions.length === 0 && (
           <p className="muted">Сессий пока нет — заполните резюме и начните первое интервью.</p>
@@ -504,7 +520,7 @@ export function CabinetView() {
               </tr>
             </thead>
             <tbody>
-              {visibleSessions.map((s) => {
+              {visibleSessions.slice(0, histShown).map((s) => {
                 const sTrack = tracks.find((t) => t.id === s.track_id);
                 return (
                 <tr key={s.id} data-session-status={s.status}>
@@ -530,7 +546,7 @@ export function CabinetView() {
                         title="Итоговый балл отчёта (1–5)"
                         data-testid={`overall-${s.id}`}
                       >
-                        {(overalls[s.id] as number).toFixed(1)}
+                        {num(overalls[s.id] as number, 1)}
                       </span>
                     )}
                     {/* spec-14/D12: пауза дольше порога — «Продолжить» прервёт
@@ -581,6 +597,20 @@ export function CabinetView() {
               })}
             </tbody>
           </table>
+        )}
+        {/* Покрупнее страницы по клику — иначе лента на сотни строк. */}
+        {visibleSessions.length > histShown && (
+          <p>
+            <button
+              type="button"
+              className="btn ghost small"
+              onClick={() => setHistShown((n) => n + HIST_PAGE)}
+              data-testid="hist-more"
+            >
+              Показать ещё {Math.min(HIST_PAGE, visibleSessions.length - histShown)} из{' '}
+              {visibleSessions.length - histShown}
+            </button>
+          </p>
         )}
       </section>
 

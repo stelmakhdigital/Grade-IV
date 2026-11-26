@@ -89,7 +89,7 @@ func (s *Server) handlePutResume(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(io.LimitReader(fh, resume.MaxBytes+1))
 	if err != nil {
 		s.log.Warn("resume: загрузка не прочитана", "err", err)
-		writeError(w, http.StatusBadRequest, "bad_request", "файл не прочитан, попробуй приложить его заново")
+		writeError(w, http.StatusBadRequest, "bad_request", "файл не прочитан, попробуйте приложить его заново")
 		return
 	}
 	if len(data) == 0 {

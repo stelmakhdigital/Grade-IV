@@ -41,6 +41,10 @@ const nextLineId = () => ++lineSeq;
 // Сколько висит info-предупреждение (переход на резервный захват и т.п.).
 const INFO_HIDE_MS = 8000;
 
+/** Сколько последних реплик держим во вьюшке (ui-review 2026-11-27): на
+ * длинном интервью старые уходят, и об этом надо сказать вслух. */
+export const MAX_TRANSCRIPT_LINES = 200;
+
 export function useVoiceSession(id: number) {
   const [session, setSession] = useState<Session | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
@@ -163,7 +167,7 @@ export function useVoiceSession(id: number) {
   }, [id]);
 
   const pushLine = useCallback((who: Line['who'], text: string) => {
-    setLines((prev) => [...prev.slice(-199), { who, text, id: nextLineId() }]);
+    setLines((prev) => [...prev.slice(-(MAX_TRANSCRIPT_LINES - 1)), { who, text, id: nextLineId() }]);
   }, []);
 
   // WS-цикл (только для активных сессий).
@@ -267,7 +271,7 @@ export function useVoiceSession(id: number) {
                 text: m.text,
                 id: nextLineId(),
               };
-              return [...prev.slice(-199), next];
+              return [...prev.slice(-(MAX_TRANSCRIPT_LINES - 1)), next];
             });
             break;
           case 'stt_partial':
@@ -284,7 +288,7 @@ export function useVoiceSession(id: number) {
               if (last !== undefined && last.who === 'user' && last.interim) {
                 return [...prev.slice(0, -1), { ...last, text: m.text }];
               }
-              return [...prev.slice(-199), { who: 'user', text: m.text, interim: true, id: nextLineId() }];
+              return [...prev.slice(-(MAX_TRANSCRIPT_LINES - 1)), { who: 'user', text: m.text, interim: true, id: nextLineId() }];
             });
             break;
           case 'stt_segment':
