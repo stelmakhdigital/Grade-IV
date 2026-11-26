@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS reports (
   study_plan_2weeks TEXT NOT NULL DEFAULT '[]',
   progress_vs_previous TEXT NOT NULL DEFAULT '[]',
   livecode_tasks TEXT NOT NULL DEFAULT '[]',
+  stages TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL
 );
 

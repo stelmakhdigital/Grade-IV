@@ -557,6 +557,7 @@ func (s *Server) startReportGeneration(id int64) {
 		sp2wJSON, _ := json.Marshal(data.StudyPlan2Weeks)
 		progJSON, _ := json.Marshal(data.ProgressVsPrevious)
 		lctJSON, _ := json.Marshal(data.LiveCodeTasks)
+		stagesJSON, _ := json.Marshal(data.Stages)
 		if err := s.reports.Save(ctx, id, data.Overall, data.GradeRecommendation,
 			critJSON, strJSON, weakJSON, recJSON, db.ReportExtra{
 				Verdict:            data.Verdict,
@@ -565,6 +566,7 @@ func (s *Server) startReportGeneration(id int64) {
 				StudyPlan2Weeks:    string(sp2wJSON),
 				ProgressVsPrevious: string(progJSON),
 				LiveCodeTasks:      string(lctJSON),
+				Stages:             string(stagesJSON),
 			}); err != nil {
 			s.log.Error("report save", "session", id, "err", err)
 			return

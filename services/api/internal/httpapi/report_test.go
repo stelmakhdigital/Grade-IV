@@ -83,6 +83,17 @@ func TestReportLifecycle(t *testing.T) {
 	if len(crit) == 0 {
 		t.Fatalf("criteria пуст: %v", body)
 	}
+	// spec-24: оценки по стадиям доезжают до клиента. Их считает движок, но
+	// раньше они терялись на сохранении отчёта — экран «как считалось по
+	// стадиям» не мог стать непустым ни при каких данных.
+	var stagesAPI []map[string]any
+	rawSt, _ := json.Marshal(body["stages"])
+	if err := json.Unmarshal(rawSt, &stagesAPI); err != nil || len(stagesAPI) == 0 {
+		t.Fatalf("stages в отчёте: err=%v raw=%s", err, rawSt)
+	}
+	if _, ok := stagesAPI[0]["score"]; !ok {
+		t.Fatalf("у стадии нет score: %v", stagesAPI[0])
+	}
 	// spec-24: Live-Code = 1 + 4·доля решённых. Одна задача, решена → 5 (раньше
 	// было 4 за «был проход», то же число, что и за 1 из 3). Коммуникация
 	// считается по речи, её точное число тут не проверяем.

@@ -34,6 +34,9 @@ func reportPayload(overall float64, gradeRecommendation string,
 		"progress_vs_previous": json.RawMessage(orJSONArray(extra.ProgressVsPrevious)),
 		// Подробно по задачам Live-Code (spec-13B T3); старые строки — [].
 		"livecode_tasks": json.RawMessage(orJSONArray(extra.LiveCodeTasks)),
+		// Оценки по стадиям (spec-24): детерминированные числа, поверх которых
+		// построено суждение оценщика; экран отчёта показывает их как «как считалось».
+		"stages": json.RawMessage(orJSONArray(extra.Stages)),
 	}
 }
 
