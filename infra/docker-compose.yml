@@ -243,8 +243,9 @@ services:
       dockerfile: ../../infra/docker/frontend.Dockerfile
     image: grade/frontend:dev
     # Наружу не публикуем: nginx — внутренний слой, вход только через caddy
-    # (:80/:443, TLS + HTTP→HTTPS). Публикация 8080 давала второй, незащищённый
-    # вход в то же приложение в обход TLS.
+    # (:80/:443 с TLS и :16870 без TLS — последний заведён сознательно для
+    # доступа по адресу машины, см. infra/caddy/Caddyfile). Публикация самого
+    # nginx дала бы третий вход, мимо лимитов и заголовков caddy.
     expose:
       - "80"
     depends_on:
@@ -278,6 +279,10 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      # Незащищённый вход для доступа по адресу машины (UI-проверки с других
+      # устройств): http://<ip машины>:16870/ . Подробности и ограничения —
+      # в infra/caddy/Caddyfile.
+      - "16870:16870"
     environment:
       GRADE_DOMAIN: "${GRADE_DOMAIN:-localhost}"
       CADDY_TLS: "${CADDY_TLS:-}"
