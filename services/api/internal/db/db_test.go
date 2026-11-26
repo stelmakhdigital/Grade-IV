@@ -221,6 +221,70 @@ func TestSessionCreateDefaultProfileNoFKViolation(t *testing.T) {
 	}
 }
 
+// TestReportStagesColumn — issue #13: колонка stages переживает повторную
+// миграцию, а старая строка без неё (колонки добавляются ALTER'ом поверх
+// существующих БД) читается как '[]' и не ломает Get.
+func TestReportStagesColumn(t *testing.T) {
+	conn, dialect, err := Open("sqlite://:memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer conn.Close()
+	ctx := context.Background()
+	if err := Migrate(ctx, conn, dialect); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	users, sessions := NewUserStore(conn, dialect), NewSessionStore(conn, dialect)
+	u, err := users.CreateUser(ctx, "stages@test.dev", "hash")
+	if err != nil {
+		t.Fatalf("user: %v", err)
+	}
+	sm, err := sessions.Create(ctx, models.Session{
+		UserID: u.ID, Grade: models.GradeMiddle, Stack: "go",
+		Stage: models.StageVoice, Status: models.StatusActive,
+		DurationLimitS: 1800, StartedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	sid := sm.ID
+	reports := NewReportStore(conn, dialect)
+
+	// Имитация старой схемы: убираем колонку и пишем отчёт без неё (как
+	// делал старый код), затем гоняем Migrate повторно — она обязана вернуть
+	// колонку с дефолтом и за-fillить существующую строку.
+	if _, err := conn.ExecContext(ctx, `ALTER TABLE reports DROP COLUMN stages`); err != nil {
+		t.Fatalf("drop column (имитация старой схемы): %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, dialect.q(`
+		INSERT INTO reports (session_id, overall, grade_recommendation,
+			criteria, strengths, weaknesses, recommendations, created_at)
+		VALUES (?, 3.5, 'middle', '{}', '[]', '[]', '[]', '2026-01-01T00:00:00Z')`), sid); err != nil {
+		t.Fatalf("insert старой строки: %v", err)
+	}
+	if err := Migrate(ctx, conn, dialect); err != nil {
+		t.Fatalf("migrate повторно: %v", err)
+	}
+	if _, _, _, _, _, _, extra, err := reports.Get(ctx, sid); err != nil {
+		t.Fatalf("get старой строки: %v", err)
+	} else if extra.Stages != "[]" {
+		t.Errorf("старая строка: stages = %q, want '[]'", extra.Stages)
+	}
+
+	// Новый отчёт: stages сохраняются и читаются как есть.
+	stages := `[{"stage":"livecode","title":"Live-Code","score":4.5,"basis":"задач 2, сдано 2, пройдено 1"}]`
+	err = reports.Save(ctx, sid, 4.0, "middle", []byte(`{}`), []byte(`[]`), []byte(`[]`), []byte(`[]`),
+		ReportExtra{Stages: stages})
+	if err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if _, _, _, _, _, _, extra, err := reports.Get(ctx, sid); err != nil {
+		t.Fatalf("get: %v", err)
+	} else if extra.Stages != stages {
+		t.Errorf("stages = %q, want %q", extra.Stages, stages)
+	}
+}
+
 func contains(list []string, s string) bool {
 	for _, v := range list {
 		if v == s {

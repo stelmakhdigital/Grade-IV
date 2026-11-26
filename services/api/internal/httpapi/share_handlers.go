@@ -138,5 +138,7 @@ func (s *Server) handlePublicReport(w http.ResponseWriter, r *http.Request) {
 		"study_plan_2weeks":    json.RawMessage(orJSONArray(extra.StudyPlan2Weeks)),
 		"progress_vs_previous": json.RawMessage(orJSONArray(extra.ProgressVsPrevious)),
 		"livecode_tasks":       json.RawMessage(orJSONArray(extra.LiveCodeTasks)),
+		// Оценки по стадиям (issue #13); старые строки — [].
+		"stages": json.RawMessage(orJSONArray(extra.Stages)),
 	})
 }

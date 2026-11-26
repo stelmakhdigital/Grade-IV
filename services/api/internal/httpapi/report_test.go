@@ -248,6 +248,73 @@ func TestReportMeasuredCapEndToEnd(t *testing.T) {
 	}
 }
 
+// TestReportStages — issue #13: оценки по стадиям сохраняются с отчётом и
+// отдаются GET'ом (фронтент ждёт поле stages с самого начала). Стадии
+// считаются детерминированно, поэтому контракт держится и на heuristic-
+// (fallback), и на LLM-отчёте.
+func TestReportStages(t *testing.T) {
+	for _, mode := range []string{"heuristic", "llm"} {
+		t.Run(mode, func(t *testing.T) {
+			e := newInterviewEnv(t)
+			ctx := context.Background()
+			if mode == "llm" {
+				e.mock.SetResponder(func(llm.Request) (string, error) {
+					return `{"criteria":[` +
+						"{\"name\":\"Live-Code (алгоритм, качество кода, тесты)\",\"score\":5,\"comment\":\"отлично\"}]," +
+						"\"verdict\":\"хорошо\"}", nil
+				})
+			}
+			_, _ = e.srv.eventData(ctx, e.session, "livecode_tasks", map[string]any{
+				"tasks": []map[string]any{{"id": "go-a", "title": "А"}}})
+			_, _ = e.srv.eventData(ctx, e.session, "code_run",
+				map[string]any{"task_id": "go-a", "passed": true, "exit_code": 0})
+			e.finishSession(t)
+
+			var body map[string]any
+			deadline := time.Now().Add(15 * time.Second)
+			for {
+				code, b := getReport(t, e)
+				if code == http.StatusOK {
+					body = b
+					break
+				}
+				if code != http.StatusAccepted || time.Now().After(deadline) {
+					t.Fatalf("report: %d %v", code, b)
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			raw, _ := json.Marshal(body["stages"])
+			var stages []map[string]any
+			if err := json.Unmarshal(raw, &stages); err != nil {
+				t.Fatalf("stages: %v (raw %s)", err, raw)
+			}
+			if len(stages) == 0 {
+				t.Fatalf("stages пуст: %s", raw)
+			}
+			haveLiveCode := false
+			for _, st := range stages {
+				s, _ := st["stage"].(string)
+				if s == "" {
+					t.Errorf("у элемента нет stage: %v", st)
+				}
+				if s == "livecode" {
+					haveLiveCode = true
+				}
+				if sc, ok := st["score"].(float64); !ok || sc < 1 || sc > 5 {
+					t.Errorf("score вне 1..5: %v", st)
+				}
+				if b, _ := st["basis"].(string); b == "" {
+					t.Errorf("у элемента нет basis: %v", st)
+				}
+			}
+			// В сессии была назначенная задача — стадия livecode обязана попасть в отчёт.
+			if !haveLiveCode {
+				t.Errorf("в stages нет стадии livecode: %s", raw)
+			}
+		})
+	}
+}
+
 // TestReportErrors — 409 (активная сессия), 404 (чужая).
 func TestReportErrors(t *testing.T) {
 	e := newInterviewEnv(t)
