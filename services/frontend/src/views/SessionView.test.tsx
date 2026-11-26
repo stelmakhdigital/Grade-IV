@@ -199,6 +199,9 @@ beforeEach(() => {
   setToken('tok');
   FakeWebSocket.instances = [];
   hookMock.fake = null;
+  // тест записи подменяет navigator целиком (mediaDevices.getUserMedia);
+  // без отката соседний тест «микрофона нет» получает рабочий микрофон
+  vi.unstubAllGlobals();
 });
 
 describe('SessionView (WP-8)', () => {
@@ -317,6 +320,9 @@ describe('SessionView (WP-8)', () => {
     renderSession(mockApi({ session: S_ACTIVE }));
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     await flush();
+    // ждём именно разблокировки кнопки: экземпляр WS создаётся раньше onopen,
+    // и на загрузившемся раннере клик по ещё disabled-кнопке проходил впустую
+    await waitFor(() => expect(screen.getByTestId('mic-toggle')).toBeEnabled());
     const user = userEvent.setup();
     // jsdom: navigator.mediaDevices отсутствует → catch → denied
     await user.click(screen.getByTestId('mic-toggle'));

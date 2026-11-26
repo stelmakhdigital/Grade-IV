@@ -137,7 +137,12 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm exec tsc --noEmit
-          pnpm exec vitest run
+          # --sequence.shuffle с фиксированным seed: тесты одного файла делят
+          # один jsdom, и состояние, оставленное соседом (адрес, черновики кода,
+          # stub navigator), всплывает только в другом порядке. Seed фиксирован,
+          # чтобы прогон не был дрожащим; повторить локально:
+          #   pnpm exec vitest run --sequence.shuffle --sequence.seed 1
+          pnpm exec vitest run --sequence.shuffle --sequence.seed 1
           pnpm exec vite build
 
   voice:

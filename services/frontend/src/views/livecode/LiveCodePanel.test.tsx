@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { LiveCodePanel, DEFAULT_CODE, saveDraft, restoreDraft } from './LiveCodePanel';
+import { LiveCodePanel, DEFAULT_CODE, codeCache, saveDraft, restoreDraft } from './LiveCodePanel';
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status });
@@ -77,6 +77,12 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   // панель чернит код в sessionStorage — тесты не должны видеть черновики друг друга
   sessionStorage.clear();
+  // номер активной задачи живёт в адресе: без чистого адреса тесты читают
+  // ?t= после соседа и стартуют не с первой вкладки
+  window.location.hash = '#/sessions/77';
+  // codeCache — модульный синглтон: без очистки следующий тест получает
+  // отредактированный код соседа (вперемешку падал «старт — вкладка 1»)
+  codeCache.clear();
 });
 
 describe('LiveCodePanel (WP-9)', () => {
@@ -228,13 +234,11 @@ describe('LiveCodePanel (WP-9)', () => {
 
 
     it('клик по вкладке пишет номер задачи в адрес', async () => {
-      window.location.hash = '#/sessions/77';
       renderTwoTasks();
       const user = userEvent.setup();
       await user.click(screen.getByTestId('task-tab-2'));
       expect(window.location.hash).toBe('#/sessions/77?t=2');
       expect(screen.getByTestId('editor')).toHaveValue('package task // t2');
-      window.location.hash = '#/sessions/77';
     });
 
     it('открытая по ссылке задача восстанавливается (?t=2)', () => {
@@ -242,7 +246,6 @@ describe('LiveCodePanel (WP-9)', () => {
       renderTwoTasks();
       expect(screen.getByTestId('task-tab-2')).toHaveAttribute('aria-selected', 'true');
       expect(screen.getByTestId('editor')).toHaveValue('package task // t2');
-      window.location.hash = '#/sessions/77';
     });
 
     it('код сохраняется при переключении вкладок (task_id в ключе кэша)', async () => {

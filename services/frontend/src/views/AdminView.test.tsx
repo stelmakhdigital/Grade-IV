@@ -105,6 +105,8 @@ function renderAdmin(fetchMock: Mock) {
 beforeEach(() => {
   localStorage.clear();
   setToken('tok');
+  // вкладка админки живёт в адресе — иначе соседний тест оставляет ?tab=…
+  window.location.hash = '#/admin';
 });
 
 describe('AdminView: роли собеседований (spec-18/22)', () => {

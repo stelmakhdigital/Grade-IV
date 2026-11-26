@@ -62,7 +62,7 @@ interface CodeCacheEntry {
   files: Record<string, string>;
   result: RunResult | null;
 }
-const codeCache = new Map<string, CodeCacheEntry>();
+export const codeCache = new Map<string, CodeCacheEntry>();
 
 /**
  * Черновик кода — ещё и в sessionStorage: F5 на практической стадии не должен

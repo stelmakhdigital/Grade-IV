@@ -13,7 +13,12 @@ function mockApi(opts: { me?: unknown; sessions?: unknown } = {}) {
     if (url.includes('/auth/me')) {
       return json(opts.me !== undefined ? 200 : 401, opts.me ?? { code: 'unauthorized', msg: 'нет' });
     }
-    if (url.includes('/sessions')) {
+    // Список истории — ровно /sessions. earlier тут был includes, и он же
+    // матчил /sessions/42 и /sessions/42/report: страница сессии получала
+    // массив вместо сессии и падала в ReportBody на criteria.map (красный CI
+    // 2026-11-26, при этом локально тест успевал закончиться до асинхронного
+    // рендера).
+    if (url.endsWith('/sessions')) {
       return json(200, opts.sessions ?? []);
     }
     return json(404, {});
@@ -90,11 +95,14 @@ describe('App: маршрутизация (WP-7)', () => {
   it('заголовок вкладки различает экраны', async () => {
     setToken('tok');
     vi.stubGlobal('fetch', mockApi({ me: ME }));
-    render(<App />);
+    const view = render(<App />);
     await screen.findByTestId('user-email');
     expect(document.title).toBe('Грейд');
     window.location.hash = '#/sessions/42';
     await vi.waitFor(() => expect(document.title).toBe('Интервью #42 — Грейд'));
+    // снять монтирование: незакрытый запрос долетает уже после теста
+    view.unmount();
+    window.location.hash = '#/';
   });
 
 });
