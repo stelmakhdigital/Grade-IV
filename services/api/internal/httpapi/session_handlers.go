@@ -471,7 +471,8 @@ func (s *Server) handleWhiteboardPut(w http.ResponseWriter, r *http.Request) {
 
 // handleWhiteboardGet — GET /api/v1/sessions/{id}/whiteboard (ADR-004): ранее
 // сохранённая схема (state Excalidraw + структура) для восстановления холста при
-// возврате на стадию design. 200 — схема; 404 — не сохранялась.
+// возврате на стадию design. 200 — схема; сохранений ещё не было — 200 с
+// state=null. 409 — сессия завершена.
 func (s *Server) handleWhiteboardGet(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseSessionID(w, r)
 	if !ok {
@@ -487,8 +488,13 @@ func (s *Server) handleWhiteboardGet(w http.ResponseWriter, r *http.Request) {
 	}
 	state, blocks, _, err := s.whiteboards.Get(r.Context(), id)
 	if err != nil {
+		// Схемы ещё нет — штатный случай, а не ошибка запроса: клиент читает
+		// холст на каждом входе в стадию, и 404 на первом входе выглядел
+		// в консоли как упавший запрос (проверено в браузере).
 		if errors.Is(err, db.ErrWhiteboardNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "схема ещё не сохранялась")
+			writeJSON(w, http.StatusOK, map[string]any{
+				"state": nil, "structure": map[string]any{"blocks": []string{}, "links": 0},
+			})
 			return
 		}
 		s.log.Error("whiteboard get", "session", id, "err", err)

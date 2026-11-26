@@ -246,3 +246,25 @@ func TestDesignCheckEvent(t *testing.T) {
 		t.Fatalf("design_check появился для кейса без required: %v", ev)
 	}
 }
+
+// TestWhiteboardGetEmpty: на первом входе в стадию схема ещё не сохранялась.
+// Раньше это был 404 — клиент его глотал, но в консоли он выглядел как упавший
+// запрос на каждой новой доске. Пустое состояние — штатный случай: 200, state=null.
+func TestWhiteboardGetEmpty(t *testing.T) {
+	e := newInterviewEnv(t)
+	code, m := doJSON(t, "GET",
+		fmt.Sprintf("%s/api/v1/sessions/%d/whiteboard", e.ts.URL, e.session), nil, authHeader(e.token))
+	if code != http.StatusOK {
+		t.Fatalf("GET пустого холста: %d %v", code, m)
+	}
+	if v, ok := m["state"]; !ok || v != nil {
+		t.Errorf("state = %v (ключ есть: %v), хочу null", m["state"], ok)
+	}
+	st, ok := m["structure"].(map[string]any)
+	if !ok {
+		t.Fatalf("structure = %T, хочу объект", m["structure"])
+	}
+	if blocks, isArray := st["blocks"].([]any); !isArray || len(blocks) != 0 {
+		t.Errorf("blocks = %v, хочу пустой список", st["blocks"])
+	}
+}

@@ -1,3 +1,4 @@
+import './unload-guard'; // до всего остального: вешать unload браузеру уже нельзя
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
