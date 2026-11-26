@@ -433,8 +433,10 @@ p {
 
 /* пре-бриф перед стартом */
 .start-brief {
+  /* Мера строки, а не фиксированные 560 px: в карточке на 1191 px такой
+     абзац оставлял справа пустые 600 px, и блок выглядел обрезанным. */
   margin: 0 0 10px;
-  max-width: 560px;
+  max-width: 84ch;
 }
 
 @media (max-width: 720px) {
@@ -1518,12 +1520,17 @@ a:focus-visible {
    интервью уходит под работу, ниже 900 рейка становится горизонтальной
    полосой над работой. */
 
+/* Диалог — под пультом микрофона, в той же колонке (фидбек 2026-11-26):
+   реплики интервьюера и кандидата читают там, где ты говоришь, а не в
+   отдельной колонке с правого края экрана. Рейка стадий остаётся слева и
+   тянется на обе строки. */
 .session-page {
   display: grid;
-  grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--aside-w);
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
   grid-template-areas:
-    "head head head"
-    "rail work aside";
+    "head head"
+    "rail work"
+    "rail aside";
   gap: var(--s-5);
   align-items: start;
 }
@@ -1548,9 +1555,10 @@ a:focus-visible {
 .session-page > .transcript {
   grid-area: aside;
   min-width: 0;
-  position: sticky;
-  top: var(--s-5);
-  max-height: calc(100vh - var(--s-7) - var(--s-7));
+  /* Высоту держим: без неё карточка транскрипта уползала вместе со страницей,
+     и кнопки микрофона съезжали с экрана посреди интервью. Список скроллится
+     внутри (новые сверху), карточка остаётся на месте. */
+  max-height: min(52vh, 520px);
   display: flex;
   flex-direction: column;
 }
@@ -1659,18 +1667,24 @@ a:focus-visible {
 }
 
 .rail-meta {
+  /* Метка над значением, а не две колонки: в рейке 228 px значение
+     «Python Backend-разработчик» жалось в остаток ширины и разрывалось.
+     Пары разделяет отступ у значения (см. .rail-meta dd). */
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 6px 10px;
-  align-items: baseline;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
   margin: 0;
   font-size: var(--fs-meta);
 }
 
 .rail-meta dd {
-  margin: 0;
+  margin: 0 0 10px;
   color: var(--text-1);
   overflow-wrap: anywhere;
+}
+
+.rail-meta dd:last-child {
+  margin-bottom: 0;
 }
 
 /* Кабинет: слева то, что делают (старт интервью), справа то, что копят
@@ -1706,8 +1720,10 @@ a:focus-visible {
 }
 
 .start-form {
-  /* 620 оставляли в карточине пустой хвост ~280 px на любой ширине. */
-  max-width: 860px;
+  /* Форму больше не режем по 860 px: карточка «Новое интервью» в широком
+     кабинете растёт до 1300 px, и ограниченной форме не хватало 440 px —
+     правый край карточки пустовал. Ширину держит колонка кабинета. */
+  max-width: none;
 }
 
 /* Селекты делят строку пополам и растут вместе с карточкой; без этого
@@ -1723,21 +1739,6 @@ a:focus-visible {
   max-width: 1000px;
   margin-left: auto;
   margin-right: auto;
-}
-
-@media (max-width: 1180px) {
-  .session-page {
-    grid-template-columns: var(--rail-w) minmax(0, 1fr);
-    grid-template-areas:
-      "head head"
-      "rail work"
-      "aside aside";
-  }
-
-  .session-page > .transcript {
-    position: static;
-    max-height: none;
-  }
 }
 
 @media (max-width: 900px) {
