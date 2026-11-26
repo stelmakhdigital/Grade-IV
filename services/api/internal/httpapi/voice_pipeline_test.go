@@ -821,7 +821,9 @@ func TestSTTStreamFallbackToBatch(t *testing.T) {
 	if m.sttCalls < 1 {
 		t.Fatal("batch /stt не вызывался после деградации")
 	}
-	resp, err := http.Get(ts.URL + "/metrics")
+	metricsReq, _ := http.NewRequest(http.MethodGet, ts.URL+"/metrics", nil)
+	metricsReq.SetBasicAuth("prom", "test-metrics")
+	resp, err := http.DefaultClient.Do(metricsReq)
 	if err != nil {
 		t.Fatalf("metrics: %v", err)
 	}

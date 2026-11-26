@@ -153,7 +153,7 @@ func (i *Interviewer) OnUserUtterance(ctx context.Context, sessionID int64, text
 	if err != nil {
 		return "", err
 	}
-	resp, err := i.llm.Chat(ctx, llm.Request{
+	resp, err := i.chatGuarded(ctx, llm.Request{
 		Messages:    msgs,
 		Temperature: 0.7,
 		MaxTokens:   300,
@@ -162,9 +162,9 @@ func (i *Interviewer) OnUserUtterance(ctx context.Context, sessionID int64, text
 		return "", err
 	}
 	i.saveEvent(ctx, sessionID, "ai_utterance", map[string]any{
-		"text": resp.Content, "stage": sess.Stage,
+		"text": resp, "stage": sess.Stage,
 	})
-	return resp.Content, nil
+	return resp, nil
 }
 
 // OnUserUtteranceStream — реплика кандидата → ответ ИИ стримом (SSE LLM).
@@ -193,14 +193,55 @@ func (i *Interviewer) OnUserUtteranceStream(ctx context.Context, sessionID int64
 	}
 	// Tee: единый потребитель стрима провайдера — собирает полный текст для БД
 	// и пересылает приращения наружу (потребителю — голосовой пайплайн).
+	//
+	// Проверка на цитату директивы идёт по фразам, до озвучки: TTS и так ждёт
+	// конца фразы, пока буфер пуст — латентности это не добавляет. При цитате
+	// остаток потока выбрасываем и берём ответ заново без стрима.
+	//
+	// shortcut: уже озвученное до момента цитаты не отозвать (аудио ушло),
+	// апгрейд — tts_stop в протоколе по этому случаю.
 	var sb strings.Builder
 	out := make(chan string, 16)
 	go func() {
 		defer cancel()
 		defer close(out)
+		var head strings.Builder
+		guarded := false
 		for delta := range ch {
-			sb.WriteString(delta)
-			out <- delta
+			if guarded {
+				sb.WriteString(delta)
+				out <- delta
+				continue
+			}
+			head.WriteString(delta)
+			if leaksDirective(head.String()) {
+				go func() {
+					for range ch {
+					}
+				}()
+				content, err := i.chatGuarded(ctx, llm.Request{Messages: msgs, Temperature: 0.7, MaxTokens: 300})
+				if content != "" {
+					sb.WriteString(content)
+					out <- content
+				} else if err != nil {
+					i.log.Error("interviewer: повторный запрос после цитаты директивы не удался", "err", err)
+				}
+				guarded = true
+				continue
+			}
+			if !clauseReady(head.String()) {
+				continue
+			}
+			guarded = true
+			headStr := head.String()
+			sb.WriteString(headStr)
+			out <- headStr
+		}
+		if !guarded && head.Len() > 0 {
+			// поток кончился на фразе короче лимита — что набрали, то и отдаём
+			headStr := head.String()
+			sb.WriteString(headStr)
+			out <- headStr
 		}
 		content := strings.TrimSpace(sb.String())
 		if content != "" {
@@ -217,8 +258,7 @@ func (i *Interviewer) OnStageChanged(ctx context.Context, sessionID int64, stage
 	ctx, cancel := context.WithTimeout(ctx, llm.DefaultTimeout)
 	defer cancel()
 
-	sess, msgs, err := i.context(ctx, sessionID,
-		"Кандидат перешёл на эту стадию. Заведи её: представь формат и задай первый вопрос (или, для Live-Code, объяви задачу).")
+	sess, msgs, err := i.context(ctx, sessionID, directiveStageEntry)
 	if err != nil {
 		return "", err
 	}
@@ -234,7 +274,7 @@ func (i *Interviewer) OnStageChanged(ctx context.Context, sessionID int64, stage
 			msgs[len(msgs)-1].Content += "\nНачни именно с этого вопроса (адаптируй формулировку под живую речь, не дословно): " + opening
 		}
 	}
-	resp, err := i.llm.Chat(ctx, llm.Request{
+	resp, err := i.chatGuarded(ctx, llm.Request{
 		Messages:    msgs,
 		Temperature: 0.7,
 		MaxTokens:   300,
@@ -243,9 +283,9 @@ func (i *Interviewer) OnStageChanged(ctx context.Context, sessionID int64, stage
 		return "", err
 	}
 	i.saveEvent(ctx, sessionID, "ai_utterance", map[string]any{
-		"text": resp.Content, "stage": sess.Stage, "note": "stage_entry",
+		"text": resp, "stage": sess.Stage, "note": "stage_entry",
 	})
-	return resp.Content, nil
+	return resp, nil
 }
 
 // OnCodeRun — результаты запуска кода (Live-Code) → ревью + follow-up.
@@ -270,7 +310,7 @@ func (i *Interviewer) OnCodeRun(ctx context.Context, sessionID int64, summary ma
 	}
 	raw, _ := json.Marshal(summary)
 	msgs := i.buildMessages(sess, "Кандидат запустил код. Результаты (JSON): "+string(raw)+"\n"+hint)
-	resp, err := i.llm.Chat(ctx, llm.Request{
+	resp, err := i.chatGuarded(ctx, llm.Request{
 		Messages:    msgs,
 		Temperature: 0.5,
 		MaxTokens:   300,
@@ -279,9 +319,9 @@ func (i *Interviewer) OnCodeRun(ctx context.Context, sessionID int64, summary ma
 		return "", err
 	}
 	i.saveEvent(ctx, sessionID, "ai_utterance", map[string]any{
-		"text": resp.Content, "stage": sess.Stage, "note": "code_review",
+		"text": resp, "stage": sess.Stage, "note": "code_review",
 	})
-	return resp.Content, nil
+	return resp, nil
 }
 
 // designReviewMessage — user-сообщение ревью схемы System Design (OnDesignSubmit).
@@ -320,7 +360,7 @@ func (i *Interviewer) OnDesignSubmit(ctx context.Context, sessionID int64, struc
 		imgs = []string{"data:image/png;base64," + base64.StdEncoding.EncodeToString(png)}
 	}
 	msgs := i.buildMessages(sess, userMsg, imgs...)
-	resp, err := i.llm.Chat(ctx, llm.Request{
+	resp, err := i.chatGuarded(ctx, llm.Request{
 		Messages:    msgs,
 		Temperature: 0.5,
 		MaxTokens:   400,
@@ -329,9 +369,9 @@ func (i *Interviewer) OnDesignSubmit(ctx context.Context, sessionID int64, struc
 		return "", err
 	}
 	i.saveEvent(ctx, sessionID, "ai_utterance", map[string]any{
-		"text": resp.Content, "stage": sess.Stage, "note": "design_review",
+		"text": resp, "stage": sess.Stage, "note": "design_review",
 	})
-	return resp.Content, nil
+	return resp, nil
 }
 
 // Nudge — кандидат молчит больше порога: ИИ сам заполняет паузу (решение #7).
@@ -345,7 +385,7 @@ func (i *Interviewer) Nudge(ctx context.Context, sessionID int64, silentS int) (
 	if err != nil {
 		return "", err
 	}
-	resp, err := i.llm.Chat(ctx, llm.Request{
+	resp, err := i.chatGuarded(ctx, llm.Request{
 		Messages:    msgs,
 		Temperature: 0.7,
 		MaxTokens:   120,
@@ -353,8 +393,8 @@ func (i *Interviewer) Nudge(ctx context.Context, sessionID int64, silentS int) (
 	if err != nil {
 		return "", err
 	}
-	i.saveEvent(ctx, sessionID, "ai_nudge", map[string]any{"text": resp.Content, "stage": sess.Stage})
-	return resp.Content, nil
+	i.saveEvent(ctx, sessionID, "ai_nudge", map[string]any{"text": resp, "stage": sess.Stage})
+	return resp, nil
 }
 
 // CodeRunHint — текстовая сводка результатов запуска для LLM-контекста.

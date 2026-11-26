@@ -67,12 +67,19 @@ type Config struct {
 	// пусто — общая разработка.
 	SandboxTasksDomain string
 	LogLevel           string // уровень логов (LOG_LEVEL)
-	SilenceNudgeS      int    // тишина > порога → nudge от ИИ, с (SILENCE_NUDGE_S)
-	LLMMock            bool   // LLM-мок вместо реального эндпоинта (LLM_MOCK=1; dev/CI, ADR-005)
-	DebugEndpoints     bool   // dev-эндпоинты (/debug/*) — только явное включение (ENABLE_DEBUG=1; дефолт OFF)
-	LLMEnableThinking  bool   // vLLM chat_template_kwargs.enable_thinking (LLM_ENABLE_THINKING, дефолт false — SLO голосового контура)
-	VADEndSilenceMS    int    // конец реплики по тишине, мс (VAD_END_SILENCE_MS, ADR-002)
-	VADRMSThreshold    int    // абсолютный мин. порог RMS int16 (VAD_RMS_THRESHOLD); фактический — адаптивный (3×шумовой пол)
+	// MetricsUser/MetricsPassword — basic-auth на /metrics (METRICS_USER,
+	// METRICS_PASSWORD). Метрики содержат пути, идентификаторы сессий и лаги
+	// голосового контура; в прод-профиле api наружу не публикуется, но внутри
+	// docker-сети его скрейпит prometheus, и без пароля там читал кто угодно.
+	// Пароль не задан — /metrics вообще не регистрируется.
+	MetricsUser       string
+	MetricsPassword   string
+	SilenceNudgeS     int  // тишина > порога → nudge от ИИ, с (SILENCE_NUDGE_S)
+	LLMMock           bool // LLM-мок вместо реального эндпоинта (LLM_MOCK=1; dev/CI, ADR-005)
+	DebugEndpoints    bool // dev-эндпоинты (/debug/*) — только явное включение (ENABLE_DEBUG=1; дефолт OFF)
+	LLMEnableThinking bool // vLLM chat_template_kwargs.enable_thinking (LLM_ENABLE_THINKING, дефолт false — SLO голосового контура)
+	VADEndSilenceMS   int  // конец реплики по тишине, мс (VAD_END_SILENCE_MS, ADR-002)
+	VADRMSThreshold   int  // абсолютный мин. порог RMS int16 (VAD_RMS_THRESHOLD); фактический — адаптивный (3×шумовой пол)
 	// VADPreSilenceMS — предварительная тишина для pre-STT (VAD_PRESTT_SILENCE_MS,
 	// default 400; 0 — отключает pre-STT).
 	VADPreSilenceMS int
@@ -135,6 +142,8 @@ func Load() (*Config, error) {
 		LLMAPIKey:             os.Getenv("LLM_API_KEY"),
 		SandboxURL:            getEnv("SANDBOX_URL", "http://localhost:8200"),
 		SandboxAdminToken:     os.Getenv("SANDBOX_ADMIN_TOKEN"),
+		MetricsUser:           getEnv("METRICS_USER", "prometheus"),
+		MetricsPassword:       os.Getenv("METRICS_PASSWORD"),
 		SandboxTasksMin:       getEnvInt("SANDBOX_TASKS_MIN", 4),
 		SandboxTasksPerTick:   getEnvInt("SANDBOX_TASKS_PER_TICK", 4),
 		SandboxTasksIntervalS: getEnvInt("SANDBOX_TASKS_INTERVAL_S", 600),

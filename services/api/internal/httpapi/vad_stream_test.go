@@ -476,12 +476,20 @@ func metricAtLeast(body, name string, n int) bool {
 	return false
 }
 
-// metricsBody — GET /metrics (тестовый стенд).
+// metricsBody — GET /metrics (тестовый стенд; маршрут под basic-auth).
 func metricsBody(t *testing.T, apiURL string) string {
 	t.Helper()
-	resp, err := http.Get(apiURL + "/metrics")
+	req, err := http.NewRequest(http.MethodGet, apiURL+"/metrics", nil)
 	if err != nil {
 		t.Fatalf("metrics: %v", err)
+	}
+	req.SetBasicAuth("prom", "test-metrics")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("metrics: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("metrics: HTTP %d — сверься с MetricsUser/MetricsPassword тестового конфига", resp.StatusCode)
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

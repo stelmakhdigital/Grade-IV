@@ -44,6 +44,10 @@ func newInterviewEnv(t *testing.T) *interviewEnv {
 		JWTExpiryHours: 1,
 		SilenceNudgeS:  1,
 		SandboxURL:     "http://127.0.0.1:1", // нет sandbox: задачи не выдаются
+		// /metrics закрыт basic-auth (как в проде); тесты метрик читают его
+		// с этими учетными данными.
+		MetricsUser:     "prom",
+		MetricsPassword: "test-metrics",
 	}
 	database, dialect, err := db.Open(cfg.DatabaseURL)
 	if err != nil {

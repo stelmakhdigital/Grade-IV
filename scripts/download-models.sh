@@ -1,127 +1,148 @@
 #!/usr/bin/env bash
-# Скачивание моделей для системы «Грейд» в MODELS_DIR (default /mnt/models).
+# Скачивание весов для системы «Грейд». Один запуск на свежей машине:
 #
-# Что скачивается:
-#   stt/         — faster-whisper (Systran/faster-whisper-{STT_MODEL}, default small)
-#   stt-gigaam/  — GigaAM v3 (Sber, MIT; дефолт STT: v3_e2e_rnnt — пунктуация, WER в ~2 раза ниже Whisper)
-#   tts/         — Silero TTS v5 RU (silero-tts-v5_ru.pt)
-#   llm/         — Qwen3.8-27B-Instruct (для vLLM; ~60 ГБ fp16 / ~30 ГБ int8)
+#   bash scripts/download-models.sh
 #
-# VAD (silero_vad_v6.onnx) — в комплекте с faster-whisper (не скачивается).
+# Файлы в git не попадают — скрипт тянет их из тех же мест, откуда их брали
+# вручную, и сверяет контрольные суммы. Каталог по умолчанию — <репо>/models:
+# его prod-compose монтирует в voice-контейнер как /models, а dev-стек
+# (scripts/run-all.sh) сам указывает MODELS_DIR=services/voice/models.
 #
-# Использование:
-#   bash scripts/download-models.sh                  # /mnt/models
-#   MODELS_DIR=/data/models bash scripts/download-models.sh
-#   STT_MODEL=large-v3 LLM_MODEL=Qwen/Qwen3.8-27B-Instruct bash scripts/download-models.sh
+# Что тянуть — переменной MODELS (по умолчанию ровно то, что нужно приложению):
+#   gigaam  GigaAM v3 RNNT (~450 МБ) — STT по умолчанию (AGENTS.md)
+#   tts     Silero TTS v5 RU (~145 МБ)
+#   whisper faster-whisper (опция, ~460 МБ … 3 ГБ) — MODELS=whisper
+#   llm     LLM для vLLM (~30-60 ГБ)                — MODELS=llm
+# Пример: MODELS=gigaam,tts,whisper bash scripts/download-models.sh
 #
-# Нужны: curl, python3 (для huggingface_hub; voice-venv используется если есть).
+# Переопределяется: MODELS_DIR, GIGAAM_URL (зеркало весов GigaAM), STT_MODEL
+# (размер faster-whisper), LLM_MODEL, HF_REPO (зеркало репо HuggingFace).
+#
+# Нужны: curl, md5sum; для whisper/llm ещё python3 с huggingface_hub
+# (берётся из services/voice/.venv, при его отсутствии создаётся /tmp/hf-venv).
+#
+# GigaAM: у Sber-CDN просрочен TLS-сертификат, поэтому зеркало через GIGAAM_URL
+# обязательно, если прямой запрос падает. Список md5 — ниже; пакет gigaam сверяет
+# хеш ckpt сам при загрузке; проверка здесь дублируется, чтобы обрезанный файл
+# не уехал в голосовой контур.
 set -euo pipefail
 
-# По умолчанию каталог <репо>/models — его prod-compose монтирует в voice как
-# /models (GIGAAM_DOWNLOAD_ROOT=/models/stt-gigaam, TTS_MODEL_DIR=/models/tts),
-# так что скачанное сразу видно контейнеру без переносов и симлинков.
-MODELS_DIR="${MODELS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]})/.." && pwd)/models}"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MODELS_DIR="${MODELS_DIR:-$REPO_DIR/models}"
+MODELS="${MODELS:-gigaam,tts}"
 STT_MODEL="${STT_MODEL:-small}"
-TTS_MODEL_FILE="silero-tts-v5_ru.pt"
-TTS_URL="https://models.silero.ai/models/tts/ru/v5_ru.pt"
 LLM_MODEL="${LLM_MODEL:-Qwen/Qwen3.8-27B-Instruct}"
+GIGAAM_URL="${GIGAAM_URL:-https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM}"
+TTS_URL="${TTS_URL:-https://models.silero.ai/models/tts/ru/v5_ru.pt}"
 
-echo "=== Целевая дирекория: $MODELS_DIR ==="
-mkdir -p "$MODELS_DIR/stt" "$MODELS_DIR/stt-gigaam" "$MODELS_DIR/tts" "$MODELS_DIR/llm"
+# Контрольные суммы проверенных файлов. v3_e2e_rnnt.ckpt пинит и сам пакет
+# (gigaam/__init__.py::_MODEL_HASHES); остальное — эталон с рабочей установки.
+# Не совпало — скрипт падает и печатает фактический md5: обновить строку можно
+# осознанно, а не подменяя веса молча.
+MD5_v3_e2e_rnnt_ckpt=2730de7545ac43ad256485a462b0a27a
+MD5_v3_e2e_rnnt_tokenizer_model=3b3bf8370e882885d79731592fc99f98
+MD5_silero_tts_v5_ru_pt=b205ce893ea1ba56b0db9ee1028d9cf6
 
-# --- 1) STT: faster-whisper (HuggingFace) ---
-echo ""
-echo "=== [1/4] STT: faster-whisper $STT_MODEL (~$([ "$STT_MODEL" = "large-v3" ] && echo "3 ГБ" || echo "460 МБ")) ==="
-if [ -d "$MODELS_DIR/stt/Systran/faster-whisper-$STT_MODEL" ]; then
-  echo "  Уже существует: $MODELS_DIR/stt/Systran/faster-whisper-$STT_MODEL"
-else
-  # Используем voice-venv (там huggingface_hub) или ставим временно.
-  VENV_PY="services/voice/.venv/bin/python"
-  if [ ! -f "$VENV_PY" ]; then
-    echo "  Ошибка: нет voice-venv (make install). Ставим huggingface_hub во временный venv."
-    python3 -m venv /tmp/hf-venv
-    /tmp/hf-venv/bin/pip install -q huggingface_hub
-    VENV_PY="/tmp/hf-venv/bin/python"
+say() { printf '  %s\n' "$@"; }
+fail() { printf '  ОШИБКА: %s\n' "$1" >&2; exit 1; }
+
+# curl -> файл, затем сверка md5 по эталону (если он задан).
+fetch() {
+  local url="$1" dest="$2" want_md5="${3:-}"
+  if [ -f "$dest" ] && { [ -z "$want_md5" ] || [ "$(md5sum "$dest" | cut -d' ' -f1)" = "$want_md5" ]; }; then
+    say "уже на месте: $(basename "$dest")"
+    return 0
   fi
-  "$VENV_PY" - <<PY
+  if [ -f "$dest" ]; then
+    say "файл не по контрольной сумме, перекачиваю: $(basename "$dest")"
+    rm -f "$dest"
+  fi
+  say "качаем: $url"
+  curl -fL --progress-bar --retry 3 --retry-delay 2 --connect-timeout 20 -o "$dest.part" "$url" || fail "не скачался $url"
+  mv "$dest.part" "$dest"
+  if [ -n "$want_md5" ]; then
+    local got
+    got="$(md5sum "$dest" | cut -d' ' -f1)"
+    [ "$got" = "$want_md5" ] || fail "md5 $(basename "$dest") = $got, ожидаем $want_md5"
+    say "md5 совпал: $(basename "$dest")"
+  fi
+}
+
+hf_download() { # repo dest
+  local venv_py="$REPO_DIR/services/voice/.venv/bin/python"
+  if [ ! -f "$venv_py" ]; then
+    say "нет voice-venv — создаю временный с huggingface_hub"
+    python3 -m venv /tmp/hf-venv
+    /tmp/hf-venv/bin/pip install -q huggingface_hub || fail "не поставился huggingface_hub"
+    venv_py="/tmp/hf-venv/bin/python"
+  fi
+  HF_REPO="$1" DEST="$2" "$venv_py" - <<'PY'
 import os
 from huggingface_hub import snapshot_download
-path = snapshot_download(
-    repo_id="Systran/faster-whisper-$STT_MODEL",
-    local_dir="$MODELS_DIR/stt/Systran/faster-whisper-$STT_MODEL",
-)
-print(f"  Скачано: {path}")
+print("  скачано:", snapshot_download(repo_id=os.environ["HF_REPO"], local_dir=os.environ["DEST"]))
 PY
-fi
+}
 
-# --- 2) TTS: Silero v5 RU ---
-echo ""
-echo "=== [2/4] TTS: Silero v5 RU (~150 МБ) ==="
-if [ -f "$MODELS_DIR/tts/$TTS_MODEL_FILE" ]; then
-  echo "  Уже существует: $MODELS_DIR/tts/$TTS_MODEL_FILE"
-else
-  curl -L --progress-bar -o "$MODELS_DIR/tts/$TTS_MODEL_FILE.part" "$TTS_URL"
-  mv "$MODELS_DIR/tts/$TTS_MODEL_FILE.part" "$MODELS_DIR/tts/$TTS_MODEL_FILE"
-  echo "  Скачано: $MODELS_DIR/tts/$TTS_MODEL_FILE"
-fi
+mkdir -p "$MODELS_DIR/stt" "$MODELS_DIR/stt-gigaam" "$MODELS_DIR/tts" "$MODELS_DIR/llm"
+echo "=== Каталог: $MODELS_DIR ; забираю: $MODELS ==="
+missing=()
 
-# --- 3) STT: GigaAM v3 (Sber, MIT; дефолт STT проекта) ---
+case ",$MODELS," in
+  *,gigaam,*)
+    echo ""
+    echo "=== STT: GigaAM v3 RNNT (дефолт проекта) ==="
+    # Только та модель, на которой стоит прод: 450 МБ вместо 1.8 ГБ на все шесть
+    # вариантов v3. Другие имена — через GIGAAM_MODEL + MODELS=gigaam (не пинены).
+    fetch "$GIGAAM_URL/v3_e2e_rnnt.ckpt" "$MODELS_DIR/stt-gigaam/v3_e2e_rnnt.ckpt" "$MD5_v3_e2e_rnnt_ckpt"
+    fetch "$GIGAAM_URL/v3_e2e_rnnt_tokenizer.model" "$MODELS_DIR/stt-gigaam/v3_e2e_rnnt_tokenizer.model" "$MD5_v3_e2e_rnnt_tokenizer_model"
+    ;;
+esac
+
+case ",$MODELS," in
+  *,tts,*)
+    echo ""
+    echo "=== TTS: Silero v5 RU ==="
+    fetch "$TTS_URL" "$MODELS_DIR/tts/silero-tts-v5_ru.pt" "$MD5_silero_tts_v5_ru_pt"
+    ;;
+esac
+
+case ",$MODELS," in
+  *,whisper,*)
+    echo ""
+    echo "=== STT: faster-whisper $STT_MODEL (опция, не дефолт проекта) ==="
+    if [ -d "$MODELS_DIR/stt/Systran/faster-whisper-$STT_MODEL" ]; then
+      say "уже на месте: faster-whisper-$STT_MODEL"
+    else
+      hf_download "Systran/faster-whisper-$STT_MODEL" "$MODELS_DIR/stt/Systran/faster-whisper-$STT_MODEL"
+    fi
+    ;;
+esac
+
+case ",$MODELS," in
+  *,llm,*)
+    echo ""
+    echo "=== LLM: $LLM_MODEL (десятки гигабайт) ==="
+    if [ -n "$(ls -A "$MODELS_DIR/llm" 2>/dev/null)" ]; then
+      say "уже непусто: $MODELS_DIR/llm"
+    else
+      hf_download "${HF_REPO:-$LLM_MODEL}" "$MODELS_DIR/llm"
+    fi
+    ;;
+esac
+
 echo ""
-echo "=== [3/4] STT: GigaAM v3 E2E/CTC/RNNT (CDN Sber, ~1.8 ГБ всего) ==="
-GIGAAM_DIR="$MODELS_DIR/stt-gigaam"
-# URL переопределяется: у Sber-CDN просрочен TLS-сертификат (notAfter 2026-11-04),
-# curl/urllib на нём падают. Качают зеркало или файл вручную и сверяют md5 с пином
-# пакета (gigaam/__init__.py::_MODEL_HASHES, v3_e2e_rnnt = 2730de7545ac43ad256485a462b0a27a),
-# пакет проверяет этот хеш сам при загрузке модели.
-GIGAAM_URL="${GIGAAM_URL:-https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM}"
-for f in v3_e2e_rnnt.ckpt v3_e2e_ctc.ckpt v3_rnnt.ckpt v3_ctc.ckpt \
-         v3_e2e_rnnt_tokenizer.model v3_e2e_ctc_tokenizer.model; do
-  if [ -f "$GIGAAM_DIR/$f" ]; then
-    echo "  Уже существует: $f"
-  else
-    curl -L --progress-bar -o "$GIGAAM_DIR/$f.part" "$GIGAAM_URL/$f"
-    mv "$GIGAAM_DIR/$f.part" "$GIGAAM_DIR/$f"
+echo "=== Итог ==="
+for p in stt-gigaam/v3_e2e_rnnt.ckpt stt-gigaam/v3_e2e_rnnt_tokenizer.model tts/silero-tts-v5_ru.pt; do
+  if [ -f "$MODELS_DIR/$p" ]; then
+    say "ок   $p ($(du -h "$MODELS_DIR/$p" | cut -f1))"
+  elif [ "$MODELS" = "gigaam,tts" ]; then
+    missing+=("$p")
   fi
 done
-
-# --- 4) LLM: Qwen3.8-27B-Instruct (HuggingFace, для vLLM) ---
-echo ""
-echo "=== [4/4] LLM: $LLM_MODEL (~60 ГБ fp16) ==="
-echo "  (Это большая загрузка. Для CPU-демо можно пропустить: LLM_MOCK=1.)"
-read -p "  Скачать LLM-модель? [y/N] " -r
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-  echo "  Пропущено (LLM_MOCK=1 для демо)."
-  exit 0
+if [ "${#missing[@]}" -gt 0 ]; then
+  fail "не хватает: ${missing[*]} — без них voice молчит (провайдер выбран, весов нет)"
 fi
-# huggingface-cli (если есть) или python-скрипт.
-if command -v huggingface-cli &> /dev/null; then
-  huggingface-cli download "$LLM_MODEL" --local-dir "$MODELS_DIR/llm"
-else
-  "$VENV_PY" - <<PY
-from huggingface_hub import snapshot_download
-path = snapshot_download(
-    repo_id="$LLM_MODEL",
-    local_dir="$MODELS_DIR/llm",
-)
-print(f"  Скачано: {path}")
-PY
-fi
-
 echo ""
-echo "=== Готово ==="
-echo ""
-echo "Теперь задайте в .env (или окружении):"
-echo "  VOICE_STT_PROVIDER=gigaam  (дефолт STT проекта, GigaAM v3)"
-echo "  GIGAAM_DOWNLOAD_ROOT=$MODELS_DIR/stt-gigaam"
-echo "  # резервный провайдер:"
-echo "  VOICE_STT_PROVIDER=faster-whisper  STT_DOWNLOAD_ROOT=$MODELS_DIR/stt"
-echo "  TTS_MODEL_DIR=$MODELS_DIR/tts"
-echo "  LLM_BASE_URL=http://LLM_NODE:8001/v1  (если vLLM на отдельном узле)"
-echo ""
-echo "Пример запуска (CPU-демо без LLM):"
-echo "  export LLM_MOCK=1"
-echo "  export VOICE_URL=http://127.0.0.1:8100"
-echo "  export SANDBOX_URL=http://127.0.0.1:8200"
-echo "  export STT_DOWNLOAD_ROOT=$MODELS_DIR/stt"
-echo "  export TTS_MODEL_DIR=$MODELS_DIR/tts"
-echo "  cd services/api && go run ./cmd/api"
+say "voice контейнера видит это как /models (монтируется compose), dev — через run-all.sh"
+say "проверить: docker compose -f infra/docker-compose.yml --profile prod up -d voice"
+say "         и GET http://127.0.0.1:8100/api/v1/health -> loaded: true"

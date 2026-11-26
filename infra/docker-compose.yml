@@ -43,6 +43,19 @@ services:
       ROLE_TRACKS_FILE: "/app/config/roles.json"
       TTS_VOICES_FILE: "/app/config/tts-voices.json"
       INTRO_OPENINGS_FILE: "/app/config/openings.json"
+      # /metrics — basic-auth. Пустой пароль = маршрута нет вовсе; тогда
+      # prometheus (профиль monitoring) покажет мишень недоступной, вместо
+      # тихого чтения метрик всей docker-сетью.
+      METRICS_USER: "${METRICS_USER:-prometheus}"
+      METRICS_PASSWORD: "${METRICS_PASSWORD:-}"
+    # Не root: правки админа раньше ложились в config/ репозитория root-овыми
+    # файлами. uid совпадаем с хостовым — bind-монтированный config/ принадлежит
+    # ему. На типичной машине это и есть 1000; иначе GRADE_UID=$(id -u) GRADE_GID=$(id -g) make up
+    user: "${GRADE_UID:-1000}:${GRADE_GID:-1000}"
+    # LLM-узел может жить на том же хосте, что и контейнеры (vLLM/llama.cpp
+    # наружу docker-сетью) — тогда LLM_BASE_URL=http://host.docker.internal:8000/v1.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Файлы резюме кандидатов (текст из них — в БД, оригинал — здесь).
       - resumes:/data/resumes
@@ -82,7 +95,21 @@ services:
       # Без SANDBOX_ADMIN_TOKEN эндпоинты отдают 503 — генерация выключена.
       SANDBOX_TASKS_FILE: "/var/lib/grade-sandbox/generated-tasks.json"
       SANDBOX_ADMIN_TOKEN: "${SANDBOX_ADMIN_TOKEN:-}"
+      # Каталог прогонов. В docker-режиме путь из -v разрешает ДОКЕР-ДЕМОН на
+      # хосте, а не песочница, поэтому путь обязан быть виден под тем же
+      # абсолютным адресом с обеих сторон (synchronized bind ниже). Иначе демон
+      # создаёт пустой каталог, контейнер прогона не видит ни решение, ни
+      # grade/overlay.json — и падает каждый запуск. Дефолт песочницы
+      # (~/.local/share/grade-sandbox) внутрь контейнера не виден наружу:
+      # «go: reading overlay: open /grade/overlay.json» на каждом прогоне
+      # (найдено на полном прод-старте 2026-11-26).
+      SANDBOX_WORKDIR_BASE: "${SANDBOX_WORK_ROOT:-/var/lib/grade-sandbox/work}"
     volumes:
+      # Тот же путь с двух сторон — обязательно (см. SANDBOX_WORKDIR_BASE выше). На хосте
+      # каталог нужно создать и отдать пользователю песочницы:
+      #   sudo mkdir -p /var/lib/grade-sandbox/work && sudo chown 1000:1000 $_
+      # Локально без root: SANDBOX_WORK_ROOT=/tmp/grade-sandbox-work
+      - "${SANDBOX_WORK_ROOT:-/var/lib/grade-sandbox/work}:${SANDBOX_WORK_ROOT:-/var/lib/grade-sandbox/work}"
       # WP-6: управление контейнерами сессий
       - /var/run/docker.sock:/var/run/docker.sock
       # spec-24: принятые gate задачи должны переживать пересборку контейнера
@@ -106,11 +133,15 @@ services:
     build:
       context: ../services/voice
       dockerfile: ../../infra/docker/voice.Dockerfile
-      # Где брать pip-пакеты: по умолчанию pypi.org. На сети без доступа к нему
-      # собирать явно: docker compose build --build-arg PIP_INDEX_URL=<зеркало>
-      # (в build.args специально не прописано — зеркало не должно становиться
-      # дефолтом прод-сборки).
+      # Откуда брать pip-пакеты. Дефолт — pypi.org; на сети без него ставим
+      # зеркало в .env (PIP_INDEX_URL=https://зеркало/pypi/simple) — иначе
+      # сборка voice падает на выборе setuptools. Дефолт оставлен pypi.org,
+      # чтобы зеркало чьей-то сети не стало дефолтом прод-сборки.
+      args:
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.org/simple}"
+        TORCH_INDEX_URL: "${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
     image: grade/voice:dev
+    user: "${GRADE_UID:-1000}:${GRADE_GID:-1000}" # писать некуда (/models :ro), но и root не нужен
     ports:
       - "8100:8100"
     environment:
@@ -152,8 +183,11 @@ services:
       context: ../services/frontend
       dockerfile: ../../infra/docker/frontend.Dockerfile
     image: grade/frontend:dev
-    ports:
-      - "8080:80"
+    # Наружу не публикуем: nginx — внутренний слой, вход только через caddy
+    # (:80/:443, TLS + HTTP→HTTPS). Публикация 8080 давала второй, незащищённый
+    # вход в то же приложение в обход TLS.
+    expose:
+      - "80"
     depends_on:
       - api
     restart: unless-stopped
@@ -207,10 +241,20 @@ services:
   # === monitoring: Prometheus + Grafana (Фаза 5) ===
   prometheus:
     image: prom/prometheus:v2.53.1
+    # Prometheus НЕ разворачивает переменные окружения в конфиге: basic_auth с
+    # ${VAR} уходит в запрос литералом и /metrics отвечает 401. Значения
+    # подставляются в prometheus.yml на старте (заполнители @METRICS_*@);
+    # разделитель sed — #, в base64-пароле его нет.
+    environment:
+      METRICS_USER: "${METRICS_USER:-prometheus}"
+      METRICS_PASSWORD: "${METRICS_PASSWORD:-}"
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=7d
+      - |
+        sed "s#@METRICS_USER@#$$METRICS_USER#; s#@METRICS_PASSWORD@#$$METRICS_PASSWORD#" \
+          /etc/prometheus/prometheus.yml > /tmp/prometheus.yml
+        exec /bin/prometheus --config.file=/tmp/prometheus.yml \
+          --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=7d
     ports:
       - "9090:9090"
     volumes:

@@ -234,7 +234,12 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("POST /debug/mic-report", s.handleDebugMicReport)
 		mux.HandleFunc("OPTIONS /debug/mic-report", s.handleDebugMicReport)
 	}
-	mux.HandleFunc("GET /metrics", metrics.Handler)
+	// /metrics — под basic-auth (METRICS_USER/METRICS_PASSWORD). Без пароля
+	// маршрута нет вовсе: тихая утечка метрик хуже, чем красный target у
+	// prometheus'а — тот сразу виден в /targets.
+	if s.cfg.MetricsPassword != "" {
+		mux.Handle("GET /metrics", requireBasicAuth(s.cfg.MetricsUser, s.cfg.MetricsPassword, http.HandlerFunc(metrics.Handler)))
+	}
 	mux.HandleFunc("POST /api/v1/auth/register", s.handleRegister)
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.Handle("GET /api/v1/auth/me", s.requireAuth(http.HandlerFunc(s.handleMe)))

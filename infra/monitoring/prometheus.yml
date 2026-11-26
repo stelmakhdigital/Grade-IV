@@ -1,4 +1,9 @@
 # Prometheus (compose-профиль monitoring) — скрейп grade-api :8000/metrics.
+#
+# /metrics закрыт basic-auth (METRICS_USER/METRICS_PASSWORD на api): метрики
+# содержат пути, идентификаторы сессий и лаги голосового контура. Значения
+# Prometheus подставляет из окружения контейнера (compose их передаёт); пустой
+# пароль на api означает, что маршрута нет вовсе и мишень будет красной.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -10,5 +15,8 @@ scrape_configs:
 
   - job_name: grade-api
     metrics_path: /metrics
+    basic_auth:
+      username: @METRICS_USER@
+      password: @METRICS_PASSWORD@
     static_configs:
       - targets: ["api:8000"]

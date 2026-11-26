@@ -130,8 +130,18 @@ voice, postgres и grafana в прод-профиле портов не публ
 - Голос по умолчанию (`TTS_SPEAKER`) обязан быть среди реальных спикеров
   `v5_ru` (aidar, eugene, baya, kseniya, xenia) — иначе Silero подставляет
   своего и шумит в лог на каждую реплику.
-- На сети без pypi.org: `docker compose build --build-arg PIP_INDEX_URL=<зеркало> voice`
-  (и ставьте torch с CPU-индекса — см. `infra/docker/voice.Dockerfile`).
+- `/metrics` — под basic-auth (`METRICS_USER`/`METRICS_PASSWORD`). Без пароля
+  маршрута нет вовсе. Учётные данные получает и prometheus (профиль
+  `monitoring`) — в `infra/monitoring/prometheus.yml` пароля нет, Prometheus
+  подставляет их из окружения.
+- На сети без pypi.org — `PIP_INDEX_URL=<зеркало>` в `.env`: compose передаёт
+  его в сборку voice (дефолт остаётся pypi.org, чтобы зеркало чьей-то сети не
+  стало дефолтом прода).
+- Контейнеры api и voice — не root (uid из `GRADE_UID`/`GRADE_GID`, по
+  умолчанию 1000). Правки админа в `config/` остаются принадлежать твоему
+  пользователю. `sandbox` — осознанное исключение: он работает через
+  `/var/run/docker.sock`, а это root на хосте независимо от uid (подробности —
+  в шапке `infra/docker/sandbox.Dockerfile`).
 - Профили: `prod` (api, postgres, sandbox, voice, frontend, caddy),
   `gpu` (voice на CUDA), `monitoring` (prometheus + grafana).
 
