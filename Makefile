@@ -3,7 +3,7 @@
 # Сервис «Грейд» — основные команды (WP-1; WP-12: up-gpu, smoke).
 GO_MODULES := services/api services/sandbox
 
-.PHONY: help install test build run-api run-sandbox run-voice run-frontend up up-gpu down smoke clean models
+.PHONY: help install test build run-all stop-all status run-api run-sandbox run-voice run-frontend up up-gpu down smoke clean models
 
 help:
 	@echo "Команды:"

@@ -70,7 +70,7 @@ Docker-путь идёт через socket-proxy с allowlist
 
 Миграции накатываются api на старте (`internal/db/db.go:108`), 41 переход,
 идемпотентно, откатов нет — схему меняют вперёд-совместимо. Перед `up --build`
- имеет смысл сделать дамп:
+имеет смысл сделать дамп:
 
 ```bash
 docker compose -f infra/docker-compose.yml exec -T postgres \
