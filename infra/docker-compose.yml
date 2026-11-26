@@ -227,9 +227,12 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     healthcheck:
-      # админ-API Caddy (127.0.0.1:2019) отвечает только внутри контейнера —
-      # наружу он не торчит
-      test: ["CMD", "curl", "-sf", "http://127.0.0.1:2019/health"]
+      # Админ-API Caddy (127.0.0.1:2019) отвечает только внутри контейнера,
+      # наружу он не торчит. /health у Caddy 2 нет — он возвращает 404, и
+      # проба никогда не проходила (контейнер висел unhealthy при работающем
+      # TLS). /config/ отвечает 200 только с загруженной конфигурацией, то есть
+      # это честная readiness-проба.
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:2019/config/"]
       interval: 15s
       timeout: 5s
       retries: 3
