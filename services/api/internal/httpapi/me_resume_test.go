@@ -10,6 +10,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -75,11 +77,22 @@ func putResume(t *testing.T, url, token, about, fileName string, file []byte) (i
 // newResumeEnv — сервер с resumes-каталогом во временной папке и ответом ИИ на подбор роли.
 func newResumeEnv(t *testing.T, roleAnswer string) (*httptest.Server, string) {
 	t.Helper()
+	ts, tok, _ := newResumeEnvRoles(t, roleAnswer)
+	return ts, tok
+}
+
+// newResumeEnvRoles — то же + путь к файлу ролей: ROLE_TRACKS_FILE указывает во
+// временную папку (тесты не пишут в config/roles.json рабочего дерева), и тест
+// может сравнить содержимое файла до и после.
+func newResumeEnvRoles(t *testing.T, roleAnswer string) (*httptest.Server, string, string) {
+	t.Helper()
 	dir := t.TempDir()
+	rolesFile := filepath.Join(dir, "roles.json")
+	t.Setenv("ROLE_TRACKS_FILE", rolesFile)
 	cfg := &config.Config{
 		Addr: ":0", DatabaseURL: "sqlite://:memory:", JWTSecret: "test-secret",
 		JWTExpiryHours: 1, ResumeDir: dir + "/resumes",
-		// Роли — дефолтный набор (backend/sysadmin/pm), файл не читаем из дерева.
+		// Роли — дефолтный набор (backend/sysadmin/pm) в temp-файле.
 	}
 	database, dialect, err := db.Open(cfg.DatabaseURL)
 	if err != nil {
@@ -109,7 +122,7 @@ func newResumeEnv(t *testing.T, roleAnswer string) (*httptest.Server, string) {
 	if tok == "" {
 		t.Fatal("нет токена кандидата")
 	}
-	return ts, tok
+	return ts, tok, rolesFile
 }
 
 // Резюме: загрузка файла + описания, чтение, сброс.
@@ -221,6 +234,82 @@ func TestSessionCreateExplicitGradeSkipsInference(t *testing.T) {
 	}
 	if m["base_grade"] != "" {
 		t.Fatalf("base_grade при явном грейде должен быть пустым, got %v", m["base_grade"])
+	}
+}
+
+// issue #12: ИИ штатно даёт разные track_id и new_track.id. Запись по второму
+// ключу затирала существующую роль (вплоть до backend) вплоть до рестарта.
+func TestResumeRoleGenerationCannotOverwrite(t *testing.T) {
+	answer := `{"track_id":"site_reliability_engineer","grade":"middle","reason":"надёжность и мониторинг",` +
+		`"title":"Инженер надёжности","stacks":["go"],"new_track":{"id":"sysadmin",` +
+		`"title":"Инженер надёжности (подменён)","description":"затирание дефолтной роли",` +
+		`"grades":["junior"],"board":{"title":"Чужая доска","review_prompt":"…",` +
+		`"groups":[{"title":"Группа","names":["Блок"]}]},` +
+		`"criteria":[{"name":"Мониторинг","weight":0.85},` +
+		`{"name":"Коммуникация (ясность, структура)","weight":0.15}]}}`
+	ts, tok, rolesFile := newResumeEnvRoles(t, answer)
+	if code, _ := putResume(t, ts.URL+"/api/v1/me/resume", tok,
+		"SRE, 4 года, мониторинг и дежурства", "r.docx", docxFixture(t, "Опыт 4 года")); code != http.StatusOK {
+		t.Fatalf("put resume: %d", code)
+	}
+	before, err := os.ReadFile(rolesFile)
+	if err != nil {
+		t.Fatalf("read roles: %v", err)
+	}
+
+	code, m := doJSON(t, "POST", ts.URL+"/api/v1/sessions", map[string]any{},
+		map[string]string{"Authorization": "Bearer " + tok})
+	if code != http.StatusCreated {
+		t.Fatalf("create: %d %v", code, m)
+	}
+	if m["track_id"] != models.DefaultTrackID {
+		t.Fatalf("track_id = %v, want %s (фолбэк, а не новая роль)", m["track_id"], models.DefaultTrackID)
+	}
+
+	// Файл ролей не перезаписан, sysadmin — дефолтный.
+	after, err := os.ReadFile(rolesFile)
+	if err != nil {
+		t.Fatalf("read roles: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("файл ролей перезаписан:\n%s", after)
+	}
+	_, raw := doJSONRaw(t, "GET", ts.URL+"/api/v1/tracks", nil,
+		map[string]string{"Authorization": "Bearer " + tok})
+	if !strings.Contains(raw, "Системный администратор") || strings.Contains(raw, "подменён") {
+		t.Fatalf("sysadmin изменён: %s", raw)
+	}
+}
+
+// Новая роль по-прежнему создаётся, когда track_id и new_track.id совпадают.
+func TestResumeRoleGenerationCreatesNewRole(t *testing.T) {
+	answer := `{"track_id":"data-platform-engineer","grade":"middle","reason":"хранилища и пайплайны",` +
+		`"title":"Инженер data-платформ","stacks":["python"],"new_track":{` +
+		`"id":"data-platform-engineer","title":"Инженер data-платформ","description":"Строит хранилища и пайплайны данных.",` +
+		`"practice":{"runtime":"python"},"grades":["middle","senior"],` +
+		`"board":{"title":"Архитектура хранилища","review_prompt":"Оцени слои данных и потоки.",` +
+		`"groups":[{"title":"Источники","names":["БД","Очередь","Файл"]}]},` +
+		`"criteria":[{"name":"Моделирование данных","weight":0.55},` +
+		`{"name":"Коммуникация (ясность, структура)","weight":0.45}]}}`
+	ts, tok, _ := newResumeEnvRoles(t, answer)
+	if code, _ := putResume(t, ts.URL+"/api/v1/me/resume", tok,
+		"Хранилища, ETL, 4 года", "r.docx", docxFixture(t, "Опыт 4 года")); code != http.StatusOK {
+		t.Fatalf("put resume: %d", code)
+	}
+	// Первый зарегистрированный — админ (ensureFirstAdmin).
+	auth := map[string]string{"Authorization": "Bearer " + tok}
+
+	code, m := doJSON(t, "POST", ts.URL+"/api/v1/sessions", map[string]any{}, auth)
+	if code != http.StatusCreated {
+		t.Fatalf("create: %d %v", code, m)
+	}
+	if m["track_id"] != "data-platform-engineer" {
+		t.Fatalf("track_id = %v, want data-platform-engineer", m["track_id"])
+	}
+
+	code, raw := doJSONRaw(t, "GET", ts.URL+"/api/v1/admin/tracks", nil, auth)
+	if code != http.StatusOK || !strings.Contains(raw, `"data-platform-engineer"`) {
+		t.Fatalf("новая роль не в admin-списке: %d %s", code, raw)
 	}
 }
 

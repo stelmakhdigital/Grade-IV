@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/resume"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/tracks"
 )
 
 // maxResumeAboutLen — лимит текста «о себе» (как вакансия — 20000 символов).
@@ -291,15 +293,25 @@ func (s *Server) inferRole(ctx context.Context, userID int64) resumeProfile {
 		if t.ID == "" {
 			t.ID = id
 		}
-		if err := s.tracks.Upsert(t); err == nil {
+		// issue #12: отсутствие роли проверяли по track_id — писать по другому ключу
+		// нельзя (затиралась существующая роль вплоть до backend): slug'и в track_id и
+		// new_track.id у ИИ расходятся штатно.
+		if t.ID != id || t.ID == models.DefaultTrackID {
+			s.log.Warn("resume: сгенерированная роль отклонена (id не совпал с track_id или это дефолтная роль) — backend",
+				"track_id", id, "new_track_id", t.ID)
+		} else if err := s.tracks.CreateIfAbsent(t); err != nil {
+			if errors.Is(err, tracks.ErrTrackExists) {
+				s.log.Warn("resume: роль уже существует — не перезаписываем, backend", "id", t.ID)
+			} else {
+				s.log.Warn("resume: сгенерированная роль не провалидировалась — backend", "id", t.ID, "err", err)
+			}
+		} else {
 			s.log.Info("resume: роль создана по резюме", "id", t.ID, "title", t.Title, "grade", base,
 				"stacks", joinStacks(stacks))
 			if title == "" {
 				title = t.Title
 			}
 			return resumeProfile{TrackID: t.ID, Base: base, Title: title, Stacks: stacks}
-		} else {
-			s.log.Warn("resume: сгенерированная роль не провалидировалась — backend", "id", t.ID, "err", err)
 		}
 	}
 	s.log.Info("resume: роль не определена — backend", "track_id", id)

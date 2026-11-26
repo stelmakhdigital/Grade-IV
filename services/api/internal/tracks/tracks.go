@@ -6,6 +6,7 @@ package tracks
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -107,15 +108,33 @@ func (s *Store) List() []models.Track {
 	return out
 }
 
+// ErrTrackExists — id уже занят (CreateIfAbsent).
+var ErrTrackExists = errors.New("трек с таким id уже существует")
+
 // Upsert — создание/обновление (валидация; запись файла атомарно).
 func (s *Store) Upsert(t models.Track) error {
+	return s.store(t, false)
+}
+
+// CreateIfAbsent — только создание (issue #12): занятый id → ErrTrackExists,
+// существующая роль не перезаписывается. Валидация и запись файла — как в Upsert.
+func (s *Store) CreateIfAbsent(t models.Track) error {
+	return s.store(t, true)
+}
+
+// store — общая запись Upsert/CreateIfAbsent (requireAbsent = занятый id отклоняется).
+func (s *Store) store(t models.Track, requireAbsent bool) error {
 	if err := t.Validate(); err != nil {
 		return err
 	}
 	t.SortCriteria()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, exists := s.tracks[t.ID]; !exists {
+	if _, exists := s.tracks[t.ID]; exists {
+		if requireAbsent {
+			return ErrTrackExists
+		}
+	} else {
 		s.order = append(s.order, t.ID)
 	}
 	tt := t
