@@ -579,11 +579,8 @@ export function SessionView({ id }: { id: number }) {
                 К доске
               </button>
             )}
-            {stage === 'livecode' && (
-              <button type="button" className="btn ghost" onClick={() => onStageAction('design')}>
-                К System Design
-              </button>
-            )}
+            {/* Переход livecode → design — в панели livecode (go-design): там
+                видно программу стадий трека, и здесь кнопка дублировалась. */}
           </div>
 
           {/* Причина, почему микрофон и отправка текстом сейчас неактивны:
