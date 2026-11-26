@@ -48,6 +48,11 @@ export function CodeEditor({ language, value, onChange, onReady }: CodeEditorPro
         automaticLayout: true,
         scrollBeyondLastLine: false,
         tabSize: 4,
+        // Перенос вместо горизонтального скролла: на 375 px колонка редактора
+        // 293 px, и длинную строку нельзя было ни прочитать, ни поправить
+        // (свайп по редактору ещё и скроллит страницу). На десктопе строки
+        // задачи в эту ширину и так влезают.
+        wordWrap: 'on',
       }}
     />
   );
