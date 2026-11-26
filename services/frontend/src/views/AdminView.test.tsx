@@ -230,6 +230,43 @@ describe('AdminView: роли собеседований (spec-18/22)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('незавершённые сессии');
   });
 
+  it('сохранение роли не теряет board.cases[].required и practice_stacks', async () => {
+    // Бэкенд (PUT /admin/tracks/{id}) сохраняет присланный объект как есть:
+    // поле, не ушедшее в payload, исчезает из базы. Проверим, что редактор
+    // прокидывает оба поля нетронутой правкой заголовка.
+    const tracks = [
+      {
+        ...TRACKS[0],
+        practice_stacks: ['go', 'python'],
+        board: {
+          ...TRACKS[0].board,
+          cases: [{ ...TRACKS[0].board.cases?.[0], required: ['БД', 'Балансировщик (LB)'] }],
+        },
+      },
+    ];
+    const fetchMock = renderAdmin({ tracks });
+    const user = userEvent.setup();
+    await screen.findByText('admin@example.com');
+    await user.click(screen.getByRole('tab', { name: 'Роли собеседований' }));
+    await screen.findByTestId('admin-tracks');
+
+    await user.selectOptions(screen.getByTestId('admin-track-select'), 'backend');
+    await user.type(screen.getByTestId('admin-track-title'), ' +');
+    await user.click(screen.getByTestId('admin-track-save'));
+
+    let put: [string, RequestInit] | undefined;
+    await waitFor(() => {
+      put = fetchMock.mock.calls.find(
+        (c) => c[1]?.method === 'PUT' && String(c[0]).endsWith('/admin/tracks/backend'),
+      ) as [string, RequestInit] | undefined;
+      expect(put).toBeDefined();
+    });
+    const body = JSON.parse(put![1].body as string).track;
+    expect(body.title).toBe('Backend (Go) +'); // правка действительно ушла
+    expect(body.practice_stacks).toEqual(['go', 'python']);
+    expect(body.board.cases[0].required).toEqual(['БД', 'Балансировщик (LB)']);
+  });
+
   it('drag-n-drop: перестановка групп за ручку', async () => {
     renderAdmin();
     const user = userEvent.setup();

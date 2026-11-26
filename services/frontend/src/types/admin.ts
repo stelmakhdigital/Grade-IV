@@ -44,10 +44,19 @@ export interface Track {
 export interface AdminTrack extends Track {
   board: Track['board'] & {
     review_prompt: string;
-    cases?: { grade: Grade; title: string; statement: string; checklist?: string[] }[];
+    cases?: {
+      grade: Grade;
+      title: string;
+      statement: string;
+      checklist?: string[];
+      /** Обязательные артефакты доски (spec-24): сверяются с блоками схемы */
+      required?: string[];
+    }[];
   };
   criteria: Track['criteria'] & { hint?: string }[];
   grade_confirm?: number;
+  /** Языки, которые роль принимает на кодовой стадии (помимо practice.runtime). */
+  practice_stacks?: Stack[];
   /** Незавершённые сессии роли (issue #7): практика меняется, только когда их нет. */
   active_sessions?: number;
 }
