@@ -286,6 +286,33 @@ describe('SessionView (WP-8)', () => {
     expect(line).toHaveTextContent('Расскажите о себе.');
   }, 10000);
 
+  // Фидбек 2026-11-26: на живом интервью в уже готовой строке кандидата
+  // оставалось «распознаётся ⋯», а рядом вырастала вторая строка с тем же
+  // текстом. Причина — финал искал интерим только среди последней строки, а
+  // между partial и final вставала реплика интервьюера.
+  it('реплика интервьюера между partial и final не оставляет висячее «распознаётся ⋯»', async () => {
+    renderSession(mockApi({ session: S_ACTIVE }));
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    const fake = FakeWebSocket.instances[0];
+    await flush();
+
+    fake.deliver(JSON.stringify({ type: 'stt_partial', text: 'Посмотреть, как это всё' }));
+    await screen.findByText('Посмотреть, как это всё');
+
+    fake.deliver(JSON.stringify({ type: 'transcript', who: 'ai', text: 'Уточните вопрос?' }));
+    await screen.findByText('Уточните вопрос?');
+
+    fake.deliver(
+      JSON.stringify({ type: 'transcript', who: 'user', text: 'Посмотреть, как это всё будет работать.' }),
+    );
+    await screen.findByText('Посмотреть, как это всё будет работать.');
+
+    const userLines = document.querySelectorAll('.line.user');
+    expect(userLines).toHaveLength(1);
+    expect(userLines[0]?.className).not.toContain('interim');
+    expect(userLines[0]?.textContent).not.toContain('распознаётся');
+  }, 10000);
+
   it('микрофон без доступа к device — статус «нет доступа»', async () => {
     renderSession(mockApi({ session: S_ACTIVE }));
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));

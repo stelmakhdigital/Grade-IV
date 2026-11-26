@@ -233,19 +233,40 @@ export function useVoiceSession(id: number) {
             break;
           case 'transcript':
             setLines((prev) => {
-              // final кандидата фиксирует интерим-строку (stt_partial),
-              // а не дублирует её отдельной строкой; id интерима сохраняется.
-              const last = prev[prev.length - 1];
-              const replacesInterim =
-                m.who === 'user' && last !== undefined && last.who === 'user' && last.interim;
+              // Финал кандидата заменяет собой интерим-строку (stt_partial),
+              // где бы она ни стояла. Между partial и final успевает встать
+              // реплика интервьюера (подсказка за молчание), и ориентироваться
+              // на «последнюю строку» нельзя: интерим оставался не зафиксированным
+              // («распознаётся ⋯» горело на уже готовой фразе) и рядом
+              // вырастала вторая строка с тем же текстом.
+              let idx = -1;
+              if (m.who === 'user') {
+                for (let i = prev.length - 1; i >= 0; i--) {
+                  const l = prev[i];
+                  if (l !== undefined && l.who === 'user' && l.interim) {
+                    idx = i;
+                    break;
+                  }
+                }
+              }
+              if (idx >= 0) {
+                const old = prev[idx]!;
+                const next: Line = {
+                  who: 'user',
+                  // Пустой финал не должен стирать распознанное: оставляем
+                  // текст интерима, но снимаем признак (точки гаснут).
+                  text: m.text !== '' ? m.text : old.text,
+                  id: old.id,
+                };
+                const copy = prev.slice();
+                copy[idx] = next;
+                return copy;
+              }
               const next: Line = {
                 who: (m.who === 'user' ? 'user' : 'ai') as Line['who'],
                 text: m.text,
-                id: replacesInterim ? last!.id : nextLineId(),
+                id: nextLineId(),
               };
-              if (replacesInterim) {
-                return [...prev.slice(0, -1), next];
-              }
               return [...prev.slice(-199), next];
             });
             break;
