@@ -251,3 +251,71 @@ func TestBuildProgress(t *testing.T) {
 		t.Errorf("overall: %v / %v", out[0].Overall, out[1].Overall)
 	}
 }
+
+// TestCapMeasuredScores — оценка LLM по измеримому критерию не улетает выше
+// измерения. Проверено на живом стенде: транскрипт идёт в промпт оценщика как
+// есть, и одной фразы кандидата хватало, чтобы Live-Code с 0 решёнными задачами
+// получил 5 (замер 2026-11-26).
+func TestCapMeasuredScores(t *testing.T) {
+	stages := []StageReport{
+		{Stage: "livecode", Title: "Live-Code", Score: 1, Basis: "0 из 3 задач"},
+		{Stage: "voice", Title: "Голосовая стадия", Score: 2, Basis: "2 реплики"},
+	}
+	crit := criteriaForGrade(models.GradeMiddle)
+	for i := range crit {
+		crit[i].Score = 5
+		crit[i].GapToGrade = -2
+	}
+	if n := capMeasuredScores(crit, stages, nil); n == 0 {
+		t.Fatal("потолок не сработал ни на одном критерии")
+	}
+	var cappedLiveCode, cappedVoice int
+	for _, c := range crit {
+		switch {
+		case strings.Contains(c.Name, "Live-Code"):
+			cappedLiveCode++
+			if c.Score > 2 {
+				t.Errorf("%v = %v, хочу не больше 2 (измерено 1 + 1)", c.Name, c.Score)
+			}
+			if !strings.Contains(c.Comment, "не выше") {
+				t.Errorf("в комментарии не видно ограничения: %q", c.Comment)
+			}
+			if c.GapToGrade != 1 {
+				t.Errorf("gap_to_grade = %v, хочу 1 (3-2)", c.GapToGrade)
+			}
+		case strings.Contains(c.Name, "Коммуникация"):
+			cappedVoice++
+			if c.Score > 3 {
+				t.Errorf("%v = %v, хочу не больше 3 (измерено 2 + 1)", c.Name, c.Score)
+			}
+		case c.Score != 5:
+			// Неизмеримый критерий (фундамент, leadership) трогать нельзя:
+			// там у измерения нет данных, и решение остаётся за оценщиком.
+			t.Errorf("%v = %v, неизмеримый критерий задет", c.Name, c.Score)
+		}
+	}
+	if cappedLiveCode == 0 || cappedVoice == 0 {
+		t.Fatalf("критерии не сопоставлены стадиям: livecode=%d voice=%d", cappedLiveCode, cappedVoice)
+	}
+	// Идемпотентность: повторный проход ничего не меняет.
+	if n := capMeasuredScores(crit, stages, nil); n != 0 {
+		t.Errorf("повторный вызов изменил %d критериев", n)
+	}
+}
+
+// Нет измерений (LLM не вернул stages, пустая сессия) — потолок не применяется,
+// иначе он срезал бы отчёт до 1 по всем критериям.
+func TestCapMeasuredScoresWithoutMeasurements(t *testing.T) {
+	crit := criteriaForGrade(models.GradeMiddle)
+	for i := range crit {
+		crit[i].Score = 5
+	}
+	if n := capMeasuredScores(crit, nil, nil); n != 0 {
+		t.Fatalf("без измерений срезано %d критериев", n)
+	}
+	for _, c := range crit {
+		if c.Score != 5 {
+			t.Errorf("%v срезан до %v без измерений", c.Name, c.Score)
+		}
+	}
+}
