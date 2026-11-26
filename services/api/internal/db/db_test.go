@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,80 @@ func TestMigrateSqlite(t *testing.T) {
 		if !contains(names, want) {
 			t.Errorf("таблица %q не создана (есть: %s)", want, strings.Join(names, ", "))
 		}
+	}
+}
+
+// TestMigrateShareIndex — миграция идемпотентна (её гоняют на каждом старте
+// api), и поиск по публичному токену отчёта ходит по индексу, а не по таблице.
+func TestMigrateShareIndex(t *testing.T) {
+	conn, dialect, err := Open("sqlite://:memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer conn.Close()
+	ctx := context.Background()
+	if err := Migrate(ctx, conn, dialect); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	// Migrate вызывается на каждом старте api — второй прогон обязан быть
+	// безошибочным (в том числе по CREATE INDEX IF NOT EXISTS).
+	if err := Migrate(ctx, conn, dialect); err != nil {
+		t.Fatalf("migrate повторно: %v", err)
+	}
+	// План проверяем на наполненной таблице: на пустой планировщик вправе
+	// выбрать SCAN, и тест ничего не проверял бы.
+	users, sessions := NewUserStore(conn, dialect), NewSessionStore(conn, dialect)
+	u, err := users.CreateUser(ctx, "share-index@example.com", "hash")
+	if err != nil {
+		t.Fatalf("user: %v", err)
+	}
+	for i := 0; i < 20; i++ {
+		if _, err := sessions.Create(ctx, models.Session{
+			UserID: u.ID, Grade: models.GradeMiddle, Stack: "go",
+			Stage: models.StageVoice, Status: models.StatusActive,
+			DurationLimitS: 1800, StartedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("session: %v", err)
+		}
+	}
+	// Токен ищется при каждом открытии публичной ссылки. Запрос обязан нести
+	// и условие `<> ''`: индекс частичный (у большинства сессий токена нет), а
+	// планировщик сам не выводит из `= 'tok'`, что это непустая строка.
+	var selectid, ord, from int
+	var detail string
+	if err := conn.QueryRow(
+		`EXPLAIN QUERY PLAN SELECT id FROM sessions WHERE share_token = 'tok' AND share_token <> ''`).
+		Scan(&selectid, &ord, &from, &detail); err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	if !strings.Contains(detail, "idx_sessions_share") {
+		t.Errorf("поиск по share_token не использует индекс: %s", detail)
+	}
+}
+
+// EmptyShareTokenDoesNotMatchSessions — сессия без ссылки хранит пустой
+// share_token, и запрос с пустым токеном не должен выбирать такую сессию:
+// иначе публичная ссылка «без токена» показала бы чужой отчёт.
+func TestEmptyShareTokenDoesNotMatchSessions(t *testing.T) {
+	conn, dialect, err := Open("sqlite://:memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer conn.Close()
+	ctx := context.Background()
+	if err := Migrate(ctx, conn, dialect); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	sessions := NewSessionStore(conn, dialect)
+	if _, err := sessions.Create(ctx, models.Session{
+		UserID: 1, Grade: models.GradeMiddle, Stack: "go",
+		Stage: models.StageVoice, Status: models.StatusActive,
+		DurationLimitS: 1800, StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	if _, err := sessions.GetByShareToken(ctx, ""); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("пустой токен нашёл сессию: err = %v", err)
 	}
 }
 

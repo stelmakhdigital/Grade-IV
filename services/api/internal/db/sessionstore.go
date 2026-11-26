@@ -423,11 +423,17 @@ func (s *SessionStore) SetShareToken(ctx context.Context, id, userID int64, toke
 }
 
 // GetByShareToken — сессия по публичному токену (GET /public/reports).
+//
+// Условие `<> ”` не косметика: у сессии без ссылки токен — пустая строка,
+// и запрос с пустым токеном вернул бы первую попавшуюся такую сессию.
+// Вызов снаружи защищён длиной токена, но защита от этого в одном месте,
+// а не в каждом вызывающем коде. Заодно это условие попадает в частичный
+// индекс idx_sessions_share (без него планировщик идёт сканом).
 func (s *SessionStore) GetByShareToken(ctx context.Context, token string) (models.Session, error) {
 	return s.scanSession(s.db.QueryRowContext(ctx,
 		s.d.q(`SELECT id, user_id, grade, stack, stage, status, duration_limit_s,
 			active_seconds, paused_at, started_at, finished_at, template_id, program, profile_id, tts_speaker, share_token, track_id, base_grade, stages, resume_title, resume_stacks
-			FROM sessions WHERE share_token = ?`), token))
+			FROM sessions WHERE share_token = ? AND share_token <> ''`), token))
 }
 
 // CountByTrack — число сессий трека (spec-18: запрет удаления используемого

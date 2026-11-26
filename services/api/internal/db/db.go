@@ -143,6 +143,11 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 			// Заголовок и стек обязаны отражать резюме, а не первую строку роли.
 			"ALTER TABLE sessions ADD COLUMN resume_title TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE sessions ADD COLUMN resume_stacks TEXT NOT NULL DEFAULT ''",
+			// Публичная ссылка на отчёт ищется по токелу (`WHERE share_token = ?`)
+			// и без индекса это полный скан на каждый чужой заход по ссылке.
+			// Индекс частичный: у большинства сессий токена нет вовсе (пустая
+			// строка), и индексировать это — раздувать базу без пользы.
+			"CREATE INDEX IF NOT EXISTS idx_sessions_share ON sessions(share_token) WHERE share_token <> ''",
 		}
 	case DialectPostgres:
 		raw = schemaPostgres + "\n" + schemaPostgresProfiles
@@ -172,6 +177,8 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 			// Интервью по резюме: должность из резюме и заявленные языки.
 			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS resume_title TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS resume_stacks TEXT NOT NULL DEFAULT ''",
+			// См. sqlite-ветку: частичный индекс по непустым share_token.
+			"CREATE INDEX IF NOT EXISTS idx_sessions_share ON sessions(share_token) WHERE share_token <> ''",
 		}
 	default:
 		return fmt.Errorf("неподдерживаемый диалект: %q", d)
