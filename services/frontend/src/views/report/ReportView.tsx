@@ -21,6 +21,21 @@ export interface ReportViewProps {
 const POLL_MS = 2000;
 const MAX_POLLS = 30;
 
+/**
+ * Часть полей отчёта пишет LLM (в DTO они unknown): Go-struct объявляет string,
+ * но значение приходит из JSON ответа модели. Сужаем здесь, у рендера, — одной
+ * функцией на весь экран: не-строка становится пустой строкой, и блок с
+ * подписью просто не показывается (вместо «[object Object]» в разметке).
+ */
+function text(v: unknown): string {
+  return typeof v === 'string' ? v : '';
+}
+
+/** Непустой текст — условие показать блок (verdict, gap, «путь по уровням»). */
+function hasText(v: unknown): boolean {
+  return typeof v === 'string' && v !== '';
+}
+
 export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS, shell = false }: ReportViewProps) {
   const [report, setReport] = useState<Report | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -179,11 +194,11 @@ export function ReportBody({
         <div>
           <h2>Итог: {num(report.overall)} / 5</h2>
           <p className="report-grade" data-testid="report-grade">
-            {report.grade_recommendation}
+            {text(report.grade_recommendation)}
           </p>
-          {report.verdict !== undefined && report.verdict !== '' && (
+          {hasText(report.verdict) && (
             <p className="report-verdict" data-testid="report-verdict">
-              {report.verdict}
+              {text(report.verdict)}
             </p>
           )}
         </div>
@@ -193,10 +208,10 @@ export function ReportBody({
       <h3>Критерии</h3>
       <ul className="criteria" data-testid="criteria">
         {report.criteria.map((c) => (
-          <li key={c.name} className="criterion">
+          <li key={text(c.name)} className="criterion">
             <div className="criterion-top">
-              <span className="criterion-name">{c.name}</span>
-              <span className={`criterion-score ${scoreColor(c.score)}`} data-testid={`score-${c.name}`}>
+              <span className="criterion-name">{text(c.name)}</span>
+              <span className={`criterion-score ${scoreColor(c.score)}`} data-testid={`score-${text(c.name)}`}>
                 {num(c.score, 1)}
                 <small className="muted"> · {Math.round(c.weight * 100)}%</small>
               </span>
@@ -207,17 +222,17 @@ export function ReportBody({
                 style={{ width: `${Math.min(100, (c.score / 5) * 100)}%` }}
               />
             </div>
-            {c.comment !== undefined && c.comment !== '' && (
-              <p className="muted">{c.comment}</p>
+            {hasText(c.comment) && (
+              <p className="muted">{text(c.comment)}</p>
             )}
             {c.evidence && c.evidence.length > 0 && (
-              <div className="criterion-evidence" data-testid={`evidence-${c.name}`}>
+              <div className="criterion-evidence" data-testid={`evidence-${text(c.name)}`}>
                 <strong>Примеры из интервью:</strong>
                 <ul>{c.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul>
               </div>
             )}
             {c.gap_to_grade !== undefined && c.gap_to_grade > 0 && (
-              <p className="criterion-gap" data-testid={`gap-${c.name}`}>
+              <p className="criterion-gap" data-testid={`gap-${text(c.name)}`}>
                 Разрыв до грейда: {num(c.gap_to_grade, 1)} балла
               </p>
             )}
@@ -237,11 +252,11 @@ export function ReportBody({
           <ul className="report-stages" data-testid="report-stages">
             {report.stages.map((st) => (
               <li key={st.stage} className="report-stage">
-                <span className="report-stage-title">{st.title}</span>
+                <span className="report-stage-title">{text(st.title)}</span>
                 <span className={`report-stage-score ${scoreColor(st.score)}`}>
                   {num(st.score, 1)} / 5
                 </span>
-                <p className="report-stage-basis">{st.basis}</p>
+                <p className="report-stage-basis">{text(st.basis)}</p>
                 {st.evidence && st.evidence.length > 0 && (
                   <ul className="report-stage-evidence">
                     {st.evidence.map((e, i) => <li key={i}>{e}</li>)}
@@ -265,7 +280,7 @@ export function ReportBody({
           <ul className="livecode-tasks" data-testid="livecode-tasks">
             {report.livecode_tasks.map((t) => (
               <li key={t.id} className={`livecode-task lc-${t.status}`}>
-                <span className="livecode-task-title">{t.title || t.id}</span>
+                <span className="livecode-task-title">{text(t.title) || t.id}</span>
                 <span
                   className={`livecode-task-status ${t.status}`}
                   data-testid={`livecode-task-${t.id}`}
@@ -298,18 +313,18 @@ export function ReportBody({
         {report.recommendations.map((s, i) => <li key={i}>{s}</li>)}
       </ol>
 
-      {report.grade_gap !== undefined && report.grade_gap !== '' && (
+      {hasText(report.grade_gap) && (
         <section className="report-grade-gap" data-testid="report-grade-gap">
           <h3>Разрыв до целевого грейда</h3>
-          <p>{report.grade_gap}</p>
+          <p>{text(report.grade_gap)}</p>
         </section>
       )}
 
       {/* Собеседование шло на шаг выше уровня по резюме: на какой планке держали, где снижали. */}
-      {report.question_trail !== undefined && report.question_trail !== '' && (
+      {hasText(report.question_trail) && (
         <section className="report-grade-gap" data-testid="report-question-trail">
           <h3>Уровень вопросов</h3>
-          <p>{report.question_trail}</p>
+          <p>{text(report.question_trail)}</p>
         </section>
       )}
 

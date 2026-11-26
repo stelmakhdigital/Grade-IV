@@ -53,6 +53,26 @@ export const LANGUAGE_BY_STACK: Record<Stack, string> = {
 };
 
 /**
+ * Имя файла задачи приходит с сервера (ключи stage.task.files — их формирует
+ * банк задач) и читается здесь как подпись вкладки. Тип unknown, а не string:
+ * экран не должен падать и не должен печатать «[object Object]», если вместо
+ * имени пришла не строка. Одно сужение на весь компонент.
+ */
+export function fileName(v: unknown, fallback: string): string {
+  return typeof v === 'string' && v !== '' ? v : fallback;
+}
+
+/**
+ * Язык редактора по стеку: stack приходит с сервера, значения вне go|python|
+ * shell — не наш случай (Monaco получил бы undefined). Фолбэк — обычный текст.
+ */
+export function editorLanguage(stack: unknown): string {
+  return stack === 'go' || stack === 'python' || stack === 'shell'
+    ? LANGUAGE_BY_STACK[stack]
+    : 'text';
+}
+
+/**
  * Код кандидата + результат последнего запуска в рамках SPA (per задача).
  * Ключ кодирует сессию + стек + task_id + набор файлов задачи: повторный вход
  * в ту же задачу восстанавливает код, другая задача/стек — нет (своё ключевое
@@ -163,7 +183,8 @@ export function solutionFile(stack: Stack, files?: Record<string, string> | null
     if (sol !== undefined) return sol;
     const main = Object.keys(files).find((n) => n === MAIN_FILE[stack]);
     if (main !== undefined) return main;
-    return Object.keys(files)[0];
+    // Object.keys({})[0] — undefined; тип имени файла сужаем вместе с фолбэком.
+    return fileName(Object.keys(files)[0], MAIN_FILE[stack]);
   }
   return MAIN_FILE[stack];
 }
@@ -420,7 +441,7 @@ export function LiveCodePanel({
 
       <div id="lc-editor" role="tabpanel" aria-label="Редактор задачи">
         <Editor
-          language={LANGUAGE_BY_STACK[stack]}
+          language={editorLanguage(stack)}
           value={files[activeFile] ?? ''}
           onChange={(v) => setFiles((prev) => ({ ...prev, [activeFile]: v }))}
         />

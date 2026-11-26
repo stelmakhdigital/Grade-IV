@@ -1,0 +1,78 @@
+/**
+ * Админка (итерация 11): шаблоны, начала разговора, реестр голосов, роли
+ * собеседований (spec-18/22). Все пути — /admin/*.
+ */
+import { request } from './request';
+import type { TTSVoiceRegistry } from '../types/domain';
+import type { AdminOpening, AdminTemplate, AdminTrack } from '../types/admin';
+
+// ------------------------------------------------------------ шаблоны
+
+export function adminListTemplates(): Promise<AdminTemplate[]> {
+  return request<AdminTemplate[]>('/admin/templates', { auth: true });
+}
+
+export function adminCreateTemplate(t: Omit<AdminTemplate, 'id'>): Promise<AdminTemplate> {
+  return request<AdminTemplate>('/admin/templates', { method: 'POST', body: t, auth: true });
+}
+
+export function adminUpdateTemplate(id: number, t: Omit<AdminTemplate, 'id'>): Promise<AdminTemplate> {
+  return request<AdminTemplate>(`/admin/templates/${id}`, { method: 'PUT', body: t, auth: true });
+}
+
+export function adminDeleteTemplate(id: number): Promise<void> {
+  return request<void>(`/admin/templates/${id}`, { method: 'DELETE', auth: true });
+}
+
+// ------------------------------------------------------ начала разговора
+
+export function adminListOpenings(): Promise<AdminOpening[]> {
+  return request<AdminOpening[]>('/admin/openings', { auth: true });
+}
+
+export function adminPutOpenings(list: AdminOpening[]): Promise<AdminOpening[]> {
+  return request<AdminOpening[]>('/admin/openings', { method: 'PUT', body: list, auth: true });
+}
+
+// --------------------------------------------------------- реестр голосов
+
+export function adminListTTSVoices(): Promise<TTSVoiceRegistry> {
+  return request<TTSVoiceRegistry>('/admin/tts-voices', { auth: true });
+}
+
+export function adminPutTTSVoices(reg: TTSVoiceRegistry): Promise<TTSVoiceRegistry> {
+  return request<TTSVoiceRegistry>('/admin/tts-voices', { method: 'PUT', body: reg, auth: true });
+}
+
+// --------------------------------------------------------- роли (треки)
+
+/** Полный список треков (админ-редактор, spec-18/Ф4). */
+export function adminListTracks(): Promise<AdminTrack[]> {
+  return request<AdminTrack[]>('/admin/tracks', { auth: true });
+}
+
+/**
+ * spec-22: черновик роли по описанию (ИИ). НЕ сохраняется — админ правит
+ * в форме и сохраняет adminCreateTrack. 502 — ИИ недоступен (fallback —
+ * ручное заполнение).
+ */
+export function adminGenerateTrack(description: string): Promise<AdminTrack> {
+  return request<{ track: AdminTrack }>('/admin/tracks/generate', {
+    body: { description },
+    auth: true,
+  }).then((r) => r.track);
+}
+
+export function adminCreateTrack(t: AdminTrack): Promise<AdminTrack> {
+  return request<AdminTrack>('/admin/tracks', { body: { track: t }, auth: true });
+}
+
+export function adminUpdateTrack(t: AdminTrack): Promise<AdminTrack> {
+  // method обязателен: без него request идёт POST (method по умолчанию при body),
+  // а PUT /admin/tracks/{id} — единственный принявший правку маршрут.
+  return request<AdminTrack>(`/admin/tracks/${t.id}`, { method: 'PUT', body: { track: t }, auth: true });
+}
+
+export function adminDeleteTrack(id: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/admin/tracks/${id}`, { method: 'DELETE', auth: true });
+}
