@@ -196,8 +196,13 @@ services:
         TORCH_INDEX_URL: "${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
     image: grade/voice:dev
     user: "${GRADE_UID:-1000}:${GRADE_GID:-1000}" # писать некуда (/models :ro), но и root не нужен
-    ports:
-      - "8100:8100"
+    # Порт НЕ публикуется: у voice нет ни аутентификации, ни лимитов — кто
+    # придёт по сети, тот бесплатно крутит STT/TTS (и шлёт нам сколько угодно
+    # байт в память). Api достучится до него по внутренней сети compose
+    # (VOICE_URL=http://voice:8100). Для отладки с хоста —
+    # ports: ["127.0.0.1:8100:8100"], а не "8100:8100".
+    expose:
+      - "8100"
     environment:
       # STT — GigaAM v3 (дефолт проекта, AGENTS.md); faster-whisper — опция
       # (её переменные STT_*/GPU-профиль переопределяются host-ENV).
@@ -313,7 +318,9 @@ services:
         exec /bin/prometheus --config.file=/tmp/prometheus.yml \
           --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=7d
     ports:
-      - "9090:9090"
+      # Только на loopback: у Prometheus нет ни авторизации, ни лимитов,
+      # а в метриках — пути, id сессий и лаги голосового контура.
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -322,9 +329,14 @@ services:
   grafana:
     image: grafana/grafana:11.1.0
     ports:
-      - "3000:3000"
+      # Только на loopback — см. Prometheus выше. Публиковать наружу можно,
+      # только сменив GRAFANA_ADMIN_PASSWORD: дефолт ниже не для этого.
+      - "127.0.0.1:3000:3000"
     environment:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      # Дефолт «change-me» живёт только за loopback (см. ports). Обязательный
+      # ${VAR:?} сюда не поставить: compose проверяет переменные всего файла
+      # сразу, и без мониторинга команда up перестала бы работать.
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-change-me}"
     volumes:
       - ./monitoring/grafana-datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro

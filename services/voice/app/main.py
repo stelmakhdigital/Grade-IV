@@ -21,7 +21,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .providers import SAMPLE_RATE, STT_EXECUTOR, FakeSTT, FakeTTS
 from .stt_stream import LazyVAD, build_vad, register_stt_stream, register_vad_stream
@@ -30,6 +30,17 @@ logger = logging.getLogger("voice")
 
 # Пачка стриминга TTS: ~250 мс @ 16 кГц PCM16 mono.
 CHUNK_BYTES = int(SAMPLE_RATE * 2 * 0.25)
+
+#: Потолок одного аудио в batch /stt: 10 MiB — это ~5 минут PCM16 16 кГц.
+#: Реплика кандидата ограничена снизу доверху (VAD, max_speech_s), поэтому
+#: больше приходит только тому, кто пришёл не из нашего приложения: без
+#: потолка размер запроса = размер съеденной памяти и очередь в STT на минуты.
+MAX_AUDIO_BYTES = 10 * 1024 * 1024
+
+#: Потолок текста в TTS: 4000 символов — несколько экранов, реплика оценщика
+#: столько не бывает. Синтез речи считается секунды на каждое слово, так что
+#: один мегабайтный запрос вешает воркер TTS на минуты.
+MAX_TTS_CHARS = 4000
 
 
 def _build_stt():
@@ -127,7 +138,16 @@ def build_app(stt=None, tts=None, vad=None, max_speech_s: float | None = None) -
         sample_rate: int = Form(SAMPLE_RATE),
     ) -> dict:
         """Аудио-реплика (WAV/PCM16 mono) -> {text, confidence, duration_s}."""
-        data = await audio.read()
+        # +1 байт, чтобы отличить «ровно на границе» от «принесли больше».
+        data = await audio.read(MAX_AUDIO_BYTES + 1)
+        if len(data) > MAX_AUDIO_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={
+                    "code": "audio_too_large",
+                    "message": f"Аудио больше {MAX_AUDIO_BYTES // (1024 * 1024)} MiB",
+                },
+            )
         # run_in_executor: transcribe (CPU/GPU, до секунд) не должен блокировать
         # event-loop сервиса (стримы /stt/stream, /vad/stream замирали бы);
         # однопоточный STT_EXECUTOR — сериализация с остальными вызовами.
@@ -173,8 +193,9 @@ def _chunks(pcm: bytes):
 
 
 class TTSRequest(BaseModel):
-    text: str = ""
-    speaker: str | None = None
+    # Потолки — см. MAX_TTS_CHARS: поле уходит в модель речи как есть.
+    text: str = Field(default="", max_length=MAX_TTS_CHARS)
+    speaker: str | None = Field(default=None, max_length=64)
 
 
 #: Приложение для uvicorn (make run-voice): провайдеры выбираются из env.
