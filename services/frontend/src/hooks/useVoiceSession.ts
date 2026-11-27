@@ -12,7 +12,6 @@ import {
   pauseSession,
   resumeSession,
   type Session,
-  type SessionEvent,
 } from '../api';
 import { MicCapture, micUnsupportedReason, type MicDebugInfo, type MicState } from '../audio/mic';
 import { PcmPlayer } from '../audio/player';
@@ -23,27 +22,22 @@ import {
   mergeRecording,
 } from '../recording';
 import { apiErrorMessage } from '../views/LoginView';
-import { eventKindLabel, eventText } from '../labels';
+import {
+  applyFinalTranscript,
+  applySttPartial,
+  lineFromEvent,
+  nextLineId,
+  runResultLine,
+  MAX_TRANSCRIPT_LINES,
+  type Line,
+} from './voiceTranscript';
 
-export interface Line {
-  who: 'user' | 'ai' | 'system';
-  text: string;
-  /** Интеримная (stt_partial) строка кандидата — обновляется до final. */
-  interim?: boolean;
-  /** spec-15: стабильный ключ для списка транскрипта (ключ по обратному
-   *  индексу вызывал churn ре-рендеров при новых строках). */
-  id: number;
-}
-
-let lineSeq = 0;
-const nextLineId = () => ++lineSeq;
+// Ре-экспорты: '../hooks/useVoiceSession' остаётся единой точкой импорта
+// для SessionView (тип Line и константа лимита транскрипта).
+export { MAX_TRANSCRIPT_LINES, type Line } from './voiceTranscript';
 
 // Сколько висит info-предупреждение (переход на резервный захват и т.п.).
 const INFO_HIDE_MS = 8000;
-
-/** Сколько последних реплик держим во вьюшке (ui-review 2026-11-27): на
- * длинном интервью старые уходят, и об этом надо сказать вслух. */
-export const MAX_TRANSCRIPT_LINES = 200;
 
 export function useVoiceSession(id: number) {
   const [session, setSession] = useState<Session | null>(null);
@@ -113,7 +107,7 @@ export function useVoiceSession(id: number) {
     [],
   );
 
-  // spec-14/D1: latest-value рефes для WS-колбэков (замыкание reconnect-цикла
+  // spec-14/D1: latest-value рефы для WS-колбэков (замыкание reconnect-цикла
   // живёт между рендерами — статус/пауза должны читаться актуальными).
   const statusRef = useRef<string>('');
   statusRef.current = session?.status ?? '';
@@ -236,43 +230,7 @@ export function useVoiceSession(id: number) {
             }
             break;
           case 'transcript':
-            setLines((prev) => {
-              // Финал кандидата заменяет собой интерим-строку (stt_partial),
-              // где бы она ни стояла. Между partial и final успевает встать
-              // реплика интервьюера (подсказка за молчание), и ориентироваться
-              // на «последнюю строку» нельзя: интерим оставался не зафиксированным
-              // («распознаётся ⋯» горело на уже готовой фразе) и рядом
-              // вырастала вторая строка с тем же текстом.
-              let idx = -1;
-              if (m.who === 'user') {
-                for (let i = prev.length - 1; i >= 0; i--) {
-                  const l = prev[i];
-                  if (l !== undefined && l.who === 'user' && l.interim) {
-                    idx = i;
-                    break;
-                  }
-                }
-              }
-              if (idx >= 0) {
-                const old = prev[idx]!;
-                const next: Line = {
-                  who: 'user',
-                  // Пустой финал не должен стирать распознанное: оставляем
-                  // текст интерима, но снимаем признак (точки гаснут).
-                  text: m.text !== '' ? m.text : old.text,
-                  id: old.id,
-                };
-                const copy = prev.slice();
-                copy[idx] = next;
-                return copy;
-              }
-              const next: Line = {
-                who: (m.who === 'user' ? 'user' : 'ai') as Line['who'],
-                text: m.text,
-                id: nextLineId(),
-              };
-              return [...prev.slice(-(MAX_TRANSCRIPT_LINES - 1)), next];
-            });
+            setLines((prev) => applyFinalTranscript(prev, m.who, m.text));
             break;
           case 'stt_partial':
             // Стриминговый STT (ADR-007): интеримный текст кандидата.
@@ -282,14 +240,7 @@ export function useVoiceSession(id: number) {
               setRecPartial(m.text);
               break;
             }
-            // обновляем последнюю интерим-строку (или создаём её).
-            setLines((prev) => {
-              const last = prev[prev.length - 1];
-              if (last !== undefined && last.who === 'user' && last.interim) {
-                return [...prev.slice(0, -1), { ...last, text: m.text }];
-              }
-              return [...prev.slice(-(MAX_TRANSCRIPT_LINES - 1)), { who: 'user', text: m.text, interim: true, id: nextLineId() }];
-            });
+            setLines((prev) => applySttPartial(prev, m.text));
             break;
           case 'stt_segment':
             // Режим записи (FR-S8, ADR-009): распознанный сегмент (final по
@@ -707,21 +658,4 @@ export function useVoiceSession(id: number) {
     clearRecording,
     sendTextUtterance,
   };
-}
-
-function lineFromEvent(e: SessionEvent): Line {
-  const kind = e.kind;
-  const who: Line['who'] =
-    kind === 'user_utterance' ? 'user'
-    : kind === 'ai_utterance' || kind === 'ai_nudge' ? 'ai'
-    : 'system';
-  const text = eventText(kind, e.data);
-  if (text !== '') return { who, text, id: nextLineId() };
-  // события без текста — короткая системная строка
-  return { who: 'system', text: eventKindLabel(kind), id: nextLineId() };
-}
-
-function runResultLine(m: { [k: string]: unknown }): string {
-  const passed = m.passed === true ? 'успех' : m.passed === false ? 'неудача' : '';
-  return passed !== '' ? `Тесты: ${passed}` : 'Результат выполнения кода получен.';
 }

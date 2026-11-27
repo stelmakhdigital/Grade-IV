@@ -4,6 +4,17 @@
  * Worklet-скрипт встраивается как Blob-URL — отдельный файл не нужен.
  */
 import { resampleToPcm16, TARGET_RATE } from './resample';
+import { WORKLET_CODE } from './mic-worklet';
+import { chunkRms, SilenceDetector, TTS_TAIL_GRACE_MS } from './mic-silence';
+import { micDebugEnabled, type MicDebugInfo } from './mic-debug';
+import { micUnsupportedReason } from './mic-support';
+
+// Ре-экспорты: mic.ts остаётся единой точкой импорта захвата (`from './mic'`
+// работали тесты, SessionView и useVoiceSession до разложения — продолжают).
+export * from './mic-worklet';
+export * from './mic-silence';
+export * from './mic-debug';
+export * from './mic-support';
 
 export interface MicCaptureEvents {
   /** Чанк PCM16 16 кГц (обычно 4000 образцов = 250 мс). */
@@ -18,207 +29,12 @@ export interface MicCaptureEvents {
 
 export type MicState = 'idle' | 'running' | 'stopped' | 'denied' | 'muted';
 
-// «Молчащий» микрофон: rms чанка < SILENCE_RMS непрерывно ≥ SILENCE_MS —
-// устройство заглушено/отключено или вход на мьюте (ревью 2026-10-05: сервер
-// видел rms 2→0 в сессии 13). Детектор чистый (время передаётся аргументом) — тесты
-// без DOM.
-export const SILENCE_RMS = 0.005;
-export const SILENCE_MS = 5000;
-// Тишина — норма в голосовом диалоге: пока ИИ говорит (свой TTS уходит в мик —
-// эхо) и TTS_TAIL_GRACE_MS после его конца (кандидат думает/слушает) детектор
-// «молчащего» микрофона не кормим. Инцидент 2026-10-09: ложная алерт «Микрофон
-// молчит» в режиме записи на паузе 5 с (микросан нормальный).
-export const TTS_TAIL_GRACE_MS = 30_000;
 // Цепочка надёжности захвата (инцидент 2026-10-08): 3 с без чанков —
 // следующий шаг: worklet → fallback (ScriptProcessor) → полная повторная
 // инициализация (getUserMedia заново → снова worklet). Не более MAX_REINIT
 // полных пересозданий подряд; счётчик сбрасывается первым чанком любого пути.
 export const MAX_REINIT = 2;
 export const NO_DATA_MS = 3000;
-
-export function chunkRms(pcm: Int16Array): number {
-  let s = 0;
-  for (let i = 0; i < pcm.length; i++) {
-    const v = pcm[i] / 32768;
-    s += v * v;
-  }
-  return Math.sqrt(s / Math.max(1, pcm.length));
-}
-
-export interface SilenceEvents {
-  /** Тишина ≥ SILENCE_MS (однажды за период). */
-  onMuted: () => void;
-  /** Уровень вернулся (rms ≥ SILENCE_RMS) после «молчания». */
-  onRecover: () => void;
-}
-
-export class SilenceDetector {
-  private silentSince: number | null = null;
-  private muted = false;
-
-  constructor(private readonly ev: SilenceEvents) {}
-
-  reset(): void {
-    this.silentSince = null;
-    this.muted = false;
-  }
-
-  isMuted(): boolean {
-    return this.muted;
-  }
-
-  feed(rms: number, now: number): void {
-    if (rms >= SILENCE_RMS) {
-      this.silentSince = null;
-      if (this.muted) {
-        this.muted = false;
-        this.ev.onRecover();
-      }
-      return;
-    }
-    if (this.muted) return; // предупреждение за период — одно
-    if (this.silentSince === null) {
-      this.silentSince = now;
-    } else if (now - this.silentSince >= SILENCE_MS) {
-      this.muted = true;
-      this.ev.onMuted();
-    }
-  }
-}
-
-// Экспортируется для теста (src/audio/worklet.test.ts): процессор собирается
-// в реальный AudioWorkletProcessor — без базового класса у инстанса нет
-// `port`, и Chrome валит процессор в processorerror (тишина → ложный переход на
-// резервный захват, «AudioWorklet молчит всегда»). options.processorOptions —
-// вложенный объект, flat-доступ (options.inputRate) давал undefined →
-// chunkSamples undefined → чанки не постились никогда.
-export const WORKLET_CODE = `
-class PcmCapture extends AudioWorkletProcessor {
-  constructor(options) {
-    super();
-    const p = (options && options.processorOptions) || {};
-    // sampleRate — глобал AudioWorkletGlobalScope (фактическая частота рендера).
-    this.rate = p.inputRate || sampleRate;
-    this.target = p.targetRate || ${TARGET_RATE};
-    this.chunkSamples = p.chunkSamples || ${Math.round(TARGET_RATE * 0.25)};
-    this.acc = [];
-    this.accLen = 0;
-    // Уровень для эквалайзера: окно ~100 мс по входной частоте.
-    this.levelWin = Math.max(1, Math.round(this.rate * 0.1));
-    this.levelSum = 0;
-    this.levelN = 0;
-  }
-  reportLevel() {
-    const rms = this.levelN > 0 ? Math.sqrt(this.levelSum / this.levelN) : 0;
-    this.levelSum = 0;
-    this.levelN = 0;
-    this.port.postMessage({ kind: 'level', rms: rms });
-  }
-  levelTick(n) {
-    this.levelN += n;
-    if (this.levelN >= this.levelWin) {
-      this.reportLevel();
-    }
-  }
-  process(inputs) {
-    const ch = inputs[0] && inputs[0][0];
-    if (!ch) {
-      return true;
-    }
-    for (let i = 0; i < ch.length; i++) {
-      this.levelSum += ch[i] * ch[i];
-    }
-    this.levelTick(ch.length);
-    if (this.rate === this.target) {
-      // однообразный случай обрабатывается ниже через общий путь
-      this.push(ch);
-      return true;
-    }
-    // ресемплинг линейной интерполяцией в worklet
-    const ratio = this.rate / this.target;
-    const outLen = Math.floor(ch.length / ratio);
-    const out = new Float32Array(outLen);
-    for (let i = 0; i < outLen; i++) {
-      const pos = i * ratio;
-      const i0 = Math.floor(pos);
-      const i1 = Math.min(i0 + 1, ch.length - 1);
-      const f = pos - i0;
-      out[i] = ch[i0] * (1 - f) + ch[i1] * f;
-    }
-    this.push(out);
-    return true;
-  }
-  push(samples) {
-    this.acc.push(samples);
-    this.accLen += samples.length;
-    while (this.accLen >= this.chunkSamples && this.acc.length > 0) {
-      const out = new Float32Array(this.chunkSamples);
-      let off = 0;
-      while (off < this.chunkSamples) {
-        const head = this.acc[0];
-        const take = Math.min(head.length, this.chunkSamples - off);
-        out.set(head.subarray(0, take), off);
-        off += take;
-        if (take === head.length) this.acc.shift();
-        else this.acc[0] = head.subarray(take);
-      }
-      this.accLen -= this.chunkSamples;
-      // int16 в worklet
-      const i16 = new Int16Array(this.chunkSamples);
-      for (let i = 0; i < this.chunkSamples; i++) {
-        let v = out[i];
-        if (v > 1) v = 1;
-        if (v < -1) v = -1;
-        i16[i] = Math.round(v * 32767);
-      }
-      this.port.postMessage(i16);
-    }
-    return true;
-  }
-}
-registerProcessor('pcm-capture', PcmCapture);
-`;
-
-// Dev-режим диагностики микрофона: live-отчёты на /debug/mic-report каждые 10 с.
-// Включение: VITE_MIC_DEBUG (vite env) — принимаются и '1', и 'true': .env.example
-// пишет 1, а vite-документация и тесты — true; молча игнорировать наполовину
-// верное значение значит оставить разработчика без диагностики.
-// В production-сборке переменная не передаётся — выключено.
-// Функция (не константа): значение читается при вызове — тесты стабятся через vi.stubEnv.
-export function micDebugEnabled(): boolean {
-  const v = import.meta.env.VITE_MIC_DEBUG ?? '';
-  return v === '1' || v === 'true';
-}
-
-/**
- * Причина, по которой микрофон недоступен в принципе (или null, если доступен).
- *
- * Вне secure context (http://<IP> — типичный запуск с телефона в LAN) у
- * браузера нет navigator.mediaDevices: getUserMedia не существует, запрос
- * разрешения даже не показывается. Подсказка «разрешите в браузере» там
- * только путает — доступ не разрешают, а открывают страницу по HTTPS
- * (или localhost).
- */
-export function micUnsupportedReason(): string | null {
-  const getUserMedia = typeof navigator === 'undefined'
-    ? undefined
-    : navigator.mediaDevices?.getUserMedia;
-  if (typeof getUserMedia === 'function') return null;
-  return (
-    'Микрофон недоступен на этом адресе: браузер даёт доступ к нему только по '
-      + 'HTTPS (или localhost). Откройте страницу по https:// — либо проверьте '
-      + 'микрофон на /audio-debug.html.'
-  );
-}
-
-export interface MicDebugInfo {
-  path: 'worklet' | 'fallback';
-  ctxState: AudioContextState | null;
-  rate: number;
-  chunks: number;
-  medGapMs: number;
-  maxRms: number;
-}
 
 export class MicCapture {
   private ctx: AudioContext | null = null;
