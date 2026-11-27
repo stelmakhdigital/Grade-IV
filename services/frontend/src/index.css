@@ -333,12 +333,6 @@ p {
   text-decoration: underline;
 }
 
-.form-warn {
-  color: var(--warn);
-  font-size: var(--fs-meta);
-  margin: 8px 0;
-}
-
 /* ------------------------------------------------------------------ auth */
 
 .auth-page {
@@ -608,41 +602,10 @@ p {
   overflow-y: auto;
 }
 
-.event {
-  padding: 10px 0;
-  border-bottom: 1px solid var(--ink-3);
-}
-
-.event:last-child {
-  border-bottom: none;
-}
-
-.event-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: var(--fs-label);
-  color: var(--text-3);
-}
-
-.event-kind {
-  color: var(--text-2);
-}
-
-.event.user_utterance .event-kind {
-  color: var(--accent);
-}
-
-.event.ai_utterance .event-kind,
-.event.ai_nudge .event-kind {
-  color: var(--live);
-}
-
-.event-text {
-  margin-top: 6px;
-  color: var(--text-1);
-  white-space: pre-wrap;
-}
+/* Стили .event* (заголовок события, вид, текст) удалены: транскрипт
+   рисуется классами .line/.line-who/.line-text (SessionView), а событийную
+   разметку с классом .event экран не использует с тех пор, как список событий
+   перестал быть транскриптом. */
 
 /* старые бейджи (WP-1) */
 
@@ -1476,7 +1439,6 @@ a:focus-visible {
     min-width: 0;
     max-width: none;
   }
-  .table-wrap,
   .sessions-table,
   .progress-table {
     display: block;
