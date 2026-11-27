@@ -4,7 +4,7 @@
  * эхо динамика→микрофон подавляется браузером, см. ADR-002/SRS §8).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { MicCapture, MAX_REINIT, SILENCE_MS, TTS_TAIL_GRACE_MS, micUnsupportedReason, type MicCaptureEvents } from './mic';
+import { MicCapture, MAX_REINIT, SILENCE_MS, TTS_TAIL_GRACE_MS, micDebugEnabled, micUnsupportedReason, type MicCaptureEvents } from './mic';
 
 /** Доступ к приватным полям/методам MicCapture (dev-диагностика). */
 type MicInternal = {
@@ -516,5 +516,25 @@ describe('micUnsupportedReason — вне secure context микрофона не
   it('mediaDevices есть → причины нет (дальше решает сам браузер)', () => {
     vi.stubGlobal('navigator', { mediaDevices: { getUserMedia: vi.fn() } });
     expect(micUnsupportedReason()).toBeNull();
+  });
+});
+
+describe('micDebugEnabled — переключатель dev-диагностики', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('включается и 1, и true (так пишут в .env.example и в vite-доках)', () => {
+    for (const v of ['1', 'true']) {
+      vi.stubEnv('VITE_MIC_DEBUG', v);
+      expect(micDebugEnabled()).toBe(true);
+    }
+  });
+
+  it('выключен, если переменная не задана или выставлена в 0/false', () => {
+    for (const v of ['0', 'false', '']) {
+      vi.stubEnv('VITE_MIC_DEBUG', v);
+      expect(micDebugEnabled()).toBe(false);
+    }
+    vi.stubEnv('VITE_MIC_DEBUG', undefined as unknown as string);
+    expect(micDebugEnabled()).toBe(false);
   });
 });
