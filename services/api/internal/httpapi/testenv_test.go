@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
 	"testing"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
@@ -42,6 +44,15 @@ func newTestServerFull(t *testing.T, log *slog.Logger, sandboxHandler http.Handl
 		JWTSecret:      "test-secret",
 		JWTExpiryHours: 1,
 		ResumeDir:      t.TempDir(), // файлы резюме не должны попадать в рабочее дерево
+	}
+	// Детерминизм выбора задач Live-Code тесты задают через t.Setenv
+	// (LIVECODE_TASK_SEED). В проде этот адрес читает config.Load; здесь он
+	// переезжает в cfg, чтобы тесты не зависели от того, что переменная
+	// читается где-то помимо конфига.
+	if v := os.Getenv("LIVECODE_TASK_SEED"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			cfg.LiveCodeSeed = n
+		}
 	}
 	if mutate != nil {
 		mutate(cfg)

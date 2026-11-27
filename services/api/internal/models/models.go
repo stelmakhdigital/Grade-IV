@@ -70,6 +70,17 @@ const (
 	StageReport   Stage = "report"
 )
 
+// Valid — верно, если стадия известна движку (тот же контракт, что у Grade.Valid).
+// Знание про набор стадий живёт здесь: проверять его внутри httpapi — значит
+// разъезжаться с движком при каждой новой стадии.
+func (s Stage) Valid() bool {
+	switch s {
+	case StageVoice, StageLiveCode, StageDesign, StageReport:
+		return true
+	}
+	return false
+}
+
 // Status — статус сессии.
 type Status string
 

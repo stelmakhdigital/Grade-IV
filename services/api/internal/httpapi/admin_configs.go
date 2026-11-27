@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/interviewer"
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
 )
 
 // Admin: редактирование набора начал + реестра TTS-голосов (итерация 11).
@@ -17,9 +18,9 @@ import (
 
 const maxPromptLen = 2000
 
-var validOpeningsGrades = map[string]bool{
-	"junior": true, "middle": true, "senior": true, "staff": true, "*": true,
-}
+// validOpeningsGrade — известный грейд или '*' (открытие подойдёт любому).
+// Список грейдов берётся из models, чтобы не разъезжаться с движком.
+func validOpeningsGrade(g string) bool { return g == "*" || models.Grade(g).Valid() }
 
 // writeAtomic — атомарная запись файла (tmp + rename).
 func writeAtomic(path string, data []byte) error {
@@ -115,7 +116,7 @@ func (s *Server) handleAdminOpeningsPut(w http.ResponseWriter, r *http.Request) 
 	}
 	var list []interviewer.Opening
 	for i, o := range req {
-		if !validOpeningsGrades[o.Grade] {
+		if !validOpeningsGrade(o.Grade) {
 			writeError(w, http.StatusBadRequest, "validation",
 				"строка "+strconv.Itoa(i+1)+": некорректный grade (junior/middle/senior/staff/*)")
 			return

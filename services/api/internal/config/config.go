@@ -44,7 +44,10 @@ type Config struct {
 	LLMBaseURL    string // OpenAI-совместимый LLM (LLM_BASE_URL; с /v1 или без — добавится)
 	LLMModel      string // модель LLM (LLM_MODEL; пусто → авто-детект по /models)
 	LLMAPIKey     string // ключ LLM (LLM_API_KEY)
-	SandboxURL    string // sandbox-сервис (SANDBOX_URL)
+	// LiveCodeSeed — LIVECODE_TASK_SEED: детерминированный выбор задач Live-Code
+	// (тесты и E2E). 0 — случайный выбор; в проде не задаётся.
+	LiveCodeSeed int64  //
+	SandboxURL   string // sandbox-сервис (SANDBOX_URL)
 	// SandboxAdminToken — токен /admin/tasks у sandbox (SANDBOX_ADMIN_TOKEN).
 	// Нужен фоновому пополнению пула задач (spec-24); пусто — пополнение выключено.
 	SandboxAdminToken string
@@ -141,6 +144,7 @@ func Load() (*Config, error) {
 		LLMModel:              os.Getenv("LLM_MODEL"), // пусто → авто по /models
 		LLMAPIKey:             os.Getenv("LLM_API_KEY"),
 		SandboxURL:            getEnv("SANDBOX_URL", "http://localhost:8200"),
+		LiveCodeSeed:          int64(getEnvInt("LIVECODE_TASK_SEED", 0)),
 		SandboxAdminToken:     os.Getenv("SANDBOX_ADMIN_TOKEN"),
 		MetricsUser:           getEnv("METRICS_USER", "prometheus"),
 		MetricsPassword:       os.Getenv("METRICS_PASSWORD"),

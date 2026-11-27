@@ -12,9 +12,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
-	"strconv"
 	"strings"
 	"time"
 
@@ -86,20 +84,6 @@ func liveCodeStretchGrade(g models.Grade) (models.Grade, bool) {
 		return models.GradeStaff, true
 	}
 	return g, false
-}
-
-// liveCodeSeed — LIVECODE_TASK_SEED (env, целое): детерминированный выбор для
-// тестов/E2E; не задан (или не целое) — рандом.
-func liveCodeSeed() (int64, bool) {
-	v := os.Getenv("LIVECODE_TASK_SEED")
-	if v == "" {
-		return 0, false
-	}
-	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return n, true
 }
 
 // pickLiveCodeTasks — N различных случайных задач из пула грейда; для
@@ -249,7 +233,7 @@ func (s *Server) enterLiveCode(ctx context.Context, id int64, ws *wsSession) {
 				stretchPool = sp
 			}
 		}
-		seed, seeded := liveCodeSeed()
+		seed, seeded := s.cfg.LiveCodeSeed, s.cfg.LiveCodeSeed != 0
 		rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 		if seeded {
 			rng = rand.New(rand.NewSource(seed))

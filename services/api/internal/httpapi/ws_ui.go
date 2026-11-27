@@ -21,7 +21,7 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage, ws *wsSession) {
 		var p struct {
 			Stage models.Stage `json:"stage"`
 		}
-		if err := json.Unmarshal(msg.Payload, &p); err != nil || !stageKnown(p.Stage) {
+		if err := json.Unmarshal(msg.Payload, &p); err != nil || !p.Stage.Valid() {
 			s.engine.SendTo(id, wsErr("invalid_request", "payload.stage: voice|livecode|design|report"))
 			return
 		}
@@ -116,11 +116,4 @@ func (s *Server) handleUIEvent(id int64, msg *wsMessage, ws *wsSession) {
 	default:
 		s.engine.SendTo(id, wsErr("unknown_ui_event", "неизвестное событие: "+msg.Name))
 	}
-}
-func stageKnown(s models.Stage) bool {
-	switch s {
-	case models.StageVoice, models.StageLiveCode, models.StageDesign, models.StageReport:
-		return true
-	}
-	return false
 }
