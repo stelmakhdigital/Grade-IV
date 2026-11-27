@@ -20,7 +20,7 @@ func (s *Server) handleTemplatesList(w http.ResponseWriter, r *http.Request) {
 	}
 	tpls, err := s.templates.List(r.Context(), grade, stack)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "ошибка БД")
+		writeError(w, http.StatusInternalServerError, "internal", "ошибка БД")
 		return
 	}
 	out := make([]map[string]any, 0, len(tpls))

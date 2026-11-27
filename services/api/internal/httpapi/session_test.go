@@ -361,3 +361,32 @@ func TestSessionWSAuthAndDisconnect(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// Проверка владения на журнале событий и запусках кода идёт через общий
+// ownedSession. Раньше в handleSessionEvents была своя копия этой проверки, и
+// в ней отсутствовала ветка «ошибка БД»: запрос уходил дальше с нулевой
+// сессией и отвечал 200 с пустым списком вместо 500.
+func TestSessionSubresourcesOwnership(t *testing.T) {
+	ts := newTestServer(t, nil)
+	owner := registerAndGetToken(t, ts)
+	other := registerAndGetToken(t, ts)
+	id, _ := createSession(t, ts, owner, "junior", "go")
+
+	type req struct {
+		method, path string
+	}
+	for _, r := range []req{
+		{"GET", fmt.Sprintf("/api/v1/sessions/%d/events", id)},
+		{"POST", fmt.Sprintf("/api/v1/sessions/%d/runs", id)},
+	} {
+		code, raw := doRaw(t, r.method, ts.URL+r.path, []byte("{}"), nil, other)
+		if code != http.StatusNotFound {
+			t.Fatalf("%s %s: %d %s", r.method, r.path, code, raw)
+		}
+	}
+	// Хозяин свой журнал видит (пустой на свежей сессии — но 200, не 404).
+	code, _ := doRaw(t, "GET", fmt.Sprintf("%s/api/v1/sessions/%d/events", ts.URL, id), nil, nil, owner)
+	if code != http.StatusOK {
+		t.Fatalf("events своей сессии: %d", code)
+	}
+}

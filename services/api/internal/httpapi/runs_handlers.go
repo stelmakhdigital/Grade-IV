@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/interviewer"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/llm"
 	"github.com/stelmakhdigital/grade-iv/services/api/internal/models"
@@ -53,14 +52,8 @@ func (s *Server) handleSessionRuns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	userID := userIDFromContext(r.Context())
-	m, err := s.sessions.GetOwned(r.Context(), id, userID)
-	if errors.Is(err, db.ErrSessionNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "сессия не найдена")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "не удалось получить сессию")
+	m, ok := s.ownedSession(w, r, id)
+	if !ok {
 		return
 	}
 	// Live-Code — стадия кода; завершённые сессии сдавать не могут.

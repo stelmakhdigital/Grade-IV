@@ -2,11 +2,8 @@ package httpapi
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"time"
-
-	"github.com/stelmakhdigital/grade-iv/services/api/internal/db"
 )
 
 // Чтение журнала событий сессии: транскрипт/история (FR-A4).
@@ -17,9 +14,8 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	m, err := s.sessions.GetOwned(r.Context(), id, userIDFromContext(r.Context()))
-	if errors.Is(err, db.ErrSessionNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "сессия не найдена")
+	m, ok := s.ownedSession(w, r, id)
+	if !ok {
 		return
 	}
 	events, err := s.sessions.ListEvents(r.Context(), m.ID)
