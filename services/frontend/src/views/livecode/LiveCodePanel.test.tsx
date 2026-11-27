@@ -1,7 +1,14 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { LiveCodePanel, DEFAULT_CODE, codeCache, saveDraft, restoreDraft } from './LiveCodePanel';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  LiveCodePanel,
+  DEFAULT_CODE,
+  DRAFT_DEBOUNCE_MS,
+  codeCache,
+  saveDraft,
+  restoreDraft,
+} from './LiveCodePanel';
 
 const RUN_OK = {
   exit_code: 0,
@@ -146,7 +153,7 @@ describe('LiveCodePanel (WP-9)', () => {
   it('черновик кода переживает перезагрузку (sessionStorage, не только память вкладки)', async () => {
     const user = userEvent.setup();
     // новый render: в памяти вкладки кода этой сессии нет — спасает только хранилище
-    render(
+    const { unmount } = render(
       <LiveCodePanel
         sessionId={91}
         stack="go"
@@ -157,11 +164,98 @@ describe('LiveCodePanel (WP-9)', () => {
     );
     await user.clear(screen.getByTestId('editor'));
     await user.type(screen.getByTestId('editor'), 'package draft // из хранилища');
+    // запись в хранилище дебаунсится; закрытие панели (страницу закрывают/
+    // перезагружают) сливает незаписанный черновик — это и есть путь F5
+    unmount();
     expect(JSON.parse(sessionStorage.getItem('grade.code.91') ?? '{}')['go-t9'])
       .toEqual({ 'solution.go': 'package draft // из хранилища' });
     // и читается по своему ключу задачи
     expect(restoreDraft(91, 'go-t9')).toEqual({ 'solution.go': 'package draft // из хранилища' });
     expect(restoreDraft(91, 'go-другая')).toBeUndefined();
+  });
+
+  describe('запись черновиков в хранилище', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('не сериализует состояние на каждое нажатие клавиши', () => {
+      vi.useFakeTimers();
+      const setItem = vi.spyOn(Storage.prototype, 'setItem');
+      try {
+        render(
+          <LiveCodePanel sessionId={92} stack="go" taskId="go-rev" review="" editor={stubEditor()} />,
+        );
+        const editor = screen.getByTestId('editor');
+        // 5 «нажатий»: каждый onChange — один символ, добавленный к коду
+        let value = DEFAULT_CODE.go;
+        for (const ch of '12345') {
+          value += ch;
+          fireEvent.change(editor, { target: { value } });
+        }
+        // правки сразу в редакторе (это источник правды), но не в хранилище
+        expect(editor).toHaveValue(value);
+        expect(setItem).not.toHaveBeenCalled();
+        // прошла пауза debounce — одна пачечная запись на все 5 нажатий
+        vi.advanceTimersByTime(DRAFT_DEBOUNCE_MS);
+        expect(setItem).toHaveBeenCalledTimes(1);
+        expect(restoreDraft(92, 'go-rev')).toEqual({ 'main.go': value });
+        // без правок хранилище не перетирается
+        vi.advanceTimersByTime(DRAFT_DEBOUNCE_MS * 3);
+        expect(setItem).toHaveBeenCalledTimes(1);
+      } finally {
+        setItem.mockRestore();
+      }
+    });
+
+    it('черновик одной задачи не затирает черновик другой', async () => {
+      const user = userEvent.setup();
+      const { unmount } = render(
+        <LiveCodePanel
+          sessionId={93}
+          stack="go"
+          tasks={[
+            { id: 'go-t1', title: 'Первая', files: { 'solution.go': 'package task // t1' } },
+            { id: 'go-t2', title: 'Вторая', files: { 'solution.go': 'package task // t2' } },
+          ]}
+          review=""
+          editor={stubEditor()}
+        />,
+      );
+      await user.clear(screen.getByTestId('editor'));
+      await user.type(screen.getByTestId('editor'), 'package t1 // черновик');
+      // переключение задачи — черновик первой сливается сразу, без таймаута
+      await user.click(screen.getByTestId('task-tab-2'));
+      await user.clear(screen.getByTestId('editor'));
+      await user.type(screen.getByTestId('editor'), 'package t2 // черновик');
+      unmount(); // закрытие страницы — сливается черновик второй
+
+      const drafts = JSON.parse(sessionStorage.getItem('grade.code.93') ?? '{}');
+      expect(drafts['go-t1']).toEqual({ 'solution.go': 'package t1 // черновик' });
+      expect(drafts['go-t2']).toEqual({ 'solution.go': 'package t2 // черновик' });
+    });
+
+    it('черновики скрытых задач чистятся, активной — остаётся', () => {
+      // черновик задачи прошлой стадии (её больше не показывают) и текущей
+      saveDraft(77, 'go-old', { 'main.go': 'package old // прошлая стадия' });
+      saveDraft(77, 'go-t1', { 'solution.go': 'package t1 // из хранилища' });
+      render(
+        <LiveCodePanel
+          sessionId={77}
+          stack="go"
+          tasks={[
+            { id: 'go-t1', title: 'Первая', files: { 'solution.go': 'package task // t1' } },
+            { id: 'go-t2', title: 'Вторая', files: { 'solution.go': 'package task // t2' } },
+          ]}
+          review=""
+          editor={stubEditor()}
+        />,
+      );
+      expect(restoreDraft(77, 'go-old')).toBeUndefined(); // скрытая — вычищена
+      // активная задача не съедена очисткой и её черновик восстановлен в редактор
+      expect(restoreDraft(77, 'go-t1')).toEqual({ 'solution.go': 'package t1 // из хранилища' });
+      expect(screen.getByTestId('editor')).toHaveValue('package t1 // из хранилища');
+    });
   });
 
   describe('вкладки задач (spec-13B T2)', () => {

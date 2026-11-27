@@ -88,10 +88,27 @@ export const codeCache = new Map<string, CodeCacheEntry>();
  * Черновик кода — ещё и в sessionStorage: F5 на практической стадии не должен
  * съедать решение, а в памяти вкладки жил только codeCache (потеря решения
  * проверена в браузере). Формат: grade.code.<сессия> = {"<task id|none>": файлы}.
+ *
+ * sessionStorage — производный кэш (защита от перезагрузки), а не третье живое
+ * состояние: источник правды — состояние `files` панели, codeCache — её
+ * in-memory кэш. В хранилище пишем пачками: по таймауту после последнего
+ * изменения, при переключении задачи, размонтировании панели и закрытии
+ * страницы — раньше JSON.stringify всех черновиков сессии шёл на каждое
+ * нажатие клавиши. Черновики задач, которых нет в текущем списке (прошлые
+ * стадии, снятые задачи), чистятся — иначе ключи копились всю жизнь сессии.
  */
 const DRAFT_PREFIX = 'grade.code.';
 
+/** Пауза «последнее изменение → запись в хранилище» (мс). */
+export const DRAFT_DEBOUNCE_MS = 400;
+
 type Drafts = Record<string, Record<string, string>>;
+
+/** Черновик, ожидающий debounce-слива в sessionStorage. */
+interface PendingDraft {
+  taskId: string | undefined;
+  files: Record<string, string>;
+}
 
 function readDrafts(sessionId: number): Drafts {
   try {
@@ -127,6 +144,44 @@ export function saveDraft(
     sessionStorage.setItem(DRAFT_PREFIX + sessionId, JSON.stringify(drafts));
   } catch {
     // хранилища нет (quota/приватный режим) — черновик остаётся в codeCache
+  }
+}
+
+/** Записать ожидающий черновик (debounce-слив) и забыть его. */
+function flushPendingDraft(
+  sessionId: number,
+  ref: { current: PendingDraft | null },
+): void {
+  const p = ref.current;
+  if (p === null) return;
+  ref.current = null;
+  saveDraft(sessionId, p.taskId, p.files);
+}
+
+/**
+ * Удалить из хранилища черновики задач, которых нет в keep (текущий список
+ * задач + активная вкладка) — подчистка за прошлыми стадиями и снятыми
+ * задачами. Ничего удалять не нужно — хранилище не трогаем вовсе.
+ */
+function pruneDrafts(sessionId: number, keepTaskIds: Set<string>): void {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_PREFIX + sessionId);
+    if (raw === null) return;
+    const drafts = JSON.parse(raw) as Drafts;
+    const kept: Drafts = {};
+    let changed = false;
+    for (const [taskId, files] of Object.entries(drafts)) {
+      if (keepTaskIds.has(taskId)) kept[taskId] = files;
+      else changed = true;
+    }
+    if (!changed) return;
+    if (Object.keys(kept).length === 0) {
+      sessionStorage.removeItem(DRAFT_PREFIX + sessionId);
+    } else {
+      sessionStorage.setItem(DRAFT_PREFIX + sessionId, JSON.stringify(kept));
+    }
+  } catch {
+    // хранилища нет или значение битое — чистить нечего
   }
 }
 
@@ -319,12 +374,55 @@ export function LiveCodePanel({
     };
   }, []);
 
-  // Сохраняем код + результат активной задачи в кэш: переживает переключение
-  // вкладок и смену стадий.
+  // codeCache — in-memory кэш правок (переживает переключение вкладок и смену
+  // стадий в рамках SPA); пишется синхронно, он дешёвый.
   useEffect(() => {
     codeCache.set(cacheKey, { files, result: activeResult });
-    saveDraft(sessionId, activeTaskId, files);
-  }, [cacheKey, files, activeResult, sessionId, activeTaskId]);
+  }, [cacheKey, files, activeResult]);
+
+  // sessionStorage — кэш на перезагрузку: не на каждое нажатие клавиши
+  // (JSON.stringify всех черновиков), а по таймауту после последнего
+  // изменения. Незаписанный остаток сливается при переключении задачи,
+  // размонтировании панели и закрытии страницы (см. эффект с beforeunload).
+  const pendingDraftRef = useRef<PendingDraft | null>(null);
+  useEffect(() => {
+    const prev = pendingDraftRef.current;
+    // ушли с другой задачи — её черновик не ждём таймаута
+    if (prev !== null && prev.taskId !== activeTaskId) {
+      flushPendingDraft(sessionId, pendingDraftRef);
+    }
+    pendingDraftRef.current = { taskId: activeTaskId, files };
+    const timer = setTimeout(
+      () => flushPendingDraft(sessionId, pendingDraftRef),
+      DRAFT_DEBOUNCE_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [cacheKey, files, activeTaskId, sessionId]);
+
+  // F5/закрытие вкладки: React-unmount при unload не успевает отработать —
+  // сливаем черновик по событию страницы; размонтирование панели (смена
+  // стадии, выход из сессии) — тем же cleanup.
+  useEffect(() => {
+    const flush = (): void => flushPendingDraft(sessionId, pendingDraftRef);
+    window.addEventListener('beforeunload', flush);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('beforeunload', flush);
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, [sessionId]);
+
+  // Подчистка черновиков задач, которых панель уже не показывает (прошлые
+  // стадии, снятые задачи). Пока taskList пуст (до прихода stage.tasks после
+  // F5) — в хранилище не лезем: там единственный черновик кандидата.
+  useEffect(() => {
+    if (taskList.length === 0) return;
+    const keep = new Set<string>();
+    for (const t of taskList) if (t.id !== undefined) keep.add(t.id);
+    keep.add(activeTaskId ?? 'none');
+    pruneDrafts(sessionId, keep);
+  }, [sessionId, taskList, activeTaskId]);
 
   const onRun = useCallback(async () => {
     if (running) return;
