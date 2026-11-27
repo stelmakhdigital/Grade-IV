@@ -2,6 +2,7 @@ package vad
 
 import (
 	"math"
+	"sync"
 	"testing"
 )
 
@@ -193,4 +194,38 @@ func TestVADNoiseBurstNotUtterance(t *testing.T) {
 	if got {
 		t.Fatal("всплеск шума стал репликой")
 	}
+}
+
+// Потокобезопасность детектора: Feed пишет из горутины, которая читает аудио
+// (read-loop WS), а InSpeech/PreSilence/Utterance читают из других горутин —
+// nudgeLoop (анти-nudge), pre-STT и обработчик UI-событий. Раньше Detector
+// объявлялся «не goroutine-safe», и -race ловил гонку в TestVADStreamFallbackToEnergy.
+// Воспроизводитель держим здесь, чтобы регрессия не зависела от тестов httpapi.
+func TestDetectorConcurrentAccess(t *testing.T) {
+	d := New(DefaultConfig())
+	frame := toneFrame(40, 4000)
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				_, _ = d.Feed(frame)
+			}
+		}
+	}()
+	for i := 0; i < 5000; i++ {
+		_ = d.InSpeech()
+		_ = d.PreSilence()
+		_ = d.Adaptive()
+		_ = d.NoiseFloor()
+		_ = d.UtteranceLen()
+		_ = d.Utterance()
+	}
+	close(done)
+	wg.Wait()
 }

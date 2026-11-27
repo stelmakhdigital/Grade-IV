@@ -8,6 +8,7 @@ package vad
 
 import (
 	"math"
+	"sync"
 )
 
 // Config — параметры детектора.
@@ -44,9 +45,14 @@ func DefaultConfig() Config {
 	}
 }
 
-// Detector — состояние на соединение (не goroutine-safe: опрашивается read-loop).
+// Detector — состояние на соединение. Потокобезопасен: Feed пишет из read-loop
+// аудио, а InSpeech/PreSilence/Utterance читают из других горутин (nudgeLoop,
+// pre-STT, обработчик UI-событий).
 type Detector struct {
 	cfg Config
+
+	// mu защищает поля ниже. cfg после New неизменяем — он под мьютекс не берётся.
+	mu sync.Mutex
 
 	inSpeech  bool
 	speechMS  int    // длительность текущей речи (от начала)
@@ -91,14 +97,29 @@ func New(cfg Config) *Detector {
 }
 
 // InSpeech — идёт речь прямо сейчас (для UI/анти-nudge).
-func (d *Detector) InSpeech() bool { return d.inSpeech }
+func (d *Detector) InSpeech() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.inSpeech
+}
 
 // NoiseFloor — текущая оценка фона шума (RMS, для отладки/UI).
-func (d *Detector) NoiseFloor() float64 { return d.noiseFloor }
+func (d *Detector) NoiseFloor() float64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.noiseFloor
+}
 
 // Adaptive — фактический порог «речь есть»: абсолютный минимум + адаптивный
 // шумовой пол (gain × floor). Первые кадры (пол не оценён) — только минимум.
 func (d *Detector) Adaptive() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.adaptive()
+}
+
+// adaptive — то же, без блокировки (вызывается из Feed, который держит мьютекс).
+func (d *Detector) adaptive() int {
 	if !d.noiseInit {
 		return d.cfg.RMSThreshold
 	}
@@ -134,16 +155,24 @@ func (d *Detector) updateNoise(rms float64, quiet bool) {
 // распознать (pre-STT) — речь уже ≥ 400 мс тишины, но EndSilenceMS ещё не
 // набрано (кандидат может продолжить). Инвалидация при новом speech-кадре.
 func (d *Detector) PreSilence() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	return d.inSpeech && d.silentMS >= d.cfg.PreSilenceMS
 }
 
 // UtteranceLen — текущая длина накопленного аудио реплики (в байтах).
 // Меняется только на speech-кадрах; тишина в реплику не входит.
-func (d *Detector) UtteranceLen() int { return len(d.utterance) }
+func (d *Detector) UtteranceLen() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.utterance)
+}
 
 // Utterance — копия накопленного аудио реплики (для pre-STT: распознать
 // текущий буфер, пока VAD-хвост ещё не завершился).
 func (d *Detector) Utterance() []byte {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if len(d.utterance) == 0 {
 		return nil
 	}
@@ -162,13 +191,15 @@ func (d *Detector) FrameMS(pcm []byte) int {
 
 // Feed — кадр PCM16 16 кГц mono. Возвращает завершённую реплику (или nil).
 func (d *Detector) Feed(pcm []byte) (utterance []byte, completed bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	frameMS := d.FrameMS(pcm)
 	if frameMS <= 0 {
 		return nil, false
 	}
 	d.frames++
 	rms := RMSPCM16(pcm)
-	thr := float64(d.Adaptive())
+	thr := float64(d.adaptive())
 	if rms >= thr {
 		// Кадр речи.
 		if !d.inSpeech {
