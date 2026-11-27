@@ -53,6 +53,8 @@ function cabinetRoutes(
     resume?: unknown;
     /** Ответ GET (текущее состояние). По умолчанию — резюме нет. */
     resumeGet?: unknown;
+    /** Ответ GET /sessions/{id}/report (для тренда по итогам). */
+    report?: unknown;
   } = {},
 ) {
   return {
@@ -62,6 +64,7 @@ function cabinetRoutes(
     'POST /sessions': opts.create ?? S_ACTIVE,
     '/profiles': opts.profiles ?? PROFILES,
     '/sessions': opts.sessions ?? [],
+    '/report': opts.report ?? { overall: 3, grade_recommendation: 'middle', criteria: [], strengths: [], weaknesses: [], recommendations: [] },
   };
 }
 
@@ -234,5 +237,24 @@ describe('история: страницы, фильтр в URL, инертны�
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByTestId('resume-about')).not.toBeInTheDocument());
     expect(header().hasAttribute('inert')).toBe(false);
+  });
+});
+
+describe('CabinetView: тренд по итогам', () => {
+  const S_DONE_2 = { ...S_FINISHED, id: 3, started_at: '2026-09-15T10:00:00Z', finished_at: '2026-09-15T10:40:00Z' };
+
+  it('отчёт по завершённой сессии грузится один раз — «Обновить» не перезапускает веер', async () => {
+    const fetchMock = renderCabinet({ sessions: [S_FINISHED, S_DONE_2] });
+    const reportCalls = () => fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/report')).length;
+    await screen.findByTestId('trend-row');
+    expect(reportCalls()).toBe(2);
+
+    const total = fetchMock.mock.calls.length;
+    await userEvent.click(screen.getByRole('button', { name: 'Обновить' }));
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(total));
+    // 50 мс — чтобы цепочка «список пришёл → состояние обновилось → эффект»
+    // точно успела бы выпустить лишние запросы, если фильтра нет.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(reportCalls()).toBe(2);
   });
 });

@@ -149,28 +149,41 @@ export function CabinetView() {
   }, [load]);
 
   // spec-14/D13 (F2-progress): тренд прогресса — overall по завершённым
-  // сессиям (отчёты грузим лениво, по одной; отсутствие отчёта → null).
-  const [overalls, setOveralls] = useState<Record<number, number | null>>({});
+  // сессиям (отчёты грузим лениво, отсутствие отчёта → null).
+  const [overalls, setOveralls] = useState<Record<number, number>>({});
   useEffect(() => {
     if (sessions === null) return;
     let cancelled = false;
-    const finished = sessions.filter((s) => s.status === 'finished' || s.status === 'aborted');
-    (async () => {
-      for (const s of finished) {
+    // Только те id, которых ещё нет: без этого любая правка списка (кнопка
+    // «Обновить», пауза, переименование) перезапускала веер по всем
+    // завершённым и вторично грузила уже известные отчёты. В кэш кладём лишь
+    // числа: «генерируется» и ошибка остаются незакрытыми и будут переспрошены
+    // при следующем обновлении, как и раньше.
+    const todo = sessions.filter(
+      (s) => (s.status === 'finished' || s.status === 'aborted') && !(s.id in overalls),
+    );
+    if (todo.length === 0) return;
+    void Promise.all(
+      todo.map(async (s): Promise<[number, number | null]> => {
         try {
           const r = await getReport(s.id);
-          if (!cancelled) {
-            setOveralls((prev) => ({ ...prev, [s.id]: r === 'generating' ? null : r.overall }));
-          }
+          return [s.id, r === 'generating' ? null : r.overall];
         } catch {
-          if (!cancelled) setOveralls((prev) => ({ ...prev, [s.id]: null }));
+          return [s.id, null];
         }
-      }
-    })();
+      }),
+    ).then((pairs) => {
+      if (cancelled) return;
+      setOveralls((prev) => {
+        const next = { ...prev };
+        for (const [id, v] of pairs) if (v != null) next[id] = v;
+        return next;
+      });
+    });
     return () => {
       cancelled = true;
     };
-  }, [sessions]);
+  }, [sessions, overalls]);
 
   // spec-14/D12: тик для пересчёта «осталось паузы» (30 с, дёшево).
   const [nowTick, setNowTick] = useState(() => Date.now());
