@@ -121,6 +121,19 @@ function Routes() {
     return <LoginView />;
   }
   if (admin) {
+    // Не-админ по прямой ссылке видит «нет прав», а не настройки: редирект без
+    // этой ветки показал бы ему личные секции и спрятал факт отказа (ui-review 2026-11-27).
+    if (user?.is_admin !== true) {
+      return (
+        <main className="app">
+          <h1>Грейд</h1>
+          <p className="muted">
+            Недостаточно прав: эта страница только для администраторов.{' '}
+            <a href="#/">В кабинет</a>
+          </p>
+        </main>
+      );
+    }
     return <RedirectToSettings />;
   }
   if (sessionId !== null) {
