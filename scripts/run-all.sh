@@ -37,7 +37,7 @@ mkdir -p "$PIDS" "$LOGS" "$RUN/sbxw"
 export PATH="$PATH:$HOME/.local/go-toolchain/bin"
 # ponytail: фолбэк на /tmp/go (тулчейн сессии агента), если основного нет — убрать после миграции
 if ! command -v go >/dev/null; then
-  [[ -x /tmp/go/bin/go ]] && export PATH="$PATH:/tmp/go/bin"
+  [[ -x /tmp/go/bin/go ]] && export PATH="$PATH:/tmp/go/bin" || true
 fi
 if ! command -v go >/dev/null; then
   echo "ошибка: go не найден (ожидается в PATH или $HOME/.local/go-toolchain/bin)" >&2
@@ -67,14 +67,21 @@ SESSION_LIMIT_S="${SESSION_LIMIT_S:-off}"
 # сам прерывает сессию (pause_timeout, отчёт генерируется). По умолчанию 1800 с
 # (30 мин). Кабинет предупреждает «осталось N мин» заранее (spec-14/D12).
 SESSION_PAUSE_TIMEOUT_S="${SESSION_PAUSE_TIMEOUT_S:-1800}"
+# ADDR — адрес api. По умолчанию :8000; на машине, где :8000 занят (напр. vLLM-
+# контейнером), переносят: ADDR=:8010 GRADE_API_URL=http://localhost:8010 (vite-
+# прокси читает GRADE_API_URL). Выбранный порт запоминается в FOR_RUN/api.port —
+# stop/status должны видеть тот же порт, а ADDR при остановке не передают.
+if [[ -z "${ADDR:-}" && -f "$RUN/api.port" ]]; then ADDR=$(cat "$RUN/api.port"); fi
+ADDR="${ADDR:-:8000}"
+API_PORT="${ADDR#:}"
 VOICE_URL="http://127.0.0.1:8100"
 SANDBOX_URL="http://127.0.0.1:8200"
 # CUDA-библиотеки ctranslate2 (nvidia-cublas/cudnn/cuda_nvrtc из voice-venv, PyPI)
 VOICE_VENV="$ROOT/services/voice/.venv"
-VENV_SP="$(ls -d "$VOICE_VENV"/lib/python3.* 2>/dev/null | head -1)"
+VENV_SP="$(ls -d "$VOICE_VENV"/lib/python3.* 2>/dev/null | head -1 || true)"
 VOICE_CUDA_LIBS=""
 for _d in cublas cuda_nvrtc cudnn; do
-  [[ -n "$VENV_SP" && -d "$VENV_SP/site-packages/nvidia/$_d/lib" ]] && VOICE_CUDA_LIBS="$VOICE_CUDA_LIBS:$VENV_SP/site-packages/nvidia/$_d/lib"
+  [[ -n "$VENV_SP" && -d "$VENV_SP/site-packages/nvidia/$_d/lib" ]] && VOICE_CUDA_LIBS="$VOICE_CUDA_LIBS:$VENV_SP/site-packages/nvidia/$_d/lib" || true
 done
 VOICE_CUDA_LIBS="${VOICE_CUDA_LIBS#:}"
 
@@ -89,13 +96,13 @@ is_running() { # $1 = имя (пид-файл)
 stop_one() {
   local name="$1" f="$PIDS/$1.pid" port pids p
   case "$name" in
-    sandbox) port=8200 ;; voice) port=8100 ;; api) port=8000 ;; frontend) port=5173 ;;
+    sandbox) port=8200 ;; voice) port=8100 ;; api) port="$API_PORT" ;; frontend) port=5173 ;;
   esac
   if is_running "$name"; then
     kill "$(cat "$f")" 2>/dev/null || true
   fi
   # подстраховка: процесс по порту (pid в файле может быть обёрткой)
-  pids=$(ss -tlnp 2>/dev/null | grep -E "[:.]$port([[:space:]]|$)" | grep -oE "pid=[0-9]+" | cut -d= -f2 | sort -u)
+  pids=$(ss -tlnp 2>/dev/null | grep -E "[:.]$port([[:space:]]|$)" | grep -oE "pid=[0-9]+" | cut -d= -f2 | sort -u || true)
   for p in $pids; do kill "$p" 2>/dev/null || true; done
   sleep 1
   rm -f "$f"
@@ -114,7 +121,7 @@ do_build() {
   # Защита: если после сборки мт-время не изменилось — громкий сбой.
   echo "==> сборка api"
   local api_tmp="$API_BIN.tmp.$$" api_old_ts=0 api_new_ts=0
-  [[ -f "$API_BIN" ]] && api_old_ts=$(stat -c %Y "$API_BIN" 2>/dev/null || echo 0)
+  if [[ -f "$API_BIN" ]]; then api_old_ts=$(stat -c %Y "$API_BIN" 2>/dev/null || echo 0); fi
   (cd "$ROOT/services/api" && go build -o "$api_tmp" ./cmd/api)
   mv -f "$api_tmp" "$API_BIN"
   api_new_ts=$(stat -c %Y "$API_BIN" 2>/dev/null || echo 0)
@@ -123,7 +130,7 @@ do_build() {
   fi
   echo "==> сборка sandbox"
   local sbx_tmp="$SBX_BIN.tmp.$$" sbx_old_ts=0 sbx_new_ts=0
-  [[ -f "$SBX_BIN" ]] && sbx_old_ts=$(stat -c %Y "$SBX_BIN" 2>/dev/null || echo 0)
+  if [[ -f "$SBX_BIN" ]]; then sbx_old_ts=$(stat -c %Y "$SBX_BIN" 2>/dev/null || echo 0); fi
   (cd "$ROOT/services/sandbox" && go build -o "$sbx_tmp" ./cmd/sandbox)
   mv -f "$sbx_tmp" "$SBX_BIN"
   sbx_new_ts=$(stat -c %Y "$SBX_BIN" 2>/dev/null || echo 0)
@@ -137,6 +144,7 @@ do_build() {
 }
 
 do_start() {
+  echo "$ADDR" > "$RUN/api.port"
   for n in sandbox voice api frontend; do
     if is_running "$n"; then
       echo "!! $n уже запущен (pid $(cat "$PIDS/$n.pid")) — пропускаю (make stop для перезапуска)"
@@ -150,7 +158,9 @@ do_start() {
   # → status показывал «стоп» при живом healthz).
   # SANDBOX_TASKS_FILE — пул сгенерированных задач (spec-24); без него банк
   # read-only. Токен управления берём из окружения (см. .env.example).
-  (cd "$ROOT" && SANDBOX_MODE=subprocess SANDBOX_WORKDIR_BASE="$RUN/sbxw" \
+  # ADDR читается и api, и sandbox — порт sandbox фиксируем здесь, чтобы ADDR
+  # снаружи относился только к api.
+  (cd "$ROOT" && ADDR=:8200 SANDBOX_MODE=subprocess SANDBOX_WORKDIR_BASE="$RUN/sbxw" \
     SANDBOX_TASKS_FILE="${SANDBOX_TASKS_FILE:-$RUN/generated-tasks.json}" \
     SANDBOX_ADMIN_TOKEN="${SANDBOX_ADMIN_TOKEN:-}" \
     nohup "$SBX_BIN" >>"$LOGS/sandbox.log" 2>&1 & echo $! >"$PIDS/sandbox.pid")
@@ -186,14 +196,14 @@ do_start() {
     nohup .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8100 >>"$LOGS/voice.log" 2>&1 & \
     echo $! >"$PIDS/voice.pid")
 
-  echo "==> api :8000 (LLM_MOCK=$LLM_MOCK LLM=$LLM_BASE_URL модель=${LLM_MODEL:-авто по /models})"
+  echo "==> api $ADDR (LLM_MOCK=$LLM_MOCK LLM=$LLM_BASE_URL модель=${LLM_MODEL:-авто по /models})"
   (cd "$ROOT" && DATABASE_URL="sqlite://FOR_RUN/run.db" \
     JWT_SECRET="${JWT_SECRET:-grade-run-secret}" \
     SESSION_LIMIT_S="$SESSION_LIMIT_S" \
     SESSION_PAUSE_TIMEOUT_S="$SESSION_PAUSE_TIMEOUT_S" \
     LLM_MOCK="$LLM_MOCK" LLM_BASE_URL="$LLM_BASE_URL" LLM_MODEL="$LLM_MODEL" \
     ENABLE_DEBUG="${ENABLE_DEBUG:-1}" \
-    VOICE_URL="$VOICE_URL" SANDBOX_URL="$SANDBOX_URL" ADDR=:8000 \
+    VOICE_URL="$VOICE_URL" SANDBOX_URL="$SANDBOX_URL" ADDR="$ADDR" \
     SANDBOX_ADMIN_TOKEN="${SANDBOX_ADMIN_TOKEN:-}" \
     nohup "$API_BIN" >>"$LOGS/api.log" 2>&1 & echo $! >"$PIDS/api.pid")
 
@@ -206,7 +216,7 @@ do_start() {
     ok=1
     curl -sf -o /dev/null http://127.0.0.1:8200/healthz || ok=0
     curl -sf -o /dev/null http://127.0.0.1:8100/api/v1/health || ok=0
-    curl -sf -o /dev/null http://127.0.0.1:8000/healthz || ok=0
+    curl -sf -o /dev/null "http://127.0.0.1:$API_PORT/healthz" || ok=0
     curl -sf -o /dev/null http://127.0.0.1:5173/ || ok=0
     [[ $ok == 1 ]] && break
     sleep 1
@@ -231,7 +241,7 @@ do_status() {
   done
   curl -sf -o /dev/null http://127.0.0.1:8200/healthz && echo "  :8200 sandbox healthz — OK" || echo "  :8200 sandbox healthz — НЕ ОТВЕЧАЕТ"
   curl -sf -o /dev/null http://127.0.0.1:8100/api/v1/health && echo "  :8100 voice health — OK" || echo "  :8100 voice health — НЕ ОТВЕЧАЕТ"
-  curl -sf -o /dev/null http://127.0.0.1:8000/healthz && echo "  :8000 api healthz — OK" || echo "  :8000 api healthz — НЕ ОТВЕЧАЕТ"
+  curl -sf -o /dev/null "http://127.0.0.1:$API_PORT/healthz" && echo "  :$API_PORT api healthz — OK" || echo "  :$API_PORT api healthz — НЕ ОТВЕЧАЕТ"
   curl -sf -o /dev/null http://127.0.0.1:5173/ && echo "  :5173 frontend — OK" || echo "  :5173 frontend — НЕ ОТВЕЧАЕТ"
 }
 
