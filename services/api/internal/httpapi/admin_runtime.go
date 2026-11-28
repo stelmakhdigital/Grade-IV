@@ -168,6 +168,9 @@ func (s *Server) buildSettings(r *http.Request, f config.AppFile) settingsView {
 			"enable_thinking": boolSetting("LLM_ENABLE_THINKING", f.LLM.EnableThinking, s.cfg.LLMEnableThinking),
 			"mock":            s.cfg.LLMMock,
 			"api_key_set":     s.cfg.LLMAPIKey != "",
+			// Куда именно пишется LLM: путь показывает, что файл — не выдумка
+			// интерфейса (админка рисует это как подпись под полем).
+			"config_path": path,
 		},
 		Sandbox: map[string]any{
 			"url":             strSetting("SANDBOX_URL", f.SandboxURL, s.cfg.SandboxURL),
