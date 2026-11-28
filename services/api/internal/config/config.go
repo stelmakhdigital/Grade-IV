@@ -172,9 +172,9 @@ func Load() (*Config, error) {
 		LLMMockTokensPerS:     getEnvFloat("LLM_MOCK_TOKENS_PER_S", 0),
 		ResumeDir:             getEnv("RESUME_DIR", "./data/resumes"),
 	}
-	// Файл переопределения LLM (config/llm.json): то, что не задано окружением.
-	if err := applyLLMFile(c); err != nil {
-		return nil, fmt.Errorf("config/llm.json: %w", err)
+	// Единый файл настроек (config/app.json): то, что не задано окружением.
+	if err := applyAppFile(c); err != nil {
+		return nil, fmt.Errorf("config/app.json: %w", err)
 	}
 	if c.JWTExpiryHours <= 0 {
 		return nil, fmt.Errorf("JWT_EXPIRY_HOURS должен быть > 0 (получено %d)", c.JWTExpiryHours)

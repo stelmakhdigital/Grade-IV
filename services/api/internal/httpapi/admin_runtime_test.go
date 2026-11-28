@@ -120,15 +120,16 @@ func TestAdminModelsPut_llm_в_файл(t *testing.T) {
 		t.Fatalf("put: %d %v", code, body)
 	}
 	applied, _ := body["applied"].(map[string]any)
-	llmApplied, _ := applied["llm"].(map[string]any)
-	if llmApplied["saved"] != true || llmApplied["applies"] != "restart" {
-		t.Fatalf("applied.llm: %v", applied)
+	appApplied, _ := applied["app"].(map[string]any)
+	if appApplied["saved"] != true || appApplied["applies"] != "restart" {
+		t.Fatalf("applied.app: %v", applied)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("файл не записан: %v", err)
 	}
-	if !strings.Contains(string(raw), "Qwen3.8") || !strings.Contains(string(raw), "enable_thinking") {
+	if !strings.Contains(string(raw), "Qwen3.8") || !strings.Contains(string(raw), "enableThinking") &&
+		!strings.Contains(string(raw), "enable_thinking") {
 		t.Fatalf("содержимое файла: %s", raw)
 	}
 	if strings.Contains(strings.ToLower(string(raw)), "api_key") {

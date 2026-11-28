@@ -87,9 +87,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/v1/admin/openings", s.requireAdmin(http.HandlerFunc(s.handleAdminOpeningsPut)))
 	mux.Handle("GET /api/v1/admin/tts-voices", s.requireAdmin(http.HandlerFunc(s.handleAdminTTSVoices)))
 	mux.Handle("PUT /api/v1/admin/tts-voices", s.requireAdmin(http.HandlerFunc(s.handleAdminTTSVoicesPut)))
-	// Контур настроек (фидбек 2026-11-28): что подключено + выбор моделей.
-	mux.Handle("GET /api/v1/admin/runtime", s.requireAdmin(http.HandlerFunc(s.adminRuntime)))
-	mux.Handle("PUT /api/v1/admin/models", s.requireAdmin(http.HandlerFunc(s.adminModelsPut)))
+	// Единый контур настроек (ADR-015): всё, что настраивается, с источником
+	// значения и пометкой «нужен перезапуск». admin/runtime и admin/models —
+	// алиасы: на них ссылается админка, логика одна.
+	mux.Handle("GET /api/v1/settings", s.requireAdmin(http.HandlerFunc(s.adminSettings)))
+	mux.Handle("PUT /api/v1/settings", s.requireAdmin(http.HandlerFunc(s.adminSettingsPut)))
+	mux.Handle("GET /api/v1/admin/runtime", s.requireAdmin(http.HandlerFunc(s.adminSettings)))
+	mux.Handle("PUT /api/v1/admin/models", s.requireAdmin(http.HandlerFunc(s.adminSettingsPut)))
 
 	// Голосовой канал (WP-3, ADR-001): auth — токен в query/заголовке.
 	mux.HandleFunc("GET /ws/session/{id}", s.handleSessionWS)

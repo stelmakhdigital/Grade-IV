@@ -160,24 +160,29 @@ live-code), ИИ не может поднять балл больше чем н�
 | `VOICE_STT_PROVIDER` | `gigaam` | `services/voice/app/main.py` |
 | `STT_DEVICE` | `cpu` | `infra/docker-compose.yml:215` |
 | `TTS_SPEAKER` | `xenia` | `infra/docker-compose.yml:222` |
-| `LLM_CONFIG_FILE` | `config/llm.json` | `internal/config/llmfile.go` |
+| `APP_CONFIG_FILE` | `config/app.json` | `internal/config/appfile.go` |
 | `VOICE_MODELS_FILE` | `config/voice-models.json` | `services/voice/app/modelconfig.py` |
 | `VOICE_ADMIN_TOKEN` | пусто запись выключена | voice + api (пробрасывает свой) |
 
-Сверх `.env` — файлы выбора моделей из админки (ADR-012): `config/llm.json` и
-`config/voice-models.json` (voice принимает их через `PUT /api/v1/config/models`).
+Сверх `.env` — файлы настроек из экрана «Настройки» (ADR-012, ADR-015):
+`config/app.json` (LLM, адреса voice/sandbox, пороги тишины/VAD, рамки сессии) и
+`config/voice-models.json` (голос; voice принимает его через
+`PUT /api/v1/config/models`).
 Старшинство в обоих сервисах: **переменная окружения > файл > дефолт кода** —
 admin-правка не должна тихо переписывать то, что задано в составе деплоя.
 Применение — перезапуском сервиса (модель держится в памяти процесса; voice
 целиком влезает в лимит 8 GiB, вторая модель рядом не встанет). Секреты в эти
 файлы не пишутся: `LLM_API_KEY` — только окружение.
 
-Админ-контур (вкладка «Система»): `GET /api/v1/admin/runtime` — что подключено
-(LLM-эндпоинт/модель/thinking, провайдеры и модели голоса, `loaded`/`device`,
-чего не хватает на диске, чем закреплено каждое значение: env | file | default);
-`PUT /api/v1/admin/models` — выбор (LLM пишет файл, голоса проксируются в voice
-с `X-Admin-Token`). Недоступный voice в сводке — строка `{error}` в своём блоке,
-а не 502 на всю панель.
+Контур настроек: `GET /api/v1/settings` — всё, что настраивается, с источником
+каждого значения (`env | file | default`) и состоянием после записи
+(`applied_now` | `needs_restart` | `shadowed_by_env`); `pending` — список того,
+что файл уже просит, а сервис ещё не применил. `PUT /api/v1/settings` — одна
+точка записи (свои значения в `config/app.json`, голоса — прокси в voice с
+`X-Admin-Token`). Блок `install` — read-only (адрес БД, адрес прослушивания,
+уровень логов, факты наличия секретов): секреты не отдаются и не принимаются.
+`/admin/runtime` и `/admin/models` — алиасы того же контракта. Недоступный voice
+в сводке — строка `{error}` в своём блоке, а не 502 на весь экран.
 
 ## 7. Хранилище
 
