@@ -114,7 +114,10 @@ class GigaAMSTT:
         urllib внутри gigaam.load_model отказывается), поэтому ждём файлы на диске.
         """
         root = Path(self._download_root) if self._download_root else Path.home() / ".cache" / "gigaam"
-        return [root / f"{self._model_name}.ckpt", root / "tokenizer"]
+        # Имена — те, что кладёт scripts/download-models.sh (не «tokenizer/»:
+        # такой директории в канонической раскладке нет, проверка врала
+        # «провайдер будет молчать» при рабочей модели).
+        return [root / f"{self._model_name}.ckpt", root / f"{self._model_name}_tokenizer.model"]
 
     # --------------------------------------------------------------- contract
     def transcribe(self, audio: bytes, sample_rate: int = SAMPLE_RATE) -> STTResult:

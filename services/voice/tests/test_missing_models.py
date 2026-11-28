@@ -31,9 +31,11 @@ def test_gigaam_без_весов_пишет_error_с_путём(caplog, tmp_pat
 
 
 def test_gigaam_с_весами_молчит(caplog, tmp_path, monkeypatch):
+    """Раскладка, которую кладёт scripts/download-models.sh, — без тревог."""
     root = tmp_path / "gigaam"
-    (root / "tokenizer").mkdir(parents=True)
+    root.mkdir(parents=True)
     (root / "v3_e2e_rnnt.ckpt").write_bytes(b"x")
+    (root / "v3_e2e_rnnt_tokenizer.model").write_bytes(b"x")
     monkeypatch.setenv("GIGAAM_DOWNLOAD_ROOT", str(root))
     assert _errors(caplog, GigaAMSTT()) == []
 
