@@ -48,6 +48,23 @@ MODEL_NAMES = (
 _RNNT_CONFIDENCE = 0.9
 
 
+def weights_root() -> Path:
+    """Каталог весов gigaam: GIGAAM_DOWNLOAD_ROOT, иначе кэш в домашнем каталоге."""
+    root = os.getenv("GIGAAM_DOWNLOAD_ROOT")
+    return Path(root) if root else Path.home() / ".cache" / "gigaam"
+
+
+def weights_for(model_name: str, root: Path | None = None) -> list[Path]:
+    """Файлы модели под этим именем (имена кладёт scripts/download-models.sh).
+
+    Одной функцией с каталогом настроек (app.modelconfig): проверка «лежит на
+    диске» и проверка на старте не должны разъезжаться — раньше expected_files
+    врал про несуществующий каталог «tokenizer».
+    """
+    root = root or weights_root()
+    return [root / f"{model_name}.ckpt", root / f"{model_name}_tokenizer.model"]
+
+
 class GigaAMSTT:
     """GigaAM (torch) — STT-провайдер с ленивой загрузкой модели."""
 
@@ -113,11 +130,8 @@ class GigaAMSTT:
         Автоскачивание в рантайме мертво (у Sber-CDN просрочен сертификат,
         urllib внутри gigaam.load_model отказывается), поэтому ждём файлы на диске.
         """
-        root = Path(self._download_root) if self._download_root else Path.home() / ".cache" / "gigaam"
-        # Имена — те, что кладёт scripts/download-models.sh (не «tokenizer/»:
-        # такой директории в канонической раскладке нет, проверка врала
-        # «провайдер будет молчать» при рабочей модели).
-        return [root / f"{self._model_name}.ckpt", root / f"{self._model_name}_tokenizer.model"]
+        root = Path(self._download_root) if self._download_root else weights_root()
+        return weights_for(self._model_name, root)
 
     # --------------------------------------------------------------- contract
     def transcribe(self, audio: bytes, sample_rate: int = SAMPLE_RATE) -> STTResult:

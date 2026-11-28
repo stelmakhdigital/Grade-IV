@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from pathlib import Path
 
 import numpy as np
 
@@ -21,6 +22,23 @@ from .providers import SAMPLE_RATE, STTResult, extract_pcm16
 logger = logging.getLogger("voice.stt")
 
 MODEL_SIZES = ("tiny", "base", "small", "medium", "large-v3", "large-v2")
+
+
+def weights_for(size: str) -> list[Path]:
+    """Кэш модели faster-whisper: локальная директория либо snapshot HF-кэша.
+
+    «Размер на диске» = есть каталог снапшота. Рассчитывать, что модель
+    докачается при старте, не приходится (в dev сеть к HF не всегда доступна),
+    поэтому каталог настроек по этому полю гасит недоступные размеры.
+    """
+    if os.path.isdir(size):
+        return [Path(size)]
+    root = Path(os.getenv("STT_DOWNLOAD_ROOT") or (Path.home() / ".cache" / "huggingface"))
+    repo = f"models--Systran--faster-whisper-{size}"
+    for cand in (root / "hub" / repo, root / repo):
+        if cand.is_dir():
+            return [cand]
+    return [root / "hub" / repo]
 
 
 class FasterWhisperSTT:

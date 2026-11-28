@@ -24,6 +24,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .providers import SAMPLE_RATE, STT_EXECUTOR, FakeSTT, FakeTTS
+from .modelconfig import ModelConfig, register_model_config
 from .stt_stream import LazyVAD, build_vad, register_stt_stream, register_vad_stream
 
 logger = logging.getLogger("voice")
@@ -43,33 +44,40 @@ MAX_AUDIO_BYTES = 10 * 1024 * 1024
 MAX_TTS_CHARS = 4000
 
 
+#: Переопределение моделей из файла (config/voice-models.json): env > файл >
+#: дефолт кода. Дефолт проекта (gigaam) файлом не меняется — см. AGENTS.md.
+MODELS = ModelConfig()
+
+
 def _build_stt():
-    """STT-провайдер по env VOICE_STT_PROVIDER: gigaam (default, AGENTS.md) | faster-whisper | fake.
+    """STT-провайдер: VOICE_STT_PROVIDER > файл > gigaam (default, AGENTS.md).
 
     gigaam — GigaAM v3 (Sber, MIT; RU WER в ~2 раза ниже Whisper large-v3),
     env: GIGAAM_MODEL (default v3_e2e_rnnt), GIGAAM_DEVICE, GIGAAM_DOWNLOAD_ROOT.
     Пустой VOICE_STT_PROVIDER — тоже gigaam (дефолт проекта), не faster-whisper.
     """
-    name = (os.getenv("VOICE_STT_PROVIDER") or "gigaam").strip().lower()
+    name = (MODELS.resolve("stt", "provider", "VOICE_STT_PROVIDER", "gigaam")[0]).strip().lower()
     if name == "fake":
         return FakeSTT()
     if name == "gigaam":
         from .gigaam import GigaAMSTT
 
-        return GigaAMSTT()
+        return GigaAMSTT(
+            model_name=MODELS.resolve("stt", "model", "GIGAAM_MODEL", "v3_e2e_rnnt")[0]
+        )
     if name == "faster-whisper":
         from .faster_whisper import FasterWhisperSTT
 
         return FasterWhisperSTT(
-            model_size=os.getenv("STT_MODEL", "small"),
+            model_size=MODELS.resolve("stt", "model", "STT_MODEL", "small")[0],
             language=os.getenv("STT_LANGUAGE", "ru"),
         )
     raise ValueError(f"Неизвестный VOICE_STT_PROVIDER: {name!r}")
 
 
 def _build_tts():
-    """TTS-провайдер по env VOICE_TTS_PROVIDER (default: silero)."""
-    name = os.getenv("VOICE_TTS_PROVIDER", "silero").strip().lower()
+    """TTS-провайдер: VOICE_TTS_PROVIDER > файл > silero (default)."""
+    name = (MODELS.resolve("tts", "provider", "VOICE_TTS_PROVIDER", "silero")[0]).strip().lower()
     if name == "fake":
         return FakeTTS()
     if name in ("", "silero"):
@@ -77,7 +85,9 @@ def _build_tts():
 
         # «ru_01» среди спикеров v5_ru нет — Silero каждый раз подставлял
         # дефолт модели с WARN; берём его же, но без подмены и шума в логе.
-        return SileroTTS(default_speaker=os.getenv("TTS_SPEAKER", DEFAULT_MODEL_SPEAKER))
+        return SileroTTS(default_speaker=MODELS.resolve(
+            "tts", "speaker", "TTS_SPEAKER", DEFAULT_MODEL_SPEAKER
+        )[0])
     raise ValueError(f"Неизвестный VOICE_TTS_PROVIDER: {name!r}")
 
 
@@ -124,6 +134,10 @@ def build_app(stt=None, tts=None, vad=None, max_speech_s: float | None = None) -
     def health() -> dict:
         """Состояние сервиса и провайдеров (используется health-check из api)."""
         return {"service": "grade-voice", "stt": stt.health(), "tts": tts.health(), "vad": vad.name}
+
+    # Настройки моделей (фидбек 2026-11-28): что подключено, что можно выбрать,
+    # что реально лежит на диске и что для применения нужно перезапустить.
+    register_model_config(app, MODELS, stt, tts)
 
     # Стриминговый STT (ADR-007): WS /api/v1/stt/stream — PCM-кадры →
     # state/partial/final (Silero VAD, partial каждые ~500 мс).

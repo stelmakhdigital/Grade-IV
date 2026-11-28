@@ -2018,3 +2018,126 @@ a:focus-visible {
     scroll-behavior: auto !important;
   }
 }
+
+/* ------------------------------------------------------------- «Система»
+   Контур настроек (фидбек 2026-11-28): значения с источником и честная пометка
+   «применится после перезапуска». */
+.runtime h3 {
+  margin: var(--s-6) 0 var(--s-3);
+  font-size: var(--fs-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.runtime h3:first-of-type {
+  margin-top: var(--s-4);
+}
+.runtime-row {
+  display: grid;
+  grid-template-columns: minmax(0, 190px) minmax(0, 1fr);
+  gap: var(--s-2) var(--s-4);
+  align-items: center;
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+.runtime-row:last-of-type {
+  border-bottom: 0;
+}
+.runtime-label {
+  color: var(--text-2);
+}
+.runtime-control {
+  display: flex;
+  gap: var(--s-3);
+  align-items: center;
+  min-width: 0;
+}
+.runtime-control .input,
+.runtime-control .select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.runtime-control .input:disabled,
+.runtime-control .select:disabled {
+  color: var(--text-3);
+  background: var(--ink-1);
+}
+.runtime-hint,
+.runtime-hint-file {
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+}
+.runtime-hint {
+  grid-column: 2;
+}
+.runtime-hint-file {
+  margin: 0 0 var(--s-3);
+}
+.runtime-check {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  color: var(--text-1);
+}
+.runtime-static {
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  color: var(--text-1);
+}
+.runtime-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  align-items: center;
+  margin-top: var(--s-4);
+}
+.runtime-env {
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  padding: 4px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-tag);
+  color: var(--text-2);
+}
+.runtime-note {
+  margin: 0 0 var(--s-2);
+}
+.runtime-note-ok {
+  color: var(--ok);
+  font-size: var(--fs-meta);
+}
+.runtime-ok {
+  color: var(--ok);
+}
+.runtime-bad {
+  color: var(--bad);
+}
+/* Источник значения: «переменная» — то, что панелью не перебить. */
+.src-chip {
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  line-height: 1;
+  padding: 5px 7px;
+  border-radius: var(--r-tag);
+  border: 1px solid var(--line-2);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.src-chip.env {
+  color: var(--warn);
+  border-color: var(--line-warn);
+  background: var(--surface-warn);
+}
+.src-chip.file {
+  color: var(--text-2);
+  border-color: var(--line-3);
+}
+@media (max-width: 720px) {
+  .runtime-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-2);
+  }
+  .runtime-hint {
+    grid-column: 1;
+  }
+}

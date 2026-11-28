@@ -9,8 +9,9 @@ import { TemplatesTab } from './templates';
 import { OpeningsTab } from './openings';
 import { VoicesTab } from './voices';
 import { TracksTab } from './tracks';
+import { SystemTab } from './system';
 
-export const ADMIN_TABS = ['templates', 'openings', 'voices', 'tracks'] as const;
+export const ADMIN_TABS = ['templates', 'openings', 'voices', 'tracks', 'system'] as const;
 export type AdminTab = (typeof ADMIN_TABS)[number];
 
 const TAB_LABELS: Record<AdminTab, string> = {
@@ -18,6 +19,7 @@ const TAB_LABELS: Record<AdminTab, string> = {
   openings: 'Начала разговора',
   voices: 'Голоса',
   tracks: 'Роли собеседований',
+  system: 'Система',
 };
 
 /** Вкладки + панель: содержимое активной вкладки монтируется при выборе. */
@@ -55,6 +57,7 @@ export function AdminTabs({ tab, onSelect }: { tab: AdminTab; onSelect: (t: Admi
         {tab === 'openings' && <OpeningsTab />}
         {tab === 'voices' && <VoicesTab />}
         {tab === 'tracks' && <TracksTab />}
+        {tab === 'system' && <SystemTab />}
       </div>
     </>
   );

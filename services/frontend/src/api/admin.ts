@@ -76,3 +76,72 @@ export function adminUpdateTrack(t: AdminTrack): Promise<AdminTrack> {
 export function adminDeleteTrack(id: string): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>(`/admin/tracks/${id}`, { method: 'DELETE', auth: true });
 }
+
+// ------------------------------------------------- система (контур настроек)
+
+/** Значение настройки вместе с тем, откуда оно взялось. */
+export type SettingSource = {
+  value: string | number | boolean | null;
+  source: 'env' | 'file' | 'default';
+  env: string;
+};
+
+/** Модель из каталога voice: есть ли её веса на диске и чего не хватает. */
+export type ModelOption = { name: string; present: boolean; missing: string[] };
+
+/** Блок voice в GET /admin/runtime (прямая проксикация /config/models). */
+export type VoiceRuntime = {
+  error?: string;
+  path?: string;
+  writable?: boolean;
+  applies?: string;
+  applies_note?: string;
+  current?: {
+    stt?: { provider?: string; model?: string; device?: string; loaded?: boolean };
+    tts?: { provider?: string; model?: string; loaded?: boolean; speakers?: string[] };
+  };
+  sources?: {
+    stt?: {
+      provider?: SettingSource;
+      model?: Record<string, SettingSource>;
+    };
+    tts?: { provider?: SettingSource; speaker?: SettingSource };
+  };
+  catalog?: { stt?: Record<string, ModelOption[]>; tts?: Record<string, ModelOption[]> };
+};
+
+export type RuntimeView = {
+  app_env: string;
+  applies: string;
+  applies_note: string;
+  llm: {
+    base_url: SettingSource;
+    model: SettingSource;
+    enable_thinking: SettingSource;
+    mock: boolean;
+    api_key_set: boolean;
+    config_path: string;
+  };
+  voice: VoiceRuntime;
+  sandbox: { url: string; admin_token_set: boolean; tasks_refill_s: number; tasks_min: number };
+};
+
+/** Что меняем: блоки независимы (LLM живёт в файле api, голоса — в voice). */
+export type ModelsPut = {
+  llm?: { base_url?: string; model?: string; enable_thinking?: boolean };
+  stt?: { provider: string; model: string };
+  tts?: { provider: string; speaker: string };
+};
+
+export type ModelsPutResult = {
+  applied: Record<string, { saved?: boolean; applies?: string; status?: number; error?: string; note?: string }>;
+  applies: string;
+};
+
+export function adminRuntime(): Promise<RuntimeView> {
+  return request<RuntimeView>('/admin/runtime', { auth: true });
+}
+
+export function adminPutModels(payload: ModelsPut): Promise<ModelsPutResult> {
+  return request<ModelsPutResult>('/admin/models', { method: 'PUT', body: payload, auth: true });
+}

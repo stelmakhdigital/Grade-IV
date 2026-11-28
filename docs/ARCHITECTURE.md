@@ -160,6 +160,24 @@ live-code), ИИ не может поднять балл больше чем н�
 | `VOICE_STT_PROVIDER` | `gigaam` | `services/voice/app/main.py` |
 | `STT_DEVICE` | `cpu` | `infra/docker-compose.yml:215` |
 | `TTS_SPEAKER` | `xenia` | `infra/docker-compose.yml:222` |
+| `LLM_CONFIG_FILE` | `config/llm.json` | `internal/config/llmfile.go` |
+| `VOICE_MODELS_FILE` | `config/voice-models.json` | `services/voice/app/modelconfig.py` |
+| `VOICE_ADMIN_TOKEN` | пусто запись выключена | voice + api (пробрасывает свой) |
+
+Сверх `.env` — файлы выбора моделей из админки (ADR-012): `config/llm.json` и
+`config/voice-models.json` (voice принимает их через `PUT /api/v1/config/models`).
+Старшинство в обоих сервисах: **переменная окружения > файл > дефолт кода** —
+admin-правка не должна тихо переписывать то, что задано в составе деплоя.
+Применение — перезапуском сервиса (модель держится в памяти процесса; voice
+целиком влезает в лимит 8 GiB, вторая модель рядом не встанет). Секреты в эти
+файлы не пишутся: `LLM_API_KEY` — только окружение.
+
+Админ-контур (вкладка «Система»): `GET /api/v1/admin/runtime` — что подключено
+(LLM-эндпоинт/модель/thinking, провайдеры и модели голоса, `loaded`/`device`,
+чего не хватает на диске, чем закреплено каждое значение: env | file | default);
+`PUT /api/v1/admin/models` — выбор (LLM пишет файл, голоса проксируются в voice
+с `X-Admin-Token`). Недоступный voice в сводке — строка `{error}` в своём блоке,
+а не 502 на всю панель.
 
 ## 7. Хранилище
 

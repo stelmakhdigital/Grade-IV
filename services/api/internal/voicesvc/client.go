@@ -155,6 +155,60 @@ func (c *Client) NewVADStream(onEvent func(VADEvent)) *VADStream {
 	return NewVADStream(c.baseURL, onEvent)
 }
 
+// ConfigModels — GET /api/v1/config/models voice: что подключено, что можно
+// выбрать, что реально лежит на диске и чем значение закреплено (env/file).
+// Отдаём как есть: форма панели — дело frontend, дублировать схему в Go — ещё
+// одно место, где модели могут разойтись.
+func (c *Client) ConfigModels(ctx context.Context) (map[string]any, error) {
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/config/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("voice /config/models: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("voice /config/models: HTTP %d", resp.StatusCode)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("voice /config/models: %w", err)
+	}
+	return out, nil
+}
+
+// PutConfigModels — PUT /api/v1/config/models с токеном админ-контура voice.
+// Код ответа и тело отдаём вызывающему: 400 от voice («нет такой модели») — это
+// ответ админу, а не внутренняя ошибка api.
+func (c *Client) PutConfigModels(ctx context.Context, payload any, token string) (int, map[string]any, error) {
+	ctx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+"/api/v1/config/models", bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Admin-Token", token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("voice /config/models: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	out := map[string]any{}
+	_ = json.Unmarshal(raw, &out)
+	return resp.StatusCode, out, nil
+}
+
 // Healthy — GET /api/v1/health (health-check).
 func (c *Client) Healthy(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)

@@ -38,6 +38,14 @@ _VOICE_ROOT = Path(__file__).resolve().parent.parent  # services/voice
 DEFAULT_MODEL_DIR = _VOICE_ROOT / "models"
 
 
+def weights_for(model_id: str = MODEL_ID) -> list[Path]:
+    """Файл весов TTS: TTS_MODEL_PATH точный, иначе TTS_MODEL_DIR/silero-tts-<id>.pt."""
+    exact = os.getenv("TTS_MODEL_PATH")
+    if exact:
+        return [Path(exact)]
+    return [Path(os.getenv("TTS_MODEL_DIR", str(DEFAULT_MODEL_DIR))) / f"silero-tts-{model_id}.pt"]
+
+
 class TTSProviderError(RuntimeError):
     """Ошибка загрузки/синтеза TTS (эндпоинт отвечает 500 {code,message})."""
 
@@ -50,9 +58,7 @@ class SileroTTS:
     def __init__(self, model_id: str = MODEL_ID, default_speaker: str = "ru_01") -> None:
         self._model_id = model_id
         self._default_speaker = default_speaker
-        self._model_path = Path(os.getenv("TTS_MODEL_PATH", "")) if os.getenv("TTS_MODEL_PATH") else (
-            Path(os.getenv("TTS_MODEL_DIR", str(DEFAULT_MODEL_DIR))) / f"silero-tts-{model_id}.pt"
-        )
+        self._model_path = weights_for(model_id)[0]
         self._model = None
         self._lock = threading.Lock()
 

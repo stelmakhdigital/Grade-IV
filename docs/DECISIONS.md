@@ -119,3 +119,32 @@ multipart) даёт задержку в длину всей реплики и н
 `services/api/internal/httpapi/stt_stream.go:onSTTStreamEvent`,
 `services/frontend/src/hooks/useVoiceSession.ts:bumpSpeech`,
 `services/voice/tests/test_stt_stream.py::test_partial_throttles_to_its_own_cost`.
+
+## ADR-012 — настройки моделей: файл + перезапуск, а не hot-swap и не БД
+
+Модель (LLM, STT, TTS) выбиралась только переменными окружения: «какая модель
+сейчас» выяснялась чтением .env и логов, а «voice молчит» из-за нескачанных
+весов выглядело как «интервьюер не отвечает». Первый эскиз панели обещал
+«применить сейчас» — это было бы враньём: gigaam v3 держит ~8 ГБ в памяти,
+вторая модель рядом не влезает (лимит контейнера voice 8 GiB), плюс под ногами
+живой WS-стрим интервьюера.
+
+Решение: вкладка «Система» в админке. Читает `GET /api/v1/admin/runtime`
+(requireAdmin): блоки llm / voice / sandbox, voice-часть — прокси
+`GET /api/v1/config/models` (провайдер, модель, `device`, `loaded`, спикеры,
+каталог весов с диска, чем закреплено каждое значение). Недоступный voice — не
+502 на всю панель, а `{error}` в своём блоке: видно, чего не хватает. Пишет
+`PUT /api/v1/admin/models`: LLM → `config/llm.json`, голоса → прокси в voice с
+`X-Admin-Token: VOICE_ADMIN_TOKEN` (без токена у voice — 503 «запись выключена»,
+без токена у api — «права не выданы»). Ответ всегда `applies: restart`.
+Старшинство и в api, и в voice: **переменная окружения > файл > дефолт кода** —
+иначе admin-правка в файле тихо переписывала бы прод, где модель задана в
+составе деплоя (docker-compose, run-all.sh); UI такие поля показывает
+неотредактированными с подписью «переменная». Секреты в файл настроек не
+пишутся: `LLM_API_KEY` — только окружение, в панели и DOM только факт
+`api_key_set`.
+
+Якоря: `services/api/internal/config/llmfile.go`,
+`services/api/internal/httpapi/admin_runtime.go`,
+`services/voice/app/modelconfig.py`,
+`services/frontend/src/views/admin/system.tsx`, ADR-006 (конфиги — файлы).

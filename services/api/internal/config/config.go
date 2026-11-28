@@ -51,6 +51,9 @@ type Config struct {
 	// SandboxAdminToken — токен /admin/tasks у sandbox (SANDBOX_ADMIN_TOKEN).
 	// Нужен фоновому пополнению пула задач (spec-24); пусто — пополнение выключено.
 	SandboxAdminToken string
+	// VoiceAdminToken — токен /api/v1/config/models у voice (VOICE_ADMIN_TOKEN).
+	// Без него панель читает voice, но не меняет его модели.
+	VoiceAdminToken string
 	// SandboxTasksMin — сколько задач каждого (стека, грейда) должно быть в пуле
 	// хотя бы (SANDBOX_TASKS_MIN, def 4).
 	SandboxTasksMin int
@@ -132,20 +135,23 @@ func isProdEnv(env string) bool {
 // Load читает окружение и валидирует минимум.
 func Load() (*Config, error) {
 	c := &Config{
-		Addr:                  getEnv("ADDR", ":8000"),
-		DatabaseURL:           getEnv("DATABASE_URL", "sqlite:///./data/grade.db"),
-		JWTSecret:             getEnv("JWT_SECRET", DevInsecureSecret),
-		Env:                   strings.ToLower(strings.TrimSpace(getEnv("APP_ENV", "dev"))),
-		JWTExpiryHours:        getEnvInt("JWT_EXPIRY_HOURS", 168),
-		PauseTimeoutS:         getEnvInt("SESSION_PAUSE_TIMEOUT_S", 1800),
-		SessionLimitS:         sessionLimitFromEnv(),
-		VoiceURL:              getEnv("VOICE_URL", "http://localhost:8100"),
-		LLMBaseURL:            getEnv("LLM_BASE_URL", "http://localhost:8300/v1"),
-		LLMModel:              os.Getenv("LLM_MODEL"), // пусто → авто по /models
-		LLMAPIKey:             os.Getenv("LLM_API_KEY"),
-		SandboxURL:            getEnv("SANDBOX_URL", "http://localhost:8200"),
-		LiveCodeSeed:          int64(getEnvInt("LIVECODE_TASK_SEED", 0)),
-		SandboxAdminToken:     os.Getenv("SANDBOX_ADMIN_TOKEN"),
+		Addr:              getEnv("ADDR", ":8000"),
+		DatabaseURL:       getEnv("DATABASE_URL", "sqlite:///./data/grade.db"),
+		JWTSecret:         getEnv("JWT_SECRET", DevInsecureSecret),
+		Env:               strings.ToLower(strings.TrimSpace(getEnv("APP_ENV", "dev"))),
+		JWTExpiryHours:    getEnvInt("JWT_EXPIRY_HOURS", 168),
+		PauseTimeoutS:     getEnvInt("SESSION_PAUSE_TIMEOUT_S", 1800),
+		SessionLimitS:     sessionLimitFromEnv(),
+		VoiceURL:          getEnv("VOICE_URL", "http://localhost:8100"),
+		LLMBaseURL:        getEnv("LLM_BASE_URL", "http://localhost:8300/v1"),
+		LLMModel:          os.Getenv("LLM_MODEL"), // пусто → авто по /models
+		LLMAPIKey:         os.Getenv("LLM_API_KEY"),
+		SandboxURL:        getEnv("SANDBOX_URL", "http://localhost:8200"),
+		LiveCodeSeed:      int64(getEnvInt("LIVECODE_TASK_SEED", 0)),
+		SandboxAdminToken: os.Getenv("SANDBOX_ADMIN_TOKEN"),
+		// VoiceAdminToken — токен записи настроек voice (VOICE_ADMIN_TOKEN).
+		// Без него admin-панель читает voice, но не меняет его модели.
+		VoiceAdminToken:       os.Getenv("VOICE_ADMIN_TOKEN"),
 		MetricsUser:           getEnv("METRICS_USER", "prometheus"),
 		MetricsPassword:       os.Getenv("METRICS_PASSWORD"),
 		SandboxTasksMin:       getEnvInt("SANDBOX_TASKS_MIN", 4),
@@ -165,6 +171,10 @@ func Load() (*Config, error) {
 		LLMMockResponse:       getEnv("LLM_MOCK_RESPONSE", ""),
 		LLMMockTokensPerS:     getEnvFloat("LLM_MOCK_TOKENS_PER_S", 0),
 		ResumeDir:             getEnv("RESUME_DIR", "./data/resumes"),
+	}
+	// Файл переопределения LLM (config/llm.json): то, что не задано окружением.
+	if err := applyLLMFile(c); err != nil {
+		return nil, fmt.Errorf("config/llm.json: %w", err)
 	}
 	if c.JWTExpiryHours <= 0 {
 		return nil, fmt.Errorf("JWT_EXPIRY_HOURS должен быть > 0 (получено %d)", c.JWTExpiryHours)
