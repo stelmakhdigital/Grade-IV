@@ -7,7 +7,6 @@
  */
 import { useAuth } from '../auth';
 import { useHashQuery } from '../hooks/useHashQuery';
-import { ThemeToggle } from '../ThemeToggle';
 import { ADMIN_TABS, AdminTabs, type AdminTab } from './admin/tabs';
 
 export function AdminView() {
@@ -41,7 +40,9 @@ export function AdminView() {
           <a className="btn ghost" href="#/">
             В кабинет
           </a>
-          <ThemeToggle />
+          <a className="btn ghost" href="#/settings">
+            Настройки
+          </a>
           <button type="button" className="btn ghost" onClick={logout}>
             Выйти
           </button>

@@ -35,7 +35,7 @@ import {
   type TTSVoice,
 } from '../api';
 import { useAuth } from '../auth';
-import { ThemeToggle } from '../ThemeToggle';
+import { prefProfileId, prefSpeaker, setPrefProfileId, setPrefSpeaker } from '../prefs';
 import { ConfirmDialog, type AskConfirm } from '../confirm';
 import { useDialog } from '../hooks/useDialog';
 import { useHashQuery } from '../hooks/useHashQuery';
@@ -229,8 +229,11 @@ export function CabinetView() {
       .then((p) => {
         if (cancelled) return;
         setProfiles(p);
+        // Сохранённый выбор человека старше дефолта реестра, но только пока
+        // профиль не убрали из списка.
+        const saved = p.find((x) => x.id === prefProfileId());
         const def = p.find((x) => x.tone === 'balanced' && x.difficulty === 'standard');
-        setProfileId(def?.id ?? p[0]?.id);
+        setProfileId(saved?.id ?? def?.id ?? p[0]?.id);
       })
       .catch(() => {
         if (!cancelled) setProfiles([]);
@@ -246,7 +249,9 @@ export function CabinetView() {
         if (cancelled) return;
         setTtsVoices(reg.voices ?? []);
         setTtsSpeakerDefault(reg.default ?? '');
-        setTtsSpeaker(reg.default || (reg.voices?.[0]?.speaker ?? ''));
+        const saved = prefSpeaker();
+        const known = (reg.voices ?? []).some((x) => x.speaker === saved);
+        setTtsSpeaker(known ? saved : reg.default || (reg.voices?.[0]?.speaker ?? ''));
       })
       .catch(() => {
         if (!cancelled) setTtsVoices([]);
@@ -395,7 +400,9 @@ export function CabinetView() {
               Админ
             </a>
           )}
-          <ThemeToggle />
+          <a className="btn ghost" href="#/settings" data-testid="settings-nav">
+            Настройки
+          </a>
           <button type="button" className="btn ghost" onClick={logout}>
             Выйти
           </button>
@@ -439,7 +446,11 @@ export function CabinetView() {
                 id="profile-select"
                 aria-describedby="profile-hint"
                 value={profileId ?? ''}
-                onChange={(e) => setProfileId(Number(e.target.value))}
+                onChange={(e) => {
+                  const id = Number(e.target.value);
+                  setProfileId(id);
+                  setPrefProfileId(id);
+                }}
               >
                 {profiles.map((p) => (
                   <option key={p.id} value={p.id} title={p.description ?? ''}>
@@ -462,7 +473,14 @@ export function CabinetView() {
           {ttsVoices.length > 0 && (
             <label className="field voice-field">
               <span>Голос интервьюера</span>
-              <select value={ttsSpeaker} onChange={(e) => setTtsSpeaker(e.target.value)} data-testid="tts-voice-select">
+              <select
+                value={ttsSpeaker}
+                onChange={(e) => {
+                  setTtsSpeaker(e.target.value);
+                  setPrefSpeaker(e.target.value);
+                }}
+                data-testid="tts-voice-select"
+              >
                 {ttsVoices.map((v) => (
                   <option key={v.id} value={v.speaker}>
                     {v.name}{v.speaker === ttsSpeakerDefault ? ' (по умолчанию)' : ''}

@@ -351,7 +351,8 @@ p {
 }
 
 .field input,
-.field select {
+.field select,
+.settings-line select {
   width: 100%;
   font: inherit;
   color: var(--text-1);
@@ -2180,4 +2181,58 @@ a:focus-visible {
 .theme-btn.active {
   background: var(--ink-3);
   color: var(--text-1);
+}
+
+/* ------------------------------------------------------------- «Настройки»
+   Строчная разметка (ключ | контрол | подпись), а не форма: элементов мало, и
+   у каждого своя природа — тема применяется сразу, голос и характер копятся на
+   следующее интервью, стенд правится перезапуском. */
+.settings .card {
+  margin-bottom: var(--s-4);
+}
+.settings-line {
+  display: grid;
+  grid-template-columns: minmax(0, 190px) minmax(0, 1fr);
+  gap: var(--s-2) var(--s-4);
+  align-items: center;
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+.settings-line:last-of-type {
+  border-bottom: 0;
+}
+.settings-key {
+  color: var(--text-2);
+}
+.settings-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
+  color: var(--text-1);
+}
+.settings-note {
+  grid-column: 2;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+}
+.settings-line .select {
+  max-width: 420px;
+}
+/* Переключатель темы — по размеру содержимого, а не вся строка. */
+.settings-line .theme-toggle {
+  justify-self: start;
+}
+.settings-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-4);
+  margin: var(--s-4) 0 0;
+}
+@media (max-width: 720px) {
+  .settings-line {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-2);
+  }
+  .settings-note {
+    grid-column: 1;
+  }
 }

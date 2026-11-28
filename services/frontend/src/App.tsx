@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from './auth';
 import { CabinetView } from './views/CabinetView';
 import { LoginView } from './views/LoginView';
 import { SessionView } from './views/SessionView';
+import { SettingsView } from './views/SettingsView';
 import { AdminView } from './views/AdminView';
 
 // Публичная страница отчёта — ленивая (report-чанк с ReportBody не попадает
@@ -51,12 +52,19 @@ function isAdminRoute(hash: string): boolean {
   return p === '#/admin' || p === '#/admin/';
 }
 
+// #/settings — настройки человека (тема, голос, характер интервьюера).
+function isSettingsRoute(hash: string): boolean {
+  const p = pathOf(hash);
+  return p === '#/settings' || p === '#/settings/';
+}
+
 function Routes() {
   const { status, user } = useAuth();
   const hash = useHashRoute();
   const sessionId = parseSessionId(hash);
   const shareToken = parseShareToken(hash);
   const admin = isAdminRoute(hash);
+  const settings = isSettingsRoute(hash);
 
   // Вкладка браузера должна различать экраны (ui-review 2026-11-27).
   useEffect(() => {
@@ -67,10 +75,12 @@ function Routes() {
           ? `Интервью #${sessionId} — Грейд`
           : admin
             ? 'Админ — Грейд'
-            : status === 'guest'
-              ? 'Вход — Грейд'
-              : 'Грейд';
-  }, [hash, status, sessionId, shareToken, admin]);
+            : settings
+              ? 'Настройки — Грейд'
+              : status === 'guest'
+                ? 'Вход — Грейд'
+                : 'Грейд';
+  }, [hash, status, sessionId, shareToken, admin, settings]);
 
   if (status === 'loading') {
     return (
@@ -109,6 +119,9 @@ function Routes() {
   }
   if (sessionId !== null) {
     return <SessionView id={sessionId} />;
+  }
+  if (settings) {
+    return <SettingsView />;
   }
   return <CabinetView />;
 }

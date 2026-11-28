@@ -11,9 +11,14 @@ const OPTIONS: { value: Theme; label: string }[] = [
   { value: 'light', label: 'Светлая' },
 ];
 
-export function ThemeToggle() {
+export function ThemeToggle({ onChange }: { onChange?: (t: Theme) => void } = {}) {
   const [theme, setLocal] = useState<Theme>(currentTheme());
   const auto = storedTheme() === null;
+  const pick = (t: Theme | null) => {
+    const next = setTheme(t);
+    setLocal(next);
+    onChange?.(next);
+  };
 
   return (
     <div className="theme-toggle" role="group" aria-label="Тема интерфейса">
@@ -28,7 +33,7 @@ export function ThemeToggle() {
               ? 'Светлая тема (при ярком экране и в проекторе)'
               : 'Тёмная тема'
           }
-          onClick={() => setLocal(setTheme(o.value))}
+          onClick={() => pick(o.value)}
         >
           {o.label}
         </button>
@@ -38,7 +43,7 @@ export function ThemeToggle() {
           type="button"
           className="theme-btn ghost"
           title="Сбросить выбор и следовать системе"
-          onClick={() => setLocal(setTheme(null))}
+          onClick={() => pick(null)}
         >
           Авто
         </button>
