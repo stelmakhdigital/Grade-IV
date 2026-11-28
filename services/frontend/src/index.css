@@ -2236,3 +2236,32 @@ a:focus-visible {
     grid-column: 1;
   }
 }
+
+/* Строка настроек: контрол с подписью источника в одну линию. */
+.settings-control {
+  display: flex;
+  gap: var(--s-3);
+  align-items: center;
+  min-width: 0;
+}
+.settings-control .input,
+.settings-control .select {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 420px;
+}
+/* Что файл уже просит, а сервис ещё не применил. */
+.settings-pending {
+  margin: 0 0 var(--s-4);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--line-warn);
+  border-left-width: 3px;
+  border-radius: var(--r-tag);
+  background: var(--surface-warn);
+  color: var(--text-1);
+  font-size: var(--fs-meta);
+}
+.settings-pending code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}

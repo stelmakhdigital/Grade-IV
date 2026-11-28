@@ -92,6 +92,8 @@ export type ModelOption = { name: string; present: boolean; missing: string[] };
 /** Блок voice в GET /admin/runtime (прямая проксикация /config/models). */
 export type VoiceRuntime = {
   error?: string;
+  /** Куда api ходит за голосом — тоже настройка (VOICE_URL / app.json). */
+  address?: SettingSource;
   path?: string;
   writable?: boolean;
   applies?: string;
@@ -140,6 +142,59 @@ export type ModelsPutResult = {
 
 export function adminRuntime(): Promise<RuntimeView> {
   return request<RuntimeView>('/admin/runtime', { auth: true });
+}
+
+/** Что произойдёт со значением после сохранения. */
+export type PendingItem = {
+  key: string;
+  status: 'needs_restart' | 'shadowed_by_env';
+  env: string;
+  note: string;
+};
+
+/** Ответ GET /api/v1/settings — всё, что настраивается, с источниками. */
+export type SettingsView = {
+  app_env: string;
+  applies: string;
+  applies_note: string;
+  writable: boolean;
+  paths: Record<string, string>;
+  llm: {
+    base_url: SettingSource;
+    model: SettingSource;
+    enable_thinking: SettingSource;
+    mock: boolean;
+    api_key_set: boolean;
+    config_path: string;
+  };
+  voice: VoiceRuntime;
+  sandbox: { url: SettingSource; admin_token_set: boolean; tasks_refill_s: number; tasks_min: number };
+  timing: Record<string, SettingSource>;
+  install: Record<string, string | boolean>;
+  pending: PendingItem[];
+};
+
+export type SettingsPut = {
+  llm?: { base_url?: string; model?: string; enable_thinking?: boolean };
+  voice_url?: string;
+  sandbox_url?: string;
+  timing?: Record<string, number>;
+  stt?: { provider: string; model: string };
+  tts?: { provider: string; speaker: string };
+};
+
+export type SettingsPutResult = {
+  applied: Record<string, { saved?: boolean; applies?: string; status?: number; error?: string; note?: string; path?: string }>;
+  applies: string;
+  pending: PendingItem[];
+};
+
+export function getSettings(): Promise<SettingsView> {
+  return request<SettingsView>('/settings', { auth: true });
+}
+
+export function putSettings(payload: SettingsPut): Promise<SettingsPutResult> {
+  return request<SettingsPutResult>('/settings', { method: 'PUT', body: payload, auth: true });
 }
 
 export function adminPutModels(payload: ModelsPut): Promise<ModelsPutResult> {
