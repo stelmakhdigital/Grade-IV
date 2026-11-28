@@ -146,7 +146,12 @@ export function SettingsView() {
       setVoiceUrl(s(st.voice.address));
       setSandboxUrl(s(st.sandbox.url));
       setStt({ provider: st.voice.current?.stt?.provider ?? '', model: st.voice.current?.stt?.model ?? '' });
-      setTts({ provider: st.voice.current?.tts?.provider ?? '', speaker: st.voice.current?.tts?.loaded ? (st.voice.current.tts.speakers?.[0] ?? '') : '' });
+      // Спикер — тот, что применен (voice отдаёт его в sources), а не первый из
+      // списка: иначе первое же «Сохранить речь» молча меняет голос интервьюера.
+      setTts({
+        provider: st.voice.current?.tts?.provider ?? '',
+        speaker: s(st.voice.sources?.tts?.speaker) || (st.voice.current?.tts?.speakers?.[0] ?? ''),
+      });
       setTiming(Object.fromEntries(Object.entries(st.timing).map(([k, v]) => [k, s(v, '0')])));
     } catch (e) {
       setError(errText(e));

@@ -177,6 +177,21 @@ func TestSettings_алиас_админки_жив(t *testing.T) {
 		t.Fatalf("алиас: %d %v", code, body)
 	}
 	if _, ok := body["llm"]; !ok {
-		t.Fatalf("алис не отдает ту же схему: %v", body)
+		t.Fatalf("алиас не отдаёт ту же схему: %v", body)
+	}
+}
+
+func TestSettings_лимит_сессии_по_грейду_не_минус_один(t *testing.T) {
+	t.Setenv("APP_CONFIG_FILE", filepath.Join(t.TempDir(), "app.json"))
+	t.Setenv("SESSION_LIMIT_S", "")
+	ts := newTestServer(t, nil) // в коде «не задано» = -1
+	auth := adminAuth(t, ts, "st-limit@example.com")
+	body := settingsGet(t, ts.URL, auth)
+	timing, _ := body["timing"].(map[string]any)
+	limit, _ := timing["session_limit_s"].(map[string]any)
+	// -1 в поле означало бы «интервью длится минус секунду»; для человека это 0
+	// и подпись «по грейду».
+	if limit["value"] != float64(0) {
+		t.Fatalf("session_limit_s: %v, want 0", limit["value"])
 	}
 }

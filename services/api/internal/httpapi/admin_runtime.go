@@ -33,6 +33,16 @@ type settingSource struct {
 	Env    string `json:"env"`
 }
 
+// sessionLimitShown — лимит сессии для показа и сравнения. В коде «не задано»
+// живёт как -1 (0 означало бы «ноль секунд»), но в интерфейсе это читается как
+// испорченное значение: показываем 0 и подписываем «по грейду».
+func (s *Server) sessionLimitShown() int {
+	if s.cfg.SessionLimitS <= 0 {
+		return 0
+	}
+	return s.cfg.SessionLimitS
+}
+
 func strSetting(envVar, fileVal, loaded string) settingSource {
 	src := "default"
 	switch {
@@ -146,7 +156,7 @@ func (s *Server) collectPending(f config.AppFile) []map[string]any {
 	add("timing.vad_rms_threshold", "VAD_RMS_THRESHOLD", f.Timing.VADRMS, s.cfg.VADRMSThreshold)
 	add("timing.vad_prestt_silence_ms", "VAD_PRESTT_SILENCE_MS", f.Timing.VADPreSilenceMS, s.cfg.VADPreSilenceMS)
 	add("timing.session_pause_timeout_s", "SESSION_PAUSE_TIMEOUT_S", f.Timing.PauseTimeoutS, s.cfg.PauseTimeoutS)
-	add("timing.session_limit_s", "SESSION_LIMIT_S", f.Timing.SessionLimitS, s.cfg.SessionLimitS)
+	add("timing.session_limit_s", "SESSION_LIMIT_S", f.Timing.SessionLimitS, s.sessionLimitShown())
 	return out
 }
 
@@ -184,7 +194,7 @@ func (s *Server) buildSettings(r *http.Request, f config.AppFile) settingsView {
 			"vad_rms_threshold":       intSetting("VAD_RMS_THRESHOLD", f.Timing.VADRMS, s.cfg.VADRMSThreshold),
 			"vad_prestt_silence_ms":   intSetting("VAD_PRESTT_SILENCE_MS", f.Timing.VADPreSilenceMS, s.cfg.VADPreSilenceMS),
 			"session_pause_timeout_s": intSetting("SESSION_PAUSE_TIMEOUT_S", f.Timing.PauseTimeoutS, s.cfg.PauseTimeoutS),
-			"session_limit_s":         intSetting("SESSION_LIMIT_S", f.Timing.SessionLimitS, s.cfg.SessionLimitS),
+			"session_limit_s":         intSetting("SESSION_LIMIT_S", f.Timing.SessionLimitS, s.sessionLimitShown()),
 		},
 		// install — то, что настраивается снаружи. Показываем эффективные
 		// значения и факты наличия секретов: человек видит, где что лежит, и не
