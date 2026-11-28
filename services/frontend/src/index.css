@@ -516,7 +516,7 @@ p {
 
 /* пре-бриф перед стартом */
 .start-brief {
-  margin: 0 0 10px;
+  margin: 0;
 }
 
 @media (max-width: 720px) {
@@ -549,21 +549,7 @@ p {
   font-weight: 600;
 }
 
-.start-form {
-  display: flex;
-  align-items: flex-end;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.start-form .field {
-  margin-bottom: 0;
-  min-width: 190px;
-}
-
-.start-form .btn {
-  margin-bottom: 1px;
-}
+/* Ряд контролов «новое интервью» — сеткой, см. .start-form в конце файла. */
 
 /* «Новое интервью» (фидбек 2026-11-22): кнопка «Резюме» — той же ширины, что
    селекты рядом (поле подписано сверху, как остальные). */
@@ -571,13 +557,116 @@ p {
   width: 100%;
 }
 
-/* Служебный текст — своими строками на всю ширину, а не втиснутый в ряд
-   контролов (иначе ряд рвётся, и высоты/базовые линии не сходятся). */
-.resume-state,
-.start-brief,
-.start-form .form-error {
-  flex: 1 1 100%;
+/* Ряд «новое интервью»: сетка равных колонок, а не flex-wrap c flex-end.
+   В flex-end поле с пояснением под контролем становилось выше соседей, и его
+   контроль уезжал на 45 px вверх (замер 1440: select 227 против 272/274); на
+   768 колонки расходились 327 против 469. В сетке ячейка — «подпись → контроль
+   → пояснение»: подписи по одной строке, значит контроли на одной линии,
+   сколько бы текста ни было в пояснении. --start-cols считает колонки из
+   разметки (списки профилей и голосов могут быть пустыми). */
+.start-form {
+  display: grid;
+  grid-template-columns: repeat(var(--start-cols, 4), minmax(0, 1fr));
+  gap: var(--s-4);
+  align-items: start;
+  /* Форму не режем по 860 px: карточка «Новое интервью» в широком кабинете
+     растёт до 1300 px, и ограниченной форме не хватало 440 px — правый край
+     карточки пустовал. Ширину держит колонка кабинета, колонки внутри — сетка. */
+  max-width: none;
+}
+
+.start-form .field {
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+/* Кнопка стоит верхом на линии контролей: строка подписи поля со своим
+   отступом — 26 px в замере (14 px шрифта при нормальном line-height + 4 px). */
+.start-form > .btn {
+  margin-top: 26px;
+}
+
+.start-form > .start-status,
+.start-form > .start-brief,
+.start-form > .form-error {
+  grid-column: 1 / -1;
+}
+
+/* 1024 ещё живёт в четыре колонки (по 216 px на контроль), в две — только ниже:
+   раньше ряд ломался на 1100, и голос уезжал один во вторую строку. */
+@media (max-width: 900px) {
+  .start-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* Последнее поле — на обе колонки, иначе после переноса слева от него
+     остаётся пустая клетка и ряд выглядит надорванным. */
+  .start-form .voice-field {
+    grid-column: 1 / -1;
+  }
+  /* Запуск — действие, а не четвёртое поле: на планшете и телефоне он идёт
+     отдельной строкой на всю ширину, под большим пальцем. */
+  .start-form > .btn {
+    grid-column: 1 / -1;
+    width: 100%;
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .start-form {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-3) 0;
+  }
+}
+
+/* Статус резюме — один блок вместо трёх серых абзацев подряд: роль фактом,
+   база/цель/стек метаданными, причина тихой строкой. */
+.start-status {
+  display: grid;
+  gap: 6px;
+}
+
+.start-status__facts {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   margin: 0;
+}
+
+.start-status__label {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.start-status__title {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.start-status__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: var(--fs-meta);
+  color: var(--text-2);
+}
+
+/* Метка факта тише значения: «база middle» читается парой, а не кашей. */
+.start-status__meta em {
+  font-style: normal;
+  color: var(--text-3);
+}
+
+.start-status__reason,
+.resume-state,
+.start-brief {
+  margin: 0;
+  max-width: 92ch;
 }
 
 .sessions-table {
@@ -1842,20 +1931,7 @@ a:focus-visible {
    380 px от правого края страницы, а ниже короткого «прогресса» висела
    пустота. Расстояния между карточками держит .card { margin-top }. */
 
-.start-form {
-  /* Форму больше не режем по 860 px: карточка «Новое интервью» в широком
-     кабинете растёт до 1300 px, и ограниченной форме не хватало 440 px —
-     правый край карточки пустовал. Ширину держит колонка кабинета. */
-  max-width: none;
-}
 
-/* Селекты делят строку пополам и растут вместе с карточкой; без этого
-   каждый держал ширину своего содержимого (замер: 581 и 317 px), и справа
-   оставалась дыра. */
-.start-form .field {
-  flex: 1 1 260px;
-  min-width: 0;
-}
 
 /* Отчёт — длинное чтение: колонка уже, чем экран, строка не распадается. */
 .report {

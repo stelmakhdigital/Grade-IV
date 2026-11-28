@@ -152,8 +152,10 @@ describe('CabinetView (WP-7)', () => {
     });
     const line = await screen.findByTestId('resume-guess');
     expect(line).toHaveTextContent('Go-разработчик');
-    expect(line).toHaveTextContent('middle → цель senior');
-    expect(line).toHaveTextContent('go,python');
+    // Метки фактов читаемы, стек — по-человечески, а не «go,python».
+    expect(line).toHaveTextContent('база middle');
+    expect(line).toHaveTextContent('цель senior');
+    expect(line).toHaveTextContent('стек Go, Python');
     expect(line).toHaveTextContent('5 лет Go на бэкенде');
   });
 

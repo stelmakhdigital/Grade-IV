@@ -7,7 +7,14 @@
  * Время интервью — метрика (длительность в истории), а не валюта: баланса
  * минут в кабинете больше нет.
  */
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+} from 'react';
 import {
   createSession,
   deleteResume,
@@ -54,6 +61,15 @@ function pausedLeftMs(s: Session, now: number): number | null {
 
 /** Пустое состояние резюме (пока не пришли данные). */
 const NO_RESUME: ResumeInfo = { about: '', file_name: '', text_chars: 0 };
+
+/** «go,python» -> «Go, Python»: список языков в строке подбора. */
+function stackNames(stacks: string): string {
+  return stacks
+    .split(',')
+    .filter((s) => s !== '')
+    .map((s) => s[0].toUpperCase() + s.slice(1))
+    .join(', ');
+}
 
 /** Страница истории (ui-review 2026-11-27). */
 const HIST_PAGE = 20;
@@ -121,6 +137,9 @@ export function CabinetView() {
     profiles.find((p) => p.tone === 'balanced' && p.difficulty === 'standard') ??
     null;
   const hasResume = resume.file_name !== '' || resume.about !== '';
+  // Колонки ряда «новое интервью»: 3 поля + кнопка. Списки профилей и голосов
+  // могут прийти пустыми — тогда колонок меньше, и ряд не должен рваться.
+  const startCols = 2 + (profiles.length > 0 ? 1 : 0) + (ttsVoices.length > 0 ? 1 : 0);
   // «Сбросить» резюме необратимо и раньше срабатывало с одного клика.
   const [ask, setAsk] = useState<AskConfirm | null>(null);
   const [resumeAbout, setResumeAbout] = useState('');
@@ -382,10 +401,14 @@ export function CabinetView() {
       </header>
       <section className="card" aria-labelledby="new-interview">
         <h2 id="new-interview">Новое интервью</h2>
-        <form className="start-form" onSubmit={onStart}>
-          {/* Фидбек 2026-11-22: все контролы ряда подписаны сверху и выровнены
-              по нижней линии (`.start-form` — flex, align-items: flex-end),
-              статус резюме / ошибка / бриф — отдельными строками. */}
+        <form
+          className="start-form"
+          style={{ '--start-cols': startCols } as CSSProperties}
+          onSubmit={onStart}
+        >
+          {/* Контролы ряда подписаны сверху и стоят на одной линии (сетка
+              равных колонок, `.start-form`); статус, ошибка и бриф — своими
+              строками на всю ширину. */}
           <div className="field resume-field" data-testid="resume-row">
             <span>Резюме</span>
             {/* Кнопка называет состояние, а не только действие: «Загрузить…»
@@ -393,6 +416,15 @@ export function CabinetView() {
             <button type="button" className="btn" onClick={openResume} data-testid="resume-open">
               {hasResume ? 'Резюме: изменить' : 'Добавить резюме'}
             </button>
+            {/* Состояние относится к этому полю и живёт под ним: пояснение под
+                контролем ряд не ломает — в этом и смысл сетки `.start-form`. */}
+            <p className="resume-state small muted" data-testid="resume-indicator">
+              {resume.file_name !== ''
+                ? `приложен файл ${resume.file_name} — ${resume.text_chars} символов текста`
+                : resume.about !== ''
+                  ? `текст заполнен (${resume.about.length} символов)`
+                  : 'не заполнено: по нему подберём роль и сложность'}
+            </p>
           </div>
           {profiles.length > 0 && (
             <div className="field">
@@ -426,7 +458,7 @@ export function CabinetView() {
             </div>
           )}
           {ttsVoices.length > 0 && (
-            <label className="field">
+            <label className="field voice-field">
               <span>Голос интервьюера</span>
               <select value={ttsSpeaker} onChange={(e) => setTtsSpeaker(e.target.value)} data-testid="tts-voice-select">
                 {ttsVoices.map((v) => (
@@ -450,32 +482,45 @@ export function CabinetView() {
               {startError}
             </p>
           )}
-          <p className="resume-state small" data-testid="resume-indicator">
-            {resume.file_name !== ''
-              ? `приложен файл ${resume.file_name} — ${resume.text_chars} символов текста`
-              : resume.about !== ''
-                ? `текст резюме заполнен (${resume.about.length} символов)`
-                : 'Резюме не заполнено: по нему подберём роль и сложность'}
-          </p>
-          {/* Что ИИ вычитал из резюме (ui-review 2026-11-28): без этой строки
-              резюме сохранялось молча, и на интервью кандидат шёл вслепую. */}
-          {hasResume &&
-            (resume.guess ? (
-              <p className="resume-state small" data-testid="resume-guess">
-                По резюме: <b>{resume.guess.title || resume.guess.track_id}</b>
-                {' — '}
-                {resume.guess.grade}
-                {resume.guess.target && resume.guess.target !== resume.guess.grade
-                  ? ` → цель ${resume.guess.target}`
-                  : ''}
-                {resume.guess.stacks ? ` · ${resume.guess.stacks}` : ''}
-                {resume.guess.reason ? ` — ${resume.guess.reason}` : ''}
-              </p>
-            ) : (
-              <p className="resume-state small muted" data-testid="resume-guess">
-                Роль и цель интервью подберём при старте.
-              </p>
-            ))}
+          {/* Что ИИ вычитал из резюме (ui-review 2026-11-28): без этого кандидат
+              идёт на интервью вслепую. Роль — фактом, база/цель/стек —
+              метаданными, причина тихой строкой. */}
+          {hasResume && (
+            <div className="start-status" data-testid="resume-guess">
+              {resume.guess ? (
+                <>
+                  <p className="start-status__facts">
+                    <span className="start-status__label">По резюме</span>
+                    <span className="start-status__title">
+                      {resume.guess.title || resume.guess.track_id}
+                    </span>
+                    <span className="start-status__meta">
+                      {resume.guess.grade && (
+                        <span>
+                          <em>база</em> {resume.guess.grade}
+                        </span>
+                      )}
+                      {resume.guess.target && resume.guess.target !== resume.guess.grade && (
+                        <span>
+                          <em>цель</em> {resume.guess.target}
+                        </span>
+                      )}
+                      {resume.guess.stacks && (
+                        <span>
+                          <em>стек</em> {stackNames(resume.guess.stacks)}
+                        </span>
+                      )}
+                    </span>
+                  </p>
+                  {resume.guess.reason && (
+                    <p className="start-status__reason muted small">{resume.guess.reason}</p>
+                  )}
+                </>
+              ) : (
+                <p className="start-status__reason">Роль и цель интервью подберём при старте.</p>
+              )}
+            </div>
+          )}
           {/* spec-21 (Codility: intro до запуска таймера): короткий бриф —
               что будет на интервью, чтобы старт не был сюрпризом. */}
           <p className="start-brief muted small" data-testid="start-brief">
