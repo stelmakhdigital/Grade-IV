@@ -258,8 +258,8 @@ p {
   font: inherit;
   font-size: var(--fs-meta);
   color: inherit;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--veil-1);
+  border: 1px solid var(--veil-2);
   border-radius: var(--r-ctl);
 }
 
@@ -1531,7 +1531,7 @@ p {
 .criterion-bar {
   height: 6px;
   border-radius: var(--r-tag);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--veil-2);
   overflow: hidden;
   margin: 6px 0;
 }
@@ -1563,7 +1563,7 @@ p {
 .criterion-gap { margin: 6px 0 0; font-size: var(--fs-meta); color: var(--warn); }
 .report-grade-gap p, .report-study-2w ol { font-size: var(--fs-body); }
 .progress-table { width: 100%; border-collapse: collapse; font-size: var(--fs-meta); }
-.progress-table th, .progress-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.progress-table th, .progress-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--veil-2); }
 .progress-table tr.same-stack { background: rgba(122, 162, 247, 0.10); }
 .progress-table .delta { display: inline-block; margin: 1px 4px 1px 0; }
 .progress-table .delta.up { color: var(--ok); }
@@ -1584,7 +1584,7 @@ p {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  border: 3px solid rgba(255, 255, 255, 0.15);
+  border: 3px solid var(--veil-2);
   border-top-color: var(--accent);
   animation: panel-spin 0.8s linear infinite;
 }
@@ -1621,7 +1621,7 @@ a:focus-visible {
   min-width: 34px;
   padding: 3px 8px;
   border-radius: var(--r-ctl);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--veil-2);
   font-size: var(--fs-meta);
   text-align: center;
 }
@@ -1641,7 +1641,7 @@ a:focus-visible {
   margin-left: 6px;
   padding: 1px 6px;
   border-radius: var(--r-tag);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--veil-2);
   font-size: var(--fs-meta);
 }
 .score-chip.good {
@@ -2059,8 +2059,11 @@ a:focus-visible {
 }
 .runtime-control .input:disabled,
 .runtime-control .select:disabled {
-  color: var(--text-3);
-  background: var(--ink-1);
+  /* Значение показано, но не правится: veil вместо второй поверхности — иначе
+     в светлой теме поле выглядело вставленным в рамку. */
+  color: var(--text-2);
+  background: var(--veil-1);
+  border-color: var(--line);
 }
 .runtime-hint,
 .runtime-hint-file {
@@ -2140,4 +2143,41 @@ a:focus-visible {
   .runtime-hint {
     grid-column: 1;
   }
+}
+
+/* --------------------------------------------------- переключатель темы
+   Сегментированный контрол в шапке: активная тема видна без чтения подписи,
+   «Авто» появляется только когда выбор вручную уже сделан (иначе это кнопка
+   «ничего не меняющая»). */
+.theme-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  background: var(--ink-1);
+}
+.theme-btn {
+  font-family: var(--font-ui);
+  font-size: var(--fs-meta);
+  line-height: 1;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: calc(var(--r-ctl) - 2px);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: background-color var(--motion) linear, color var(--motion) linear;
+}
+.theme-btn:hover {
+  color: var(--text-1);
+  background: var(--veil-1);
+}
+.theme-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.theme-btn.active {
+  background: var(--ink-3);
+  color: var(--text-1);
 }

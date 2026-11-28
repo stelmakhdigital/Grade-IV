@@ -35,6 +35,7 @@ import {
   type TTSVoice,
 } from '../api';
 import { useAuth } from '../auth';
+import { ThemeToggle } from '../ThemeToggle';
 import { ConfirmDialog, type AskConfirm } from '../confirm';
 import { useDialog } from '../hooks/useDialog';
 import { useHashQuery } from '../hooks/useHashQuery';
@@ -394,6 +395,7 @@ export function CabinetView() {
               Админ
             </a>
           )}
+          <ThemeToggle />
           <button type="button" className="btn ghost" onClick={logout}>
             Выйти
           </button>

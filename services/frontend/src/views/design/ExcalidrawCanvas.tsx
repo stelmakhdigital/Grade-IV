@@ -13,6 +13,7 @@ import '@excalidraw/excalidraw/index.css';
 import type { WhiteboardState } from '../../api';
 import type { DesignCanvasApi } from './DesignCanvasApi';
 import { blockColor } from './designColors';
+import { currentTheme } from '../../theme';
 
 const Excalidraw = lazy(() =>
   import('@excalidraw/excalidraw').then((m) => ({ default: m.Excalidraw })),
@@ -237,7 +238,10 @@ export function ExcalidrawCanvas({ apiRef, initialState }: ExcalidrawCanvasProps
               pendingRestore.current = null;
             }
           }}
-          theme="dark"
+          /* Тема берётся при монтаже: переключатель — в шапке кабине/админки,
+             на экране интервью его нет, а перекрашивать холст посреди ответа
+             кандидата нечего. */
+          theme={currentTheme()}
           langCode="ru"
         />
       </Suspense>
