@@ -31,6 +31,30 @@ type resumeOut struct {
 	About     string `json:"about"`
 	FileName  string `json:"file_name"`
 	TextChars int    `json:"text_chars"`
+	// Guess — подбор роли и грейда по резюме (resumeGuess); нет — подбор не
+	// считался или ИИ не ответил: роль определится на старте интервью.
+	Guess json.RawMessage `json:"guess,omitempty"`
+}
+
+// resumeGuess — что ИИ понял из резюме: роль, должность, подтверждённый грейд,
+// цель интервью (шаг выше), заявленные языки и короткое обоснование.
+type resumeGuess struct {
+	TrackID string `json:"track_id,omitempty"`
+	Title   string `json:"title,omitempty"`
+	// Grade — базовый грейд (тот, что резюме подтверждает), Target — цель
+	// интервью на шаг выше базы.
+	Grade  string `json:"grade,omitempty"`
+	Target string `json:"target,omitempty"`
+	Stacks string `json:"stacks,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// guessJSON — сохранённый подбор для ответа; пусто или битый JSON — поля нет.
+func guessJSON(raw string) json.RawMessage {
+	if raw == "" || !json.Valid([]byte(raw)) {
+		return nil
+	}
+	return json.RawMessage(raw)
 }
 
 func toResumeOut(r db.Resume) resumeOut {
@@ -45,7 +69,13 @@ func (s *Server) handleGetResume(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "ошибка чтения резюме")
 		return
 	}
-	writeJSON(w, http.StatusOK, toResumeOut(res))
+	out := toResumeOut(res)
+	// Подбор показываем заранее: без него кандидат не видит, что ИИ вычитал из
+	// резюме, и идёт на интервью вслепую (ui-review 2026-11-28).
+	if raw, err := s.users.ResumeGuessGet(r.Context(), userIDFromContext(r.Context())); err == nil {
+		out.Guess = guessJSON(raw)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handlePutResume — PUT /api/v1/me/resume (multipart: поле about + файл resume).
@@ -138,6 +168,10 @@ func (s *Server) handleDeleteResume(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "не удалось сбросить резюме")
 		return
 	}
+	// Сброшено резюме — нечего показывать и про подобранную роль.
+	if err := s.users.ResumeGuessSet(r.Context(), uid, ""); err != nil {
+		s.log.Warn("resume: подбор роли не сброшен", "err", err)
+	}
 	writeJSON(w, http.StatusOK, resumeOut{})
 }
 
@@ -148,7 +182,41 @@ func (s *Server) saveResume(w http.ResponseWriter, ctx context.Context, uid int6
 		writeError(w, http.StatusInternalServerError, "internal", "не удалось сохранить резюме")
 		return
 	}
-	writeJSON(w, http.StatusOK, toResumeOut(res))
+	out := toResumeOut(res)
+	out.Guess = s.storeResumeGuess(ctx, uid, res)
+	writeJSON(w, http.StatusOK, out)
+}
+
+// storeResumeGuess — подбор роли и грейда по резюме тем же расчётом, что на
+// старте интервью, но показанный в кабинете заранее. Считаем на сохранении:
+// резюме обновляют редко, а фоновый расчёт потребовал бы состояния и опроса.
+// shortcut: медленный ИИ задерживает сохранение резюме; станет заметно —
+// вынести в горутину и отдавать статус подбора.
+func (s *Server) storeResumeGuess(ctx context.Context, uid int64, res db.Resume) json.RawMessage {
+	guess := ""
+	if !res.Empty() {
+		p := s.inferRole(ctx, uid)
+		// Пустые Base/Title/Stacks — ИИ молчал или ответил мусором. Врать про
+		// «подобранную роль» не будем: подберёт старт интервью.
+		if p.Base != "" || p.Title != "" || len(p.Stacks) > 0 {
+			g := resumeGuess{TrackID: p.TrackID, Title: p.Title, Grade: string(p.Base),
+				Stacks: joinStacks(p.Stacks), Reason: p.Reason}
+			if t, _ := s.tracks.GetOrDefault(p.TrackID); t != nil {
+				if g.Title == "" {
+					g.Title = t.Title
+				}
+				g.Target = string(targetGrade(p.Base, t.Grades))
+			}
+			if b, err := json.Marshal(g); err == nil {
+				guess = string(b)
+			}
+		}
+	}
+	if err := s.users.ResumeGuessSet(ctx, uid, guess); err != nil {
+		s.log.Warn("resume: подбор роли не сохранён", "err", err)
+		return nil
+	}
+	return guessJSON(guess)
 }
 
 // storeResumeFile — положить файл в cfg.ResumeDir под серверным именем
@@ -240,6 +308,8 @@ type resumeProfile struct {
 	Base    models.Grade
 	Title   string
 	Stacks  []models.Stack
+	// Reason — почему ИИ выбрал эту роль; нужна кабинету, движок интервью её не читает.
+	Reason string
 }
 
 // inferRole — роль, базовый грейд, должность и языки по резюме кандидата (ИИ).
@@ -274,9 +344,10 @@ func (s *Server) inferRole(ctx context.Context, userID int64) resumeProfile {
 	}
 	stacks := cleanStacks(g.Stacks)
 	title := strings.TrimSpace(g.Title)
+	reason := strings.TrimSpace(g.Reason)
 	id := strings.ToLower(strings.TrimSpace(g.TrackID))
 	if id == "" {
-		return resumeProfile{TrackID: models.DefaultTrackID, Base: base, Title: title, Stacks: stacks}
+		return resumeProfile{TrackID: models.DefaultTrackID, Base: base, Title: title, Stacks: stacks, Reason: reason}
 	}
 	if t, _ := s.tracks.Get(id); t != nil {
 		if title == "" {
@@ -284,7 +355,7 @@ func (s *Server) inferRole(ctx context.Context, userID int64) resumeProfile {
 		}
 		s.log.Info("resume: роль по резюме", "track", id, "grade", base,
 			"title", title, "stacks", joinStacks(stacks), "reason", g.Reason)
-		return resumeProfile{TrackID: id, Base: base, Title: title, Stacks: stacks}
+		return resumeProfile{TrackID: id, Base: base, Title: title, Stacks: stacks, Reason: reason}
 	}
 	if g.NewRole != nil {
 		t := *g.NewRole
@@ -297,13 +368,13 @@ func (s *Server) inferRole(ctx context.Context, userID int64) resumeProfile {
 			if title == "" {
 				title = t.Title
 			}
-			return resumeProfile{TrackID: t.ID, Base: base, Title: title, Stacks: stacks}
+			return resumeProfile{TrackID: t.ID, Base: base, Title: title, Stacks: stacks, Reason: reason}
 		} else {
 			s.log.Warn("resume: сгенерированная роль не провалидировалась — backend", "id", t.ID, "err", err)
 		}
 	}
 	s.log.Info("resume: роль не определена — backend", "track_id", id)
-	return resumeProfile{TrackID: models.DefaultTrackID, Base: base, Title: title, Stacks: stacks}
+	return resumeProfile{TrackID: models.DefaultTrackID, Base: base, Title: title, Stacks: stacks, Reason: reason}
 }
 
 // cleanStacks — языки из ответа ИИ в рабочий вид: нижний регистр, только

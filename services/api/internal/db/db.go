@@ -136,6 +136,8 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 			"ALTER TABLE users ADD COLUMN resume_text TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE users ADD COLUMN resume_file TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE users ADD COLUMN resume_path TEXT NOT NULL DEFAULT ''",
+			// Подбор роли по резюме (показывается в кабинете до старта).
+			"ALTER TABLE users ADD COLUMN resume_guess TEXT NOT NULL DEFAULT ''",
 			// Грейд по резюме (ИИ определил по резюме): отчёту и метрике «собесовали на шаг выше».
 			"ALTER TABLE sessions ADD COLUMN base_grade TEXT NOT NULL DEFAULT ''",
 			// След уровней вопросов (адаптивная сложность) в отчёте.
@@ -174,6 +176,7 @@ func Migrate(ctx context.Context, dbx *sql.DB, d Dialect) error {
 			"ALTER TABLE users ADD COLUMN IF NOT EXISTS resume_text TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE users ADD COLUMN IF NOT EXISTS resume_file TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE users ADD COLUMN IF NOT EXISTS resume_path TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE users ADD COLUMN IF NOT EXISTS resume_guess TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS base_grade TEXT NOT NULL DEFAULT ''",
 			"ALTER TABLE reports ADD COLUMN IF NOT EXISTS question_trail TEXT NOT NULL DEFAULT ''",
 			// issue #7: программа стадий, закреплённая на создание сессии.

@@ -171,6 +171,31 @@ func (s *UserStore) SetResume(ctx context.Context, userID int64, r Resume) error
 	return nil
 }
 
+// ResumeGuessGet — подбор роли и грейда по резюме (JSON, см. httpapi).
+// Пустая строка — подбор не считался или ИИ не ответил.
+func (s *UserStore) ResumeGuessGet(ctx context.Context, userID int64) (string, error) {
+	var v string
+	err := s.db.QueryRowContext(ctx,
+		s.d.q(`SELECT resume_guess FROM users WHERE id = ?`), userID).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get resume guess: %w", err)
+	}
+	return v, nil
+}
+
+// ResumeGuessSet — сохранить подбор (” — сбросить).
+func (s *UserStore) ResumeGuessSet(ctx context.Context, userID int64, guess string) error {
+	_, err := s.db.ExecContext(ctx,
+		s.d.q(`UPDATE users SET resume_guess = ? WHERE id = ?`), guess, userID)
+	if err != nil {
+		return fmt.Errorf("set resume guess: %w", err)
+	}
+	return nil
+}
+
 func isUniqueViolation(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "unique constraint") || strings.Contains(msg, "duplicate key")
