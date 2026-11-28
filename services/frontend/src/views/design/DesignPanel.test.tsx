@@ -51,6 +51,7 @@ const WHITEBOARD_OK = { 'PUT /whiteboard': { saved: true, structure: { blocks: [
 function renderPanel(opts: {
   routes?: Record<string, unknown>;
   review?: string;
+  paused?: boolean;
   canvas?: { api: MockApi; Canvas: ComponentType<CanvasProps> };
 } = {}) {
   const mock = opts.canvas ?? makeMockCanvas();
@@ -62,6 +63,7 @@ function renderPanel(opts: {
       <DesignPanel
         sessionId={7}
         canvas={mock.Canvas}
+        paused={opts.paused}
         review={opts.review ?? ''}
       />,
     ),
@@ -78,6 +80,26 @@ function putCalls(mock: ReturnType<typeof vi.fn>): unknown[][] {
 }
 
 describe('DesignPanel (WP-10)', () => {
+  it('доска растягивается на весь экран, Esc возвращает обычный режим', async () => {
+    renderPanel();
+    const panel = screen.getByTestId('design-panel');
+    expect(panel.className).not.toContain('design--full');
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('design-fullscreen'));
+    expect(panel.className).toContain('design--full');
+    await user.keyboard('{Escape}');
+    expect(panel.className).not.toContain('design--full');
+  });
+
+  it('пауза интервью снимает действия стадии — primary на экране остаётся одна', async () => {
+    renderPanel({ paused: true });
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('block-client'));
+    // Блок поставлен (без паузы «Оценить» была бы активна) — на паузе нельзя.
+    expect(screen.getByTestId('design-evaluate')).toBeDisabled();
+    expect(screen.getByTestId('design-fullscreen')).toBeEnabled();
+  });
+
   it('палитра: 12 блоков ADR-004', () => {
     renderPanel();
     expect(DESIGN_BLOCKS).toHaveLength(12);

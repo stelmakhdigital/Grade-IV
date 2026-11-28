@@ -72,7 +72,7 @@ const GRADE_LABEL: Record<string, string> = {
   '*': 'Все',
 };
 export const STACKS = [
-  { value: '*', label: '*' },
+  { value: '*', label: 'любой' },
   { value: 'go', label: 'Go' },
   { value: 'python', label: 'Python' },
 ];

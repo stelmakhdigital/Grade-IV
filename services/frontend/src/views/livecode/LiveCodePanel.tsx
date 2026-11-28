@@ -221,6 +221,8 @@ export interface LiveCodePanelProps {
   taskTitle?: string;
   /** Файлы задачи из банка (stage.task.files); без них — шаблон main.go/main.py. */
   taskFiles?: Record<string, string> | null;
+  /** Интервью на паузе: сдачу кода не принимаем, пока кандидат не продолжил. */
+  paused?: boolean;
   /** Реализация редактора (по умолчанию — Monaco). */
   editor?: (props: {
     language: string;
@@ -253,6 +255,7 @@ export function LiveCodePanel({
   taskFiles,
   editor,
   review,
+  paused,
 }: LiveCodePanelProps) {
   // Список задач: stage.tasks; без него — одна задача из legacy-props (совместимость).
   const taskList = useMemo<StageTask[]>(() => {
@@ -550,7 +553,8 @@ export function LiveCodePanel({
           type="button"
           className="btn primary"
           onClick={() => void onRun()}
-          disabled={running}
+          disabled={running || paused === true}
+          title={paused === true ? 'Интервью на паузе — сначала «Продолжить»' : undefined}
           data-testid="run-tests"
         >
           {running ? 'Выполняется…' : 'Запустить тесты'}

@@ -28,6 +28,7 @@ import {
   type TTSVoice,
 } from '../api';
 import { useAuth } from '../auth';
+import { ConfirmDialog, type AskConfirm } from '../confirm';
 import { useDialog } from '../hooks/useDialog';
 import { useHashQuery } from '../hooks/useHashQuery';
 import { num } from '../format';
@@ -113,6 +114,15 @@ export function CabinetView() {
   // Резюме: описание + файл (pdf/docx/doc) — по ним ИИ берёт роль и грейд.
   const [resumeOpen, setResumeOpen] = useState(false);
   const [resume, setResume] = useState<ResumeInfo>(NO_RESUME);
+  // Подпись под списком профилей: описание выбранного (тон/сложность — язык
+  // админки, в опцию select не влезает целиком).
+  const selectedProfile =
+    profiles.find((p) => p.id === profileId) ??
+    profiles.find((p) => p.tone === 'balanced' && p.difficulty === 'standard') ??
+    null;
+  const hasResume = resume.file_name !== '' || resume.about !== '';
+  // «Сбросить» резюме необратимо и раньше срабатывало с одного клика.
+  const [ask, setAsk] = useState<AskConfirm | null>(null);
   const [resumeAbout, setResumeAbout] = useState('');
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [resumeBusy, setResumeBusy] = useState(false);
@@ -378,22 +388,42 @@ export function CabinetView() {
               статус резюме / ошибка / бриф — отдельными строками. */}
           <div className="field resume-field" data-testid="resume-row">
             <span>Резюме</span>
+            {/* Кнопка называет состояние, а не только действие: «Загрузить…»
+               одинаково выглядело и с резюме, и без него. */}
             <button type="button" className="btn" onClick={openResume} data-testid="resume-open">
-              Загрузить…
+              {hasResume ? 'Резюме: изменить' : 'Добавить резюме'}
             </button>
           </div>
           {profiles.length > 0 && (
-            <label className="field">
-              <span>Профиль интервьюера</span>
-              <select value={profileId ?? ''} onChange={(e) => setProfileId(Number(e.target.value))}>
+            <div className="field">
+              {/* Имя поля — только подпись; описание читается отдельно через
+                  aria-describedby (внутри label оно уезжало в доступное имя). */}
+              <label htmlFor="profile-select">
+                <span>Профиль интервьюера</span>
+              </label>
+              <select
+                id="profile-select"
+                aria-describedby="profile-hint"
+                value={profileId ?? ''}
+                onChange={(e) => setProfileId(Number(e.target.value))}
+              >
                 {profiles.map((p) => (
                   <option key={p.id} value={p.id} title={p.description ?? ''}>
-                    {p.name} — {p.tone}/{p.difficulty}
-                    {p.tone === 'balanced' && p.difficulty === 'standard' ? ' (по умолчанию)' : ''}
+                    {p.name}
                   </option>
                 ))}
               </select>
-            </label>
+              {/* Тон/сложность (strict/plus) — язык админки; в подписях опций
+                  он был нечитабелен (select резал без многоточия). */}
+              {selectedProfile !== null && (
+                <p className="muted small" id="profile-hint">
+                  {selectedProfile.description ?? `${selectedProfile.tone} · ${selectedProfile.difficulty}`}
+                  {selectedProfile.tone === 'balanced' && selectedProfile.difficulty === 'standard'
+                    ? ' (по умолчанию)'
+                    : ''}
+                </p>
+              )}
+            </div>
           )}
           {ttsVoices.length > 0 && (
             <label className="field">
@@ -421,12 +451,31 @@ export function CabinetView() {
             </p>
           )}
           <p className="resume-state small" data-testid="resume-indicator">
-            {resume.file_name
-              ? `${resume.file_name} · ${resume.text_chars} симв. из файла`
-              : resume.about
-                ? `описание: ${resume.about.length} симв.`
-                : 'не заполнено — роль и сложность подберём по нему'}
+            {resume.file_name !== ''
+              ? `приложен файл ${resume.file_name} — ${resume.text_chars} символов текста`
+              : resume.about !== ''
+                ? `текст резюме заполнен (${resume.about.length} символов)`
+                : 'Резюме не заполнено: по нему подберём роль и сложность'}
           </p>
+          {/* Что ИИ вычитал из резюме (ui-review 2026-11-28): без этой строки
+              резюме сохранялось молча, и на интервью кандидат шёл вслепую. */}
+          {hasResume &&
+            (resume.guess ? (
+              <p className="resume-state small" data-testid="resume-guess">
+                По резюме: <b>{resume.guess.title || resume.guess.track_id}</b>
+                {' — '}
+                {resume.guess.grade}
+                {resume.guess.target && resume.guess.target !== resume.guess.grade
+                  ? ` → цель ${resume.guess.target}`
+                  : ''}
+                {resume.guess.stacks ? ` · ${resume.guess.stacks}` : ''}
+                {resume.guess.reason ? ` — ${resume.guess.reason}` : ''}
+              </p>
+            ) : (
+              <p className="resume-state small muted" data-testid="resume-guess">
+                Роль и цель интервью подберём при старте.
+              </p>
+            ))}
           {/* spec-21 (Codility: intro до запуска таймера): короткий бриф —
               что будет на интервью, чтобы старт не был сюрпризом. */}
           <p className="start-brief muted small" data-testid="start-brief">
@@ -489,7 +538,7 @@ export function CabinetView() {
         );
       })()}
 
-      <section className="card" aria-labelledby="history">
+      <section className="card history-card" aria-labelledby="history">
         <div className="history-head">
           <h2 id="history">История</h2>
           {/* spec-20: фильтр истории — без него длинная лента нечитаема. */}
@@ -529,7 +578,9 @@ export function CabinetView() {
                 <th scope="col">Стадия</th>
                 <th scope="col">Статус</th>
                 <th scope="col">Длительность</th>
-                <th scope="col"></th>
+                {/* Колонка действий без подписи: без неё у скринридера в ряду
+                   читается «кнопка, кнопка» и непонятно, где что. */}
+                <th scope="col"><span className="sr-only">Действия</span></th>
               </tr>
             </thead>
             <tbody>
@@ -663,10 +714,19 @@ export function CabinetView() {
             <div className="muted small" style={{ marginTop: 6 }} data-testid="resume-counter">
               {resumeAbout.length} / 20000
             </div>
-            <label className="field resume-file">
-              <span>Файл резюме (pdf, docx, doc — до 8 МБ)</span>
+            <div className="field resume-file">
+              <span id="resume-file-label">Файл резюме (pdf, docx, doc — до 8 МБ)</span>
+              {/* Нативный file input рисует «Choose File / No file chosen» — чужой
+                  язык в русском интерфейсе. Контрол остаётся доступным с клавиатуры
+                  (sr-only + подпись по id), видимой частью делает label-кнопку. */}
+              <label className="btn resume-file-btn" htmlFor="resume-file-input">
+                {resumeFile ? resumeFile.name : resume.file_name || 'Прикрепить файл'}
+              </label>
               <input
+                id="resume-file-input"
+                className="resume-file-file"
                 type="file"
+                aria-labelledby="resume-file-label"
                 accept=".pdf,.docx,.doc,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword"
                 onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)}
                 data-testid="resume-file"
@@ -678,7 +738,7 @@ export function CabinetView() {
                     ? `сейчас приложен: ${resume.file_name} (${resume.text_chars} симв. текста)`
                     : 'файл не приложен'}
               </span>
-            </label>
+            </div>
             {resumeError !== null && (
               <p className="form-error" role="alert">{resumeError}</p>
             )}
@@ -686,7 +746,12 @@ export function CabinetView() {
               <button
                 type="button"
                 className="btn danger"
-                onClick={() => void onResumeReset()}
+                onClick={() =>
+                  setAsk({
+                    question: 'Удалить резюме? Роль и цель интервью снова подберутся при следующем запуске.',
+                    run: () => void onResumeReset(),
+                  })
+                }
                 disabled={resumeBusy || (!resume.about && !resume.file_name)}
                 data-testid="resume-reset"
               >
@@ -778,6 +843,8 @@ export function CabinetView() {
           </div>
         </div>
       )}
+
+      {ask !== null && <ConfirmDialog ask={ask} onCancel={() => setAsk(null)} />}
     </main>
   );
 }

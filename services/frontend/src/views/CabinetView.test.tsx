@@ -134,6 +134,41 @@ describe('CabinetView (WP-7)', () => {
     expect(startBody(fetchMock)).toEqual({ profile_id: 1 });
   });
 
+  // ui-review 2026-11-28: подбор роли по резюме должен быть виден до старта.
+  it('подбор по резюме: роль, база, цель и стек показаны в кабинете', async () => {
+    renderCabinet({
+      sessions: [],
+      resumeGet: {
+        ...RESUME,
+        guess: {
+          track_id: 'backend',
+          title: 'Go-разработчик',
+          grade: 'middle',
+          target: 'senior',
+          stacks: 'go,python',
+          reason: '5 лет Go на бэкенде',
+        },
+      },
+    });
+    const line = await screen.findByTestId('resume-guess');
+    expect(line).toHaveTextContent('Go-разработчик');
+    expect(line).toHaveTextContent('middle → цель senior');
+    expect(line).toHaveTextContent('go,python');
+    expect(line).toHaveTextContent('5 лет Go на бэкенде');
+  });
+
+  it('подбора нет (ИИ молчал) — обещаем подобрать при старте, не выдумываем роль', async () => {
+    renderCabinet({ sessions: [], resumeGet: RESUME });
+    expect(await screen.findByTestId('resume-guess')).toHaveTextContent('подберём при старте');
+  });
+
+  it('резюме не заполнено — строки про подбор нет', async () => {
+    renderCabinet({ sessions: [], resumeGet: { about: '', file_name: '', text_chars: 0 } });
+    await screen.findByTestId('resume-indicator');
+    expect(screen.queryByTestId('resume-guess')).not.toBeInTheDocument();
+  });
+
+
   it('резюме: индикатор из GET, сохранение — multipart PUT', async () => {
     const fetchMock = renderCabinet({ resume: RESUME, resumeGet: RESUME });
     await screen.findByTestId('resume-indicator');

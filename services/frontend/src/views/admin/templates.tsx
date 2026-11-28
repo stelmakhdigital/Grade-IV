@@ -41,6 +41,9 @@ export function TemplatesTab() {
   const [form, setForm] = useState<TemplateForm | null>(null);
   const [saving, setSaving] = useState(false);
   const [ask, setAsk] = useState<AskConfirm | null>(null);
+  // Шаблонов бывает десятки: без фильтра и порядка по грейду список
+  // превращается в прокрутку.
+  const [q, setQ] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -53,6 +56,11 @@ export function TemplatesTab() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Порядок: грейд (junior → staff), внутри — по имени.
+  const rows = (templates ?? [])
+    .filter((t) => `${t.name} ${t.stack} ${t.grade}`.toLowerCase().includes(q.trim().toLowerCase()))
+    .sort((a, b) => GRADES.indexOf(a.grade) - GRADES.indexOf(b.grade) || a.name.localeCompare(b.name));
 
   const startEdit = (t: AdminTemplate) =>
     setForm({ id: t.id, name: t.name, grade: t.grade, stack: t.stack, duration_s: t.duration_s, is_default: t.is_default, blocks: t.blocks.map((b) => ({ ...b })) });
@@ -107,6 +115,14 @@ export function TemplatesTab() {
     <section className="card">
       <div className="history-head">
         <h2>Шаблоны интервью</h2>
+        <input
+          className="table-filter"
+          type="search"
+          placeholder="Имя, стек или грейд"
+          aria-label="Фильтр шаблонов"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
         <button type="button" className="btn primary small" onClick={() => setForm(emptyTemplate())}>
           Новый шаблон
         </button>
@@ -122,14 +138,14 @@ export function TemplatesTab() {
               <th scope="col">Имя</th>
               <th scope="col">Дефолт</th>
               <th scope="col">Блоки</th>
-              <th scope="col"></th>
+              <th scope="col"><span className="sr-only">Действия</span></th>
             </tr>
           </thead>
           <tbody>
-            {templates.map((t) => (
+            {rows.map((t) => (
               <tr key={t.id}>
                 <td>{gradeLabel(t.grade)}</td>
-                <td>{t.stack}</td>
+                <td>{STACKS.find((s) => s.value === t.stack)?.label ?? t.stack}</td>
                 <td>{t.name}</td>
                 <td>{t.is_default ? 'да' : '—'}</td>
                 <td>{t.blocks.length}</td>
@@ -145,6 +161,11 @@ export function TemplatesTab() {
                 </td>
               </tr>
             ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={6} className="muted">Ничего не найдено.</td>
+              </tr>
+            )}
           </tbody>
         </table>
       )}

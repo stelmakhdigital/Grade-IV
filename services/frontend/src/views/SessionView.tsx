@@ -382,6 +382,7 @@ export function SessionView({ id }: { id: number }) {
                   taskTitle={task?.title}
                   taskFiles={task?.files ?? null}
                   review={runReview}
+                  paused={paused}
                 />
               </Suspense>
               {/* Кнопка перехода в System Design: по программе стадий трека
@@ -414,7 +415,7 @@ export function SessionView({ id }: { id: number }) {
           ) : stage === 'design' ? (
             <>
               <Suspense fallback={<PanelLoading />}>
-                <DesignPanel sessionId={id} review={designReview} board={board} />
+                <DesignPanel sessionId={id} review={designReview} board={board} paused={paused} />
               </Suspense>
               {/* Возврат на предыдущую стадию разрешён (движок); холст при возврате
                   восстанавливается из сохранённого whiteboard. */}
@@ -508,11 +509,13 @@ export function SessionView({ id }: { id: number }) {
             <button
               type="button"
               className={
-                mic === 'running' || mic === 'muted'
-                  ? 'btn primary'
-                  : waitingForAI
-                    ? 'btn ghost'
-                    : 'btn primary'
+                // На паузе primary только одна — «Продолжить» в шапке:
+                // две синие кнопки рядом спорят за главное действие.
+                paused
+                  ? 'btn ghost'
+                  : mic === 'running' || mic === 'muted' || !waitingForAI
+                    ? 'btn primary'
+                    : 'btn ghost'
               }
               onClick={() => void toggleMic()}
               data-testid="mic-toggle"

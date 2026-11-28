@@ -42,6 +42,10 @@ export interface DesignPanelProps {
   review: string;
   /** Конфиг доски из stage-сообщения трека (spec-18/Ф3); null — дефолт backend. */
   board?: BoardInfo | null;
+  /** Интервью на паузе: действия стадии недоступны, пока кандидат не продолжил
+      (иначе на экране две primary-кнопки, и «Оценить схему» уходит на сервер
+      в паузе). */
+  paused?: boolean;
 }
 
 export interface CanvasProps {
@@ -58,6 +62,7 @@ export function DesignPanel({
   canvas,
   review,
   board,
+  paused,
 }: DesignPanelProps) {
   // spec-18: палитра и задание — из трека; дефолт — текущие группы backend.
   const groups: ReadonlyArray<{ title: string; names: readonly string[]; color?: string }> =
@@ -74,6 +79,18 @@ export function DesignPanel({
   const [initialState, setInitialState] = useState<WhiteboardState | null>(null);
   // «ИИ оценивает…» — от успешного сохранения до появления нового review.
   const [evaluating, setEvaluating] = useState(false);
+  // Доска на весь экран: 640 px холста тесно для схемы из 12 блоков
+  // (фидбек 2026-11-28). Панель растягивается целиком, чтобы палитра
+  // и «Оценить схему» оставались под рукой.
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFull(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [full]);
   const reviewAtSaveRef = useRef('');
 
   // Восстановление сохранённой схемы (GET whiteboard → холст) при каждом входе
@@ -174,7 +191,7 @@ export function DesignPanel({
   }, [submitting, sessionId, placed, review]);
 
   return (
-    <div className="design" data-testid="design-panel">
+    <div className={full ? 'design design--full' : 'design'} data-testid="design-panel">
       <p className="design-hint" data-testid="design-hint">
         {board?.case ? (
           <>
@@ -208,6 +225,15 @@ export function DesignPanel({
             ))}
           </div>
         ))}
+        <button
+          type="button"
+          className="btn ghost small design-expand"
+          onClick={() => setFull((v) => !v)}
+          aria-pressed={full}
+          data-testid="design-fullscreen"
+        >
+          {full ? 'Обычный экран' : 'Во весь экран'}
+        </button>
       </div>
 
       <Canvas apiRef={apiRef} initialState={initialState} />
@@ -223,7 +249,8 @@ export function DesignPanel({
           className="btn primary"
           onClick={() => void onEvaluate()}
           data-testid="design-evaluate"
-          disabled={submitting || placed.length === 0}
+          disabled={submitting || placed.length === 0 || paused === true}
+          title={paused === true ? 'Интервью на паузе — сначала «Продолжить»' : undefined}
         >
           {submitting ? 'Сохраняем…' : saved ? 'Схема сохранена — ждём оценку' : 'Оценить схему'}
         </button>
@@ -231,7 +258,7 @@ export function DesignPanel({
           type="button"
           className="btn ghost"
           onClick={onClear}
-          disabled={placed.length === 0}
+          disabled={placed.length === 0 || paused === true}
           title="Убрать все блоки со холста"
         >
           Очистить холст

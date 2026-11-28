@@ -179,6 +179,47 @@ p {
   font-size: 14px;
 }
 
+/* Запуск тестов и «Оценить схему» — главное действие стадии, но стояли после
+   редактора/холста и на 1440×900 оказывались под сгибом (замер: редактор
+   396 px + шапка задачи + табы файлов). Липкая панель держит их на виду. */
+.livecode .voice-controls,
+.design .voice-controls {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: var(--ink-2);
+  border-top: 1px solid var(--line);
+  padding-top: var(--s-3);
+  margin-top: var(--s-3);
+}
+
+/* Файл резюме: нативный input показывает «Choose File / No file chosen» —
+   англоязычный контрол в русском интерфейсе. Нативный ввод остаётся
+   доступным с клавиатуры (его подписывает label.btn), видимой частью делает
+   обычную кнопку. */
+.resume-file {
+  position: relative;
+}
+/* Специфичность выше `.field input` (иначе width: 100% побеждает, и
+   «скрытый» input растягивается на всю ширину). */
+.field .resume-file-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+}
+.resume-file:has(.resume-file-file:focus-visible) .resume-file-btn {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.resume-file-btn {
+  display: inline-block;
+  width: fit-content;
+}
+
 /* ------------------------------------------------- модальное окно (F6: вакансия) */
 
 .vacancy-row {
@@ -298,9 +339,15 @@ p {
 
 .field span {
   display: block;
-  font-size: var(--fs-label);
+  /* Подпись поля — не «приборная»: 12 px остаётся у h2-эйбрау в верхнем
+     регистре (см. tokens.css), форма читается с 14 px. */
+  font-size: var(--fs-meta);
   color: var(--text-3);
   margin-bottom: 4px;
+}
+
+.field > label {
+  display: block;
 }
 
 .field input,
@@ -312,6 +359,7 @@ p {
   border: 1px solid var(--line-2);
   border-radius: var(--r-ctl);
   padding: 9px 12px;
+  text-overflow: ellipsis;
 }
 
 .field input:focus,
@@ -419,10 +467,35 @@ p {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  /* 390 px: без переноса ряд «аккаунт | кнопки» не влезал (замер: блок кнопок
+     на right 408 при вьюпорте 390) — страница скроллилась, «Выйти» была cut. */
+  flex-wrap: wrap;
+}
+
+.header > div:first-child {
+  min-width: 0;
+}
+
+.header p {
+  overflow-wrap: anywhere;
 }
 
 .header h1 {
   margin-bottom: 2px;
+}
+
+/* Поле поиска в шапке списка (админка): живёт в одном ряду с заголовком
+   и кнопкой «Новый…». */
+.table-filter {
+  flex: 1 1 180px;
+  max-width: 320px;
+  margin: 0 var(--s-3);
+  font: inherit;
+  color: var(--text-1);
+  background: var(--ink-0);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-ctl);
+  padding: 7px 10px;
 }
 
 .history-head {
@@ -511,6 +584,25 @@ p {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--fs-meta);
+}
+
+/* Скролл — у контейнера, а не у самой таблицы: `display: block` на <table>
+   снимал табличную семантику у скринридеров, а правило по ширине (≤720)
+   оставляло 721-900 px без него: на 768 колонка действий уезжала за карточку
+   (замер: right 921 при вьюпорте 768, кнопка «Отчёт» недостижима). */
+.table-scroll {
+  overflow-x: auto;
+}
+
+/* Кабинет: колонки истории шире карточки на планшете — скролл у карточки,
+   таблица остаётся таблицей (см. комментарий у .table-scroll). */
+.history-card {
+  overflow-x: auto;
+}
+
+/* Подпись-пояснение под полем (описание выбранного профиля). */
+.field .muted.small {
+  margin: 4px 0 0;
 }
 
 .sessions-table th {
@@ -716,6 +808,11 @@ p {
 .mic-eq.idle .mic-eq-bar {
   background: var(--line-3);
   opacity: 0.55;
+}
+/* Микрофон выключен: рамка с тусклыми штрихами читалась как сломанное поле
+   ввода. Пробел держим (visibility), чтобы кнопка не прыгала при включении. */
+.mic-eq.idle {
+  visibility: hidden;
 }
 
 .task-box {
@@ -1224,8 +1321,33 @@ p {
   border-radius: var(--r-card);
   overflow: hidden;
   /* 640 px — весь вертикальный тулбар Excalidraw (~750 px контента) + холст;
-     при 540 нижние инструменты обрезались. */
-  height: 640px;
+     при 540 нижние инструменты обрезались. На высоких экранах холст растёт:
+     рисовать схему на 640 px тесно (фидбек 2026-11-28). */
+  height: clamp(640px, calc(100dvh - 340px), 1200px);
+}
+/* Доска на весь экран (тумблер в палитре): схема — главный объект стадии,
+   шапка, рейка и транскрипт во время рисования только мешают. Растягиваем
+   всю панель, а не один холст: палитра блоков должна остаться под рукой.
+   Esc — выйти. */
+.design--full {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  padding: var(--s-4);
+  background: var(--ink-0);
+  gap: var(--s-3);
+}
+.design--full .design-canvas {
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+}
+.design-expand {
+  margin-left: auto;
+  align-self: flex-start;
+  flex: none;
 }
 /* Excalidraw 0.18 в нашем контейнере (ширина ≈ 768 px): тулбар (sidebar) по
    умолчанию свёрнут, а вместо него — гигантский «sidebar-trigger» (логотип
@@ -1264,7 +1386,39 @@ p {
 
 /* Отчёт (WP-11) */
 .report h2 { margin: 0 0 4px; }
-.report-grade { margin: 0 0 16px; font-size: var(--fs-body); }
+/* Вердикт — главный объект отчёта, а не подпись-эйбрау. Базовый h2 (12 px,
+   uppercase, --text-3) делал итоговую цифру мельче, чем h3 разделов (замер:
+   12 px/600 против 15 px/700 ниже по странице). */
+.report-score {
+  display: block;
+  margin: 0 0 4px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--text-1);
+  text-transform: none;
+}
+.report-score-label {
+  display: block;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 2px;
+}
+.report-score-value {
+  font-size: clamp(30px, 2.2vw + 18px, 42px);
+}
+.report-score-value.good { color: var(--ok); }
+.report-score-value.mid { color: var(--warn); }
+.report-score-value.bad { color: var(--bad); }
+.report-score-max {
+  font-size: 0.45em;
+  color: var(--text-3);
+}
+.report-grade { margin: 0 0 16px; font-size: var(--fs-lede); color: var(--text-1); }
 
 /* F1-export (spec-16): публичная ссылка на отчёт */
 .report-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
@@ -1438,11 +1592,6 @@ a:focus-visible {
   .session-head .head-actions {
     min-width: 0;
     max-width: none;
-  }
-  .sessions-table,
-  .progress-table {
-    display: block;
-    overflow-x: auto;
   }
   .sessions-table th,
   .sessions-table td {

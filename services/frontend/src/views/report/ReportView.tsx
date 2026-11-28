@@ -152,6 +152,7 @@ export function ReportView({ sessionId, pollMs = POLL_MS, maxPolls = MAX_POLLS, 
               <input
                 className="report-share-link"
                 readOnly
+                autoFocus
                 value={`${window.location.origin}${window.location.pathname}#${share.path}`}
                 aria-label="Публичная ссылка на отчёт"
                 onFocus={(e) => e.currentTarget.select()}
@@ -192,7 +193,15 @@ export function ReportBody({
     <section className="card report" data-testid="report">
       <header className="report-head">
         <div>
-          <h2>Итог: {num(report.overall)} / 5</h2>
+          {/* Цифра — то, ради чего отчёт открывают: базовый h2 (12 px, uppercase,
+              --text-3) делал её мельче заголовков разделов. */}
+          <h2 className="report-score">
+            <span className="report-score-label">Итог:</span>{' '}
+            <span className={`report-score-value ${scoreColor(report.overall)}`}>
+              {num(report.overall)}
+            </span>{' '}
+            <span className="report-score-max">/ 5</span>
+          </h2>
           <p className="report-grade" data-testid="report-grade">
             {text(report.grade_recommendation)}
           </p>
