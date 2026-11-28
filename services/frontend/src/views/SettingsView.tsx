@@ -31,6 +31,8 @@ import {
   type SettingSource,
 } from '../api';
 import { useAuth } from '../auth';
+import { useHashQuery } from '../hooks/useHashQuery';
+import { ADMIN_TABS, AdminTabs, type AdminTab } from './admin/tabs';
 import { prefProfileId, prefSpeaker, setPrefProfileId, setPrefSpeaker } from '../prefs';
 import { ThemeToggle } from '../ThemeToggle';
 import { currentTheme, storedTheme } from '../theme';
@@ -107,6 +109,12 @@ const s = (v: SettingSource | undefined, fallback = ''): string => {
 export function SettingsView() {
   const { user } = useAuth();
   const admin = user?.is_admin === true;
+  // Вкладка редактора — в адресе (#/settings?tab=voices): F5 и «Назад» хранят
+  // раздел, а старые ссылки вида #/admin?tab=voices переезжают без потерь.
+  const [query, setQuery] = useHashQuery();
+  const editorTab: AdminTab = (ADMIN_TABS as readonly string[]).includes(query.get('tab') ?? '')
+    ? (query.get('tab') as AdminTab)
+    : 'templates';
   const [view, setView] = useState<Settings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -242,7 +250,7 @@ export function SettingsView() {
       <header className="header">
         <div>
           <h1>Настройки</h1>
-          <p className="muted small">{user?.email} · {view.app_env}</p>
+          <p className="muted small"><span>{user?.email}</span> · {view.app_env}</p>
         </div>
         <a className="btn ghost" href="#/">В кабинет</a>
       </header>
@@ -412,6 +420,20 @@ export function SettingsView() {
           {String(view.install.note ?? '')} Файлы: {view.paths?.app_file}
           {view.paths?.voice_file ? `, ${view.paths.voice_file}` : ''}
         </p>
+      </section>
+
+      <section className="card" aria-labelledby="set-editors">
+        <h2 id="set-editors">Сценарии интервью</h2>
+        <p className="muted small">
+          Шаблоны, начала разговора, реестр голосов и роли применяются сразу —
+          их читают сервисы на каждый ход, перезапуск не нужен.
+        </p>
+        <div className="settings-editors">
+          <AdminTabs
+            tab={editorTab}
+            onSelect={(t) => setQuery({ tab: t === 'templates' ? '' : t })}
+          />
+        </div>
       </section>
     </main>
   );

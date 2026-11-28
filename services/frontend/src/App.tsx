@@ -9,7 +9,6 @@ import { CabinetView } from './views/CabinetView';
 import { LoginView } from './views/LoginView';
 import { SessionView } from './views/SessionView';
 import { SettingsView } from './views/SettingsView';
-import { AdminView } from './views/AdminView';
 
 // Публичная страница отчёта — ленивая (report-чанк с ReportBody не попадает
 // в критический путь кабинета, code-splitting как у остальных вьюх).
@@ -46,6 +45,26 @@ function parseShareToken(hash: string): string | null {
   return m !== null ? m[1] : null;
 }
 
+/**
+ * #/admin больше не экран: редакторы (шаблоны, начала, голоса, роли) переехали
+ * секциями в настройки, а конфигурация стенда — туда же. Старые ссылки живут:
+ * ?tab= переезжает вместе с адресом.
+ */
+function RedirectToSettings() {
+  useEffect(() => {
+    const qs = window.location.hash.split('?')[1] ?? '';
+    window.location.hash = qs ? `#/settings?${qs}` : '#/settings';
+  }, []);
+  return (
+    <main className="app">
+      <h1>Настройки</h1>
+      <p className="muted">
+        Админка — часть настроек. <a href="#/settings">Открыть настройки</a>
+      </p>
+    </main>
+  );
+}
+
 // #/admin — admin-UI (итерация 11): редактирование шаблонов/начал/голосов.
 function isAdminRoute(hash: string): boolean {
   const p = pathOf(hash);
@@ -74,7 +93,7 @@ function Routes() {
         : sessionId !== null
           ? `Интервью #${sessionId} — Грейд`
           : admin
-            ? 'Админ — Грейд'
+            ? 'Настройки — Грейд'
             : settings
               ? 'Настройки — Грейд'
               : status === 'guest'
@@ -102,20 +121,7 @@ function Routes() {
     return <LoginView />;
   }
   if (admin) {
-    // Не-админ, пришедший по прямой ссылке, должен видеть «нет прав», а не
-    // обвес админки с текстом 403 (ui-review 2026-11-27).
-    if (user?.is_admin !== true) {
-      return (
-        <main className="app">
-          <h1>Грейд</h1>
-          <p className="muted">
-            Недостаточно прав: эта страница только для администраторов.{' '}
-            <a href="#/">В кабинет</a>
-          </p>
-        </main>
-      );
-    }
-    return <AdminView />;
+    return <RedirectToSettings />;
   }
   if (sessionId !== null) {
     return <SessionView id={sessionId} />;

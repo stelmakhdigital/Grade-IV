@@ -1,3 +1,4 @@
+import { SETTINGS_STUB } from './tabs';
 /**
  * Вкладка «Начала разговора» (src/views/admin/openings.tsx): список,
  * сохранение всех строк одним PUT, ошибка загрузки.
@@ -7,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { setToken } from '../../api';
 import { AuthProvider } from '../../auth';
-import { AdminView } from '../AdminView';
+import { SettingsView } from '../SettingsView';
 
 const ME_ADMIN = {
   user: { id: 1, email: 'admin@example.com', created_at: '2026-09-14T00:00:00Z', is_admin: true },
@@ -21,6 +22,8 @@ const OPENINGS = [
 function renderAdmin() {
   return __api.on({
     '/auth/me': ME_ADMIN,
+    'GET /settings': SETTINGS_STUB,
+    'PUT /settings': __api.json(200, { applied: {}, applies: 'restart', pending: [] }),
     // сохранение — PUT списком целиком; точный метод раньше общего GET-ключа
     'PUT /admin/openings': (_url: string, init?: RequestInit) =>
       __api.json(200, init?.body ? JSON.parse(init.body as string) : []),
@@ -40,7 +43,7 @@ describe('Админка: вкладка «Начала разговора»', (
     const user = userEvent.setup();
     const view = render(
       <AuthProvider>
-        <AdminView />
+        <SettingsView />
       </AuthProvider>,
     );
     await screen.findByText('admin@example.com');
@@ -75,7 +78,7 @@ describe('Админка: вкладка «Начала разговора»', (
     __api.on({ '/admin/openings': __api.failure(500, 'internal', 'начала недоступны') });
     render(
       <AuthProvider>
-        <AdminView />
+        <SettingsView />
       </AuthProvider>,
     );
     expect(await screen.findByRole('alert')).toHaveTextContent('начала недоступны');

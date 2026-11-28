@@ -9,9 +9,8 @@ import { TemplatesTab } from './templates';
 import { OpeningsTab } from './openings';
 import { VoicesTab } from './voices';
 import { TracksTab } from './tracks';
-import { SystemTab } from './system';
 
-export const ADMIN_TABS = ['templates', 'openings', 'voices', 'tracks', 'system'] as const;
+export const ADMIN_TABS = ['templates', 'openings', 'voices', 'tracks'] as const;
 export type AdminTab = (typeof ADMIN_TABS)[number];
 
 const TAB_LABELS: Record<AdminTab, string> = {
@@ -19,7 +18,6 @@ const TAB_LABELS: Record<AdminTab, string> = {
   openings: 'Начала разговора',
   voices: 'Голоса',
   tracks: 'Роли собеседований',
-  system: 'Система',
 };
 
 /** Вкладки + панель: содержимое активной вкладки монтируется при выборе. */
@@ -57,7 +55,6 @@ export function AdminTabs({ tab, onSelect }: { tab: AdminTab; onSelect: (t: Admi
         {tab === 'openings' && <OpeningsTab />}
         {tab === 'voices' && <VoicesTab />}
         {tab === 'tracks' && <TracksTab />}
-        {tab === 'system' && <SystemTab />}
       </div>
     </>
   );
@@ -88,3 +85,36 @@ export function errText(e: unknown): string {
 export function gradeLabel(g: string): string {
   return GRADE_LABEL[g] ?? g;
 }
+
+/**
+ * Минимальная конфигурация стенда для тестов вкладок: сами вкладки про неё
+ * ничего не знают, но экран настроек без неё показывал бы ошибку вместо
+ * редактора. Значения — те, что даёт стенд без переопределений.
+ */
+export const SETTINGS_STUB = {
+  app_env: 'dev',
+  applies: 'restart',
+  applies_note: '',
+  writable: true,
+  paths: { app_file: 'config/app.json' },
+  llm: {
+    base_url: { value: 'http://llm:8000/v1', source: 'default', env: 'LLM_BASE_URL' },
+    model: { value: '', source: 'default', env: 'LLM_MODEL' },
+    enable_thinking: { value: false, source: 'default', env: 'LLM_ENABLE_THINKING' },
+    mock: false,
+    api_key_set: true,
+    config_path: 'config/app.json',
+  },
+  voice: {
+    address: { value: 'http://127.0.0.1:8100', source: 'default', env: 'VOICE_URL' },
+    current: {
+      stt: { provider: 'gigaam', model: 'v3_e2e_rnnt', loaded: true },
+      tts: { provider: 'silero', model: 'v5_ru', loaded: true, speakers: ['xenia'] },
+    },
+    catalog: {},
+  },
+  sandbox: { url: { value: 'http://127.0.0.1:8200', source: 'default', env: 'SANDBOX_URL' }, admin_token_set: false, tasks_refill_s: 600, tasks_min: 4 },
+  timing: {},
+  install: { database_url: 'sqlite', editable: false, note: '' },
+  pending: [],
+};

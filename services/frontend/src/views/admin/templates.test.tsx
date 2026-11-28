@@ -1,3 +1,4 @@
+import { SETTINGS_STUB } from './tabs';
 /**
  * Вкладка «Шаблоны» (src/views/admin/templates.tsx): список, сохранение
  * (PUT с полным телом шаблона), ошибка загрузки (сообщение, а не пустой экран).
@@ -7,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { setToken } from '../../api';
 import { AuthProvider } from '../../auth';
-import { AdminView } from '../AdminView';
+import { SettingsView } from '../SettingsView';
 
 const ME_ADMIN = {
   user: { id: 1, email: 'admin@example.com', created_at: '2026-09-14T00:00:00Z', is_admin: true },
@@ -28,6 +29,8 @@ const TEMPLATES = [
 function renderAdmin() {
   return __api.on({
     '/auth/me': ME_ADMIN,
+    'GET /settings': SETTINGS_STUB,
+    'PUT /settings': __api.json(200, { applied: {}, applies: 'restart', pending: [] }),
     // точные методы — раньше общего GET-ключа, чтобы matчить и сохранение
     'POST /admin/templates': () => __api.json(201, TEMPLATES[0]),
     'PUT /admin/templates*': (_url: string, init?: RequestInit) =>
@@ -48,7 +51,7 @@ describe('Админка: вкладка «Шаблоны»', () => {
     const user = userEvent.setup();
     const view = render(
       <AuthProvider>
-        <AdminView />
+        <SettingsView />
       </AuthProvider>,
     );
     await screen.findByText('admin@example.com');
@@ -87,7 +90,7 @@ describe('Админка: вкладка «Шаблоны»', () => {
     __api.on({ '/admin/templates': __api.failure(500, 'internal', 'шаблоны недоступны') });
     render(
       <AuthProvider>
-        <AdminView />
+        <SettingsView />
       </AuthProvider>,
     );
     expect(await screen.findByRole('alert')).toHaveTextContent('шаблоны недоступны');
