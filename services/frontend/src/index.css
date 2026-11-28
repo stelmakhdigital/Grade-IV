@@ -566,7 +566,10 @@ p {
    разметки (списки профилей и голосов могут быть пустыми). */
 .start-form {
   display: grid;
-  grid-template-columns: repeat(var(--start-cols, 4), minmax(0, 1fr));
+  /* 4 колонки по умолчанию; реальное число пишет разметка (inline), потому что
+     списки профилей и голосов могут прийти пустыми. */
+  --start-cols: 4;
+  grid-template-columns: repeat(var(--start-cols), minmax(0, 1fr));
   gap: var(--s-4);
   align-items: start;
   /* Форму не режем по 860 px: карточка «Новое интервью» в широком кабинете
