@@ -860,6 +860,34 @@ describe('Voice UX: история новые-сверху + режим запи
     expect(screen.getByTestId('mic-toggle')).not.toBeDisabled();
   });
 
+  it('счётчик речи (ui-review 2026-11-28): partial двигает «речи N с» до первого сегмента', async () => {
+    stubMicEnv();
+    renderSession({ session: S_ACTIVE });
+    const fake = await waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      return FakeWebSocket.instances[0]!;
+    });
+    await flush();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('mic-toggle'));
+    await screen.findByTestId('rec-window');
+
+    // Раньше счётчик молчал на 0,0 всю реплику: total_speech_ms приходил
+    // только со stt_segment, то есть после паузы в 600 мс + распознавания.
+    fake.deliver(JSON.stringify({ type: 'stt_partial', text: 'Расскажи' }));
+    expect(await screen.findByTestId('rec-speech-hint')).toHaveTextContent('речи 0,0 с');
+    fake.deliver(JSON.stringify({ type: 'stt_partial', text: 'Расскажи про', total_speech_ms: 2400 }));
+    expect(await screen.findByTestId('rec-speech-hint')).toHaveTextContent('речи 2,4 с');
+
+    // Граница сегмента: длительность final (по VAD) меньше снимка partial'а —
+    // счётчик не отыгрывает назад.
+    fake.deliver(
+      JSON.stringify({ type: 'stt_segment', text: 'Расскажи про', speech_ms: 2200, total_speech_ms: 2200 }),
+    );
+    await screen.findByTestId('rec-text');
+    expect(screen.getByTestId('rec-speech-hint')).toHaveTextContent('речи 2,4 с');
+  });
+
   it('режим записи (E2E): сегменты не становятся user-строками и не запускают AI-ход; выключение мика → одно utterance со склеенным текстом', async () => {
     stubMicEnv();
     renderSession({ session: S_ACTIVE });

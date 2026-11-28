@@ -47,7 +47,9 @@ export type WsMessage =
   | { type: 'timer'; remaining_s: number }
   | { type: 'ai_text'; text: string }
   | { type: 'transcript'; who: 'user' | 'ai'; text: string }
-  | { type: 'stt_partial'; text: string }
+  /** total_speech_ms — суммарная речь с начала записи (сервер копит по
+   *  сегментам); приходит только пока микрофон включён (режим записи). */
+  | { type: 'stt_partial'; text: string; total_speech_ms?: number }
   | { type: 'stt_segment'; text: string; speech_ms: number; total_speech_ms: number }
   | { type: 'tts_stop' }
   | { type: 'run_result'; [k: string]: unknown }

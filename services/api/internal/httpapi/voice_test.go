@@ -153,10 +153,18 @@ func (m *mockVoice) streamWS(w http.ResponseWriter, r *http.Request) {
 			speech = true
 			silFrames = 0
 			speechBytes = 0
+			partialSent = false // partial — на каждую реплику (voice шлёт и несколько раз внутри одной)
 			send(map[string]any{"type": "state", "speech": true})
 		case isSpeech && !partialSent:
 			partialSent = true
-			send(map[string]any{"type": "partial", "text": "Здравствуйте, расскажите о себе"})
+			// speech_ms — речь в текущем сегменте на момент снимка (контракт
+			// voice с ui-review 2026-11-28: без него счётчик «речи N с» ждал
+			// границы тишины).
+			send(map[string]any{
+				"type":      "partial",
+				"text":      "Здравствуйте, расскажите о себе",
+				"speech_ms": (speechBytes + len(data)) * 1000 / (2 * 16000),
+			})
 		case !isSpeech && speech:
 			if silFrames++; silFrames >= 1 { // хвост тишины 250 мс → конец
 				speech = false

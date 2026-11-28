@@ -51,7 +51,16 @@ func (w *wsSession) onSTTStreamEvent(s *Server, ev voicesvc.StreamEvent) {
 		}
 	case "partial":
 		if ev.Text != "" {
-			s.engine.SendTo(w.id, map[string]any{"type": "stt_partial", "text": ev.Text})
+			msg := map[string]any{"type": "stt_partial", "text": ev.Text}
+			// Режим записи: к промежуточному тексту добавляем суммарную речь —
+			// накопленное по финалам + текущий сегмент (speech_ms из partial:
+			// длительность буфера на момент снимка). Иначе «речи N с» в окне
+			// записи дожидалось границы тишины и приходило одним прыжком через
+			// 2-3,6 с после паузы (ui-review 2026-11-28).
+			if w.recording.Load() {
+				msg["total_speech_ms"] = w.recSpeechMS.Load() + int64(ev.SpeechMS)
+			}
+			s.engine.SendTo(w.id, msg)
 		}
 	case "final":
 		w.handleSTTStreamFinal(s, ev)

@@ -41,6 +41,15 @@ VAD_PRE_SILENCE_MS = 400     # тишина ≥ 400 мс в речи (но < min
 # речь продолжается). Защита от сверхдлинного аудио-буфера (память + задержка STT).
 VAD_MAX_SPEECH_S = 30
 PARTIAL_INTERVAL_S = 0.5     # partial не чаще раза в 500 мс
+# Adaptive-throttle (ui-review 2026-11-28): распознавалка стоит ~0.2 с на секунду
+# аудио, а partial всегда идёт по ВСЕМУ буферу реплики. При фиксированных 500 мс
+# на десятисекундном ответе partial'ы тратят больше реального времени, чем идёт
+# речь, и final встаёт в очередь однопоточного STT_EXECUTOR за спиной у
+# собственного partial'а (замер: счётчик «речи N с» приходил через 2-3,6 с после
+# паузы). Интервал = max(PARTIAL_INTERVAL_S, PARTIAL_COST_FACTOR × длительность
+# прошлого partial'а): живой текст остаётся, STT занимает не больше половины
+# реального времени, final перестаёт ждать в очереди.
+PARTIAL_COST_FACTOR = 2
 # spec-14/B2: нет входящих аудио-кадров столько секунд → чистое закрытие WS
 # (close code 1001): мёртвый клиент (полуоткрытый TCP) не рвёт async for и
 # вечно держит VAD-состояние и слот executor'а.
@@ -51,7 +60,8 @@ ENERGY_RMS = 0.005           # энергетический VAD: rms-порог 
 
 __all__ = [
     "VAD_THRESHOLD", "VAD_MIN_SILENCE_MS", "VAD_MIN_SPEECH_MS", "VAD_PRE_SILENCE_MS",
-    "VAD_MAX_SPEECH_S", "PARTIAL_INTERVAL_S", "WINDOW", "PREROLL_SAMPLES", "ENERGY_RMS",
+    "VAD_MAX_SPEECH_S", "PARTIAL_INTERVAL_S", "PARTIAL_COST_FACTOR", "WINDOW",
+    "PREROLL_SAMPLES", "ENERGY_RMS",
     "STREAM_IDLE_TIMEOUT_S",
     "SileroVAD", "EnergyVAD", "StreamVAD", "build_vad", "LazyVAD",
     "register_stt_stream", "register_vad_stream",
@@ -305,7 +315,15 @@ async def _idle_watchdog(ws: WebSocket, frame_seen: asyncio.Event,
 
 async def _do_partial(stt: STTProvider, q: asyncio.Queue, pcm: bytes, cell: dict) -> None:
     """Partial (best-effort): распознавание на текущий буфер; дубли не шлём.
-    Отправка — через очередь sender-таска (spec-14/B1)."""
+    Отправка — через очередь sender-таска (spec-14/B1).
+
+    ``speech_ms`` — сколько речи в текущем сегменте на момент снимка (длина
+    буфера; та же мера, что у final после принудительного разрыва). Без неё
+    клиент получал длительность речи только на границе тишины, и счётчик
+    «речи N с» в окне записи стоял на нуле всю реплику (ui-review 2026-11-28).
+    ``cell["cost"]`` — длительность распознавалки, питает adaptive-throttle.
+    """
+    t0 = time.monotonic()
     try:
         # STT_EXECUTOR (однопоточный): ctranslate2 не потокобезопасен для
         # параллельного transcribe — partial/final/REST сериализуем
@@ -315,10 +333,15 @@ async def _do_partial(stt: STTProvider, q: asyncio.Queue, pcm: bytes, cell: dict
         )
         if res.text and res.text != cell.get("text"):
             cell["text"] = res.text
-            q.put_nowait({"type": "partial", "text": res.text})
+            q.put_nowait({
+                "type": "partial",
+                "text": res.text,
+                "speech_ms": round(len(pcm) // 2 * 1000 / SAMPLE_RATE),
+            })
     except Exception:
         pass  # partial — не критичен
     finally:
+        cell["cost"] = time.monotonic() - t0  # следующий partial — не раньше 2× этого
         cell["busy"] = False
 
 
@@ -397,6 +420,7 @@ def register_stt_stream(app, stt: STTProvider, vad, max_speech_s: float | None =
                         splits = 0
                         _cancel_partial()
                         cell["text"] = ""
+                        cell["cost"] = 0.0  # новая реплика: буфер пуст, cost прошлой не тащим
                         # pre-roll: предыдущий кадр (≤250 мс) — чистый старт слова.
                         buf = bytearray(ring[-2] if len(ring) >= 2 else b"")
                         q.put_nowait({"type": "state", "speech": True})
@@ -442,7 +466,10 @@ def register_stt_stream(app, stt: STTProvider, vad, max_speech_s: float | None =
                             "speech_ms": speech_ms,
                             "split": True,
                         })
-                    if not cell["busy"] and (time.monotonic() - cell.get("t", 0.0)) >= PARTIAL_INTERVAL_S:
+                    # Adaptive-throttle: интервал растёт со стоимостью распознавалки
+                    # (буфер с речью растёт — partial дорожает).
+                    interval = max(PARTIAL_INTERVAL_S, PARTIAL_COST_FACTOR * cell.get("cost", 0.0))
+                    if not cell["busy"] and (time.monotonic() - cell.get("t", 0.0)) >= interval:
                         cell["busy"] = True
                         cell["t"] = time.monotonic()
                         snap = bytes(buf)

@@ -114,6 +114,101 @@ def test_partial_arrives_before_final(voice_uri: str) -> None:
     assert all(m.get("text") for m in partials), "partial с пустым текстом"
 
 
+def test_partial_carries_speech_ms(voice_uri: str) -> None:
+    """(1b) partial несёт speech_ms — сколько речи в сегменте НА МОМЕНТ СНИМКА.
+
+    Без этого клиент узнавал длительность речи только на границе тишины
+    (stt_segment), и счётчик «речи N с» в окне записи стоял на нуле всю
+    реплику, пока кандидат говорит (ui-review 2026-11-28).
+    """
+    async def scenario():
+        return await _run(voice_uri, _frames(_tone(3000)) + _frames(np.zeros(12800)), 10)
+
+    msgs, err = asyncio.run(scenario())
+    assert err is None, f"final не пришёл: {msgs}"
+    partials = [m for m in msgs if m["type"] == "partial"]
+    assert partials, "нет partial"
+    ms = [m.get("speech_ms", 0) for m in partials]
+    assert all(v > 0 for v in ms), f"partial без speech_ms: {ms}"
+    assert ms == sorted(ms), f"speech_ms не растёт вместе с буфером: {ms}"
+    # Снимок не может быть длиннее самой речи (+ pre-roll/хвост кадра).
+    assert ms[-1] <= 3600, f"speech_ms больше речи: {ms[-1]}"
+
+
+class SlowLengthSTT(LengthSTT):
+    """LengthSTT с задержкой распознавалки: питает adaptive-throttle partial'ов."""
+
+    def __init__(self, delay: float) -> None:
+        self.delay = delay
+
+    def transcribe(self, audio: bytes, sample_rate: int = SAMPLE_RATE) -> STTResult:
+        time.sleep(self.delay)
+        return super().transcribe(audio, sample_rate)
+
+
+@pytest.fixture(scope="module")
+def slow_voice_uri():
+    """Uvicorn с медленным STT (0.6 с на распознавалку) — как GigaAM на CPU."""
+    vad = EnergyVAD(min_silence_ms=150, min_speech_ms=100)
+    app = build_app(stt=SlowLengthSTT(0.6), tts=FakeTTS(), vad=vad)
+    port = _free_port()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    th = threading.Thread(target=server.run, daemon=True)
+    th.start()
+    deadline = time.time() + 10
+    while not server.started and time.time() < deadline:
+        time.sleep(0.05)
+    assert server.started, "uvicorn не стартовал"
+    yield f"ws://127.0.0.1:{port}/api/v1/stt/stream"
+    server.should_exit = True
+    th.join(timeout=5)
+
+
+def test_partial_throttles_to_its_own_cost(slow_voice_uri: str) -> None:
+    """(1c) adaptive-throttle: partial не чаще, чем 2× его собственной стоимости.
+
+    Речь 4 с кадрми по 250 мс в реальном времени, распознавалка 0.6 с. С
+    фиксированным интервалом 0.5 с partial'ы шли бы каждые ~0,6 с (6-7 штук) и
+    держали бы однопоточный STT_EXECUTOR занятым — final ждал бы своей очереди
+    (замер в проде: 2-3,6 с до счётчика речи). С throttle интервал 1,2 с.
+    """
+    async def scenario():
+        async with websockets.connect(slow_voice_uri, max_size=None) as ws:
+            got: list[tuple[float, dict]] = []
+            frames = _frames(_tone(4000)) + _frames(np.zeros(12800))
+            stop = asyncio.Event()
+
+            async def reader():
+                while not stop.is_set():
+                    try:
+                        m = await _recv(ws, 0.2)
+                    except asyncio.TimeoutError:
+                        continue
+                    except websockets.exceptions.ConnectionClosed:
+                        break
+                    got.append((time.monotonic(), m))
+                    if m["type"] == "final":
+                        return
+
+            r = asyncio.create_task(reader())
+            for f in frames:
+                await ws.send(f)
+                await asyncio.sleep(0.25)
+            await asyncio.wait_for(r, 10)
+            stop.set()
+            r.cancel()
+            return got
+
+    got = asyncio.run(scenario())
+    part_t = [t for t, m in got if m["type"] == "partial"]
+    assert len(part_t) >= 2, f"мало partial'ов для замера интервала: {part_t}"
+    gaps = [b - a for a, b in zip(part_t, part_t[1:])]
+    assert min(gaps) >= 1.0, f"partial чаще, чем 2× стоимости (0.6 с): {[f'{g:.2f}' for g in gaps]}"
+    # Живой текст при этом остаётся: final догнал речь.
+    final = [m for _, m in got if m["type"] == "final"]
+    assert final and final[0]["text"], f"final без текста: {final}"
+
+
 def test_final_contains_full_utterance(voice_uri: str) -> None:
     """(2) final содержит всю реплику: длительность финала ≈ 3 с (хвост не потерян)."""
     async def scenario():

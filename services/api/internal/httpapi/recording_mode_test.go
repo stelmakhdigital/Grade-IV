@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -114,6 +115,81 @@ func TestRecordingModeNoAutoTurn(t *testing.T) {
 	if !sawUser || !sawAIText {
 		t.Fatalf("явная отправка: transcript(user)/ai_text не пришли (user=%v ai_text=%v)", sawUser, sawAIText)
 	}
+}
+
+// recWaitMsg — следующее текстовое WS-сообщение данного типа (сырой JSON:
+// wsReadMixed форматирует только type/who/text, а нам нужны числовые поля).
+// transcript(user)/ai_text в режиме записи = стартовавший AI-ход fail.
+func recWaitMsg(t *testing.T, conn *websocket.Conn, typ string) map[string]any {
+	t.Helper()
+	for i := 0; i < 30; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		msgType, data, err := conn.Read(ctx)
+		cancel()
+		if err != nil {
+			t.Fatalf("%s: ws read: %v", typ, err)
+		}
+		if msgType != websocket.MessageText {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal(data, &m); err != nil {
+			continue
+		}
+		switch m["type"] {
+		case typ:
+			return m
+		case "ai_text":
+			t.Fatalf("в режиме записи стартовал AI-ход: %v", m)
+		case "transcript":
+			if m["who"] == "user" {
+				t.Fatalf("в режиме записи пришёл user-транскрипт (AI-ход от сегмента?): %v", m)
+			}
+		}
+	}
+	t.Fatalf("%s: превышен лимит сообщений", typ)
+	return nil
+}
+
+// TestRecordingPartialCarriesSpeechTotal (ui-review 2026-11-28): суммарная речь
+// идёт уже в stt_partial — накопленное по завершённым сегментам + текущий
+// сегмент. Раньше total_speech_ms жил только в stt_segment (граница тишины),
+// и счётчик «речи N с» в окне записи стоял на нуле, пока кандидат говорит,
+// а потом прыгал сразу на 7 с через 2-3,6 с после паузы.
+func TestRecordingPartialCarriesSpeechTotal(t *testing.T) {
+	_, conn, _ := recTestSetup(t)
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	num := func(m map[string]any, key string) int64 {
+		v, ok := m[key].(float64)
+		if !ok {
+			t.Fatalf("%s нет в %v", key, m)
+		}
+		return int64(v)
+	}
+
+	recWriteRecording(t, conn, true)
+	// Сегмент 1: тон 4 кадра (1 с) + тишина partial (500 мс) и final (1000 мс).
+	for i := 0; i < 4; i++ {
+		recWritePCM(t, conn, tonePCM(250, 5000))
+	}
+	recWritePCM(t, conn, silencePCM(250))
+	if got := num(recWaitMsg(t, conn, "stt_partial"), "total_speech_ms"); got != 500 {
+		t.Fatalf("partial первого сегмента: total_speech_ms=%d, ждали 500", got)
+	}
+	if got := num(recWaitMsg(t, conn, "stt_segment"), "total_speech_ms"); got != 1000 {
+		t.Fatalf("конец первого сегмента: total_speech_ms=%d, ждали 1000", got)
+	}
+
+	// Сегмент 2: тон 2 кадра (500 мс) partial обязан учесть прошлый сегмент.
+	for i := 0; i < 2; i++ {
+		recWritePCM(t, conn, tonePCM(250, 5000))
+	}
+	if got := num(recWaitMsg(t, conn, "stt_partial"), "total_speech_ms"); got != 1500 {
+		t.Fatalf("partial второго сегмента: total_speech_ms=%d, ждали 1500", got)
+	}
+	recWritePCM(t, conn, silencePCM(250))
+	recWriteRecording(t, conn, false)
 }
 
 // TestRecordingSegmentationOnSilence — длинная запись (FR-S8): несколько

@@ -76,6 +76,14 @@ export function useVoiceSession(id: number) {
   const [recSegs, setRecSegs] = useState<string[]>([]);
   const [recPartial, setRecPartial] = useState('');
   const [recTotalSpeechMs, setRecTotalSpeechMs] = useState(0);
+  // Счётчик речи не отыгрывает назад: длительность final (по границам VAD)
+  // чуть меньше снимка partial'а (в буфер снимка попадают pre-roll и тишина до
+  // 600 мс), и без max число на границе сегмента подпрыгивало бы вверх-вниз.
+  // Перебор в пару-сотен мс для критерия «≥ 1,5 с» не опасен: пустой текст всё
+  // равно не уходит (recording.ts).
+  const bumpSpeech = useCallback((ms: number) => {
+    setRecTotalSpeechMs((prev) => (ms > prev ? ms : prev));
+  }, []);
   const [recSince, setRecSince] = useState<number | null>(null); // мм:сс окна
   const [recCollapsed, setRecCollapsed] = useState(false);
   const [recNote, setRecNote] = useState<string | null>(null);
@@ -235,9 +243,12 @@ export function useVoiceSession(id: number) {
           case 'stt_partial':
             // Стриминговый STT (ADR-007): интеримный текст кандидата.
             // Режим записи (FR-S8): интерим — в окно записи, НЕ в строки
-            // (сегменты не становятся ответами кандидата).
+            // (сегменты не становятся ответами кандидата). Речь — в счётчик:
+            // без него «речи N с» дожидалось границы тишины и прыгало сразу на
+            // 7 с через 2-3,6 с после паузы (ui-review 2026-11-28).
             if (recRef.current.active) {
               setRecPartial(m.text);
+              bumpSpeech(m.total_speech_ms ?? 0);
               break;
             }
             setLines((prev) => applySttPartial(prev, m.text));
@@ -252,7 +263,7 @@ export function useVoiceSession(id: number) {
             }
             setRecSegs((prev) => [...prev, m.text]);
             setRecPartial('');
-            setRecTotalSpeechMs(m.total_speech_ms ?? 0);
+            bumpSpeech(m.total_speech_ms ?? 0);
             break;
           case 'tts_stop':
             // barge-in: кандидат прервал речь ИИ — плеер останавливается
