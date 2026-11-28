@@ -203,12 +203,13 @@ func (s *Server) buildSettings(r *http.Request, f config.AppFile) settingsView {
 	// Голос отвечает сам за себя: провайдеры, модели, что лежит на диске.
 	// Недоступен — строка ошибки в своём блоке, а не 502 на весь экран.
 	voice, err := s.voice.ConfigModels(r.Context())
-	view.Voice["address"] = strSetting("VOICE_URL", f.VoiceURL, s.cfg.VoiceURL)
+	addr := strSetting("VOICE_URL", f.VoiceURL, s.cfg.VoiceURL)
 	if err != nil {
-		view.Voice = map[string]any{"error": err.Error(),
-			"address": strSetting("VOICE_URL", f.VoiceURL, s.cfg.VoiceURL)}
+		// view.Voice ещё nil: присваивание в nil-map — паника, а не 502.
+		view.Voice = map[string]any{"error": err.Error(), "address": addr}
 	} else {
 		view.Voice = voice
+		voice["address"] = addr
 		if p, ok := voice["path"].(string); ok {
 			view.Paths["voice_file"] = p
 		}

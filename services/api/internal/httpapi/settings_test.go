@@ -2,10 +2,13 @@ package httpapi
 
 import (
 	"fmt"
+
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stelmakhdigital/grade-iv/services/api/internal/config"
 )
 
 // Единый экран настроек (ADR-015): источник значения, «нужен перезапуск» и то,
@@ -23,7 +26,10 @@ func settingsGet(t *testing.T, ts string, auth map[string]string) map[string]any
 func TestSettings_get_показывает_источники_и_то_что_не_правится(t *testing.T) {
 	t.Setenv("APP_CONFIG_FILE", filepath.Join(t.TempDir(), "app.json"))
 	t.Setenv("SILENCE_NUDGE_S", "30")
-	ts := newTestServer(t, nil)
+	// voice отвечает — блок собирается из его ответа плюс адрес с источником;
+	// недоступный voice проверяется отдельным тестом (nil-map там паниковал).
+	stub, _ := voiceStub(t, 200)
+	ts := newTestServer(t, func(cfg *config.Config) { cfg.VoiceURL = stub.URL })
 	auth := adminAuth(t, ts, "st-admin@example.com")
 	body := settingsGet(t, ts.URL, auth)
 
@@ -56,6 +62,18 @@ func TestSettings_get_показывает_источники_и_то_что_н�
 	if install["database_url"] == nil || install["database_url"] == "" {
 		t.Fatalf("адрес БД не показан: %v", install)
 	}
+	// Адрес voice — тоже настройка, и он обязан быть в ответе с источником:
+	// без него поле «адрес голосового сервиса» показывает пустоту там, где
+	// значение есть.
+	voice, _ := body["voice"].(map[string]any)
+	addr, _ := voice["address"].(map[string]any)
+	if addr["env"] != "VOICE_URL" || addr["source"] == nil {
+		t.Fatalf("voice.address без источника: %v", voice["address"])
+	}
+	if addr["value"] != stub.URL {
+		t.Fatalf("voice.address не эффективное значение: %v", addr)
+	}
+
 	paths, _ := body["paths"].(map[string]any)
 	if !strings.HasSuffix(fmt.Sprintf("%v", paths["app_file"]), "app.json") {
 		t.Fatalf("пути: %v", paths)
